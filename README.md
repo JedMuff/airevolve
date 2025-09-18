@@ -5,7 +5,7 @@ An evolutionary algorithm framework for optimizing drone morphology and control.
 ## Features
 
 - **Multiple Genome Representations**: Support for both spherical angular and Cartesian Euler coordinate systems
-- **Evolutionary Strategies**: �+� and �,� evolution strategies with configurable selection pressure
+- **Evolutionary Strategies**: μ+λ and μ,λ evolution strategies with configurable selection pressure
 - **Morphological Optimization**: Evolve drone arm configurations, motor placements, and propeller orientations
 - **Gate Navigation**: Built-in support for training drones to navigate through gate courses
 - **Symmetry Constraints**: Optional bilateral symmetry enforcement (XY, XZ, YZ planes)
@@ -48,7 +48,7 @@ The `examples/` directory contains several demonstration scripts:
 ### Core Components
 
 - **Evolution Tools**: Core evolutionary algorithm implementations
-  - `strategies/`: Evolution strategies (�+�, �,�)
+  - `strategies/`: Evolution strategies (μ+λ, μ,λ)
   - `selectors/`: Parent selection methods (tournament, top-k)
   - `genome_handlers/`: Genome representation and operators
   - `evaluators/`: Fitness evaluation functions
