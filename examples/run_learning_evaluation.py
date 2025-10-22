@@ -7,10 +7,11 @@ import numpy as np
 import pickle
 import os
 import time
+import argparse
 from airevolve.evolution_tools.evaluators.gate_train import evaluate_individual
 
 def evaluate_drone(individual, task='circle', output_dir='evaluation_results', 
-                  timesteps=int(1e8), num_envs=100, create_videos=False):
+                  timesteps=int(1e8), num_envs=100, create_videos=False, device='cpu'):
     """
     Evaluate a single drone design on a specified task.
     
@@ -21,6 +22,7 @@ def evaluate_drone(individual, task='circle', output_dir='evaluation_results',
         timesteps (int): Training timesteps
         num_envs (int): Number of parallel environments
         create_videos (bool): Whether to create visualization videos after training
+        device (str): Device to use for training ('cpu' or 'cuda:0')
     
     Returns:
         float: Fitness score
@@ -57,7 +59,7 @@ def evaluate_drone(individual, task='circle', output_dir='evaluation_results',
     
     try:
         # Run the evaluation
-        fitness = evaluate_individual(individual, output_dir, timesteps, num_envs, task, device='cpu')
+        fitness = evaluate_individual(individual, output_dir, timesteps, num_envs, task, device=device)
         
         end_time = time.time()
         duration = end_time - start_time
@@ -122,6 +124,32 @@ def main():
     """
     Example usage with one of the predefined designs.
     """
+    parser = argparse.ArgumentParser(description='Evaluate a drone design on a flight task')
+    parser.add_argument('--task', type=str, default='figure8',
+                       choices=['circle', 'figure8', 'slalom', 'backandforth'],
+                       help='Flight task to evaluate on')
+    parser.add_argument('--timesteps', type=float, default=1e5,
+                       help='Number of training timesteps (e.g., 1e5, 1e7, 1e8)')
+    parser.add_argument('--num-envs', type=int, default=1,
+                       help='Number of parallel environments')
+    parser.add_argument('--device', type=str, default='cpu',
+                       choices=['cpu', 'cuda:0', 'cuda:1'],
+                       help='Device to use for training (cpu recommended for MLP policies)')
+    parser.add_argument('--output-dir', type=str, default='simple_evaluation',
+                       help='Directory to save results')
+    parser.add_argument('--no-videos', action='store_true',
+                       help='Disable video creation after training')
+    parser.add_argument('--production', action='store_true',
+                       help='Use production settings (1e8 timesteps, 100 envs, cpu)')
+    
+    args = parser.parse_args()
+    
+    # Override with production settings if requested
+    if args.production:
+        print("Using production settings: 1e8 timesteps, 100 parallel envs, CPU device")
+        args.timesteps = 1e8
+        args.num_envs = 100
+        args.device = 'cpu'
     
     # Example: Use a simple quadcopter design (4 motors in X configuration)
     example_individual = np.array([
@@ -133,17 +161,26 @@ def main():
         [np.nan, np.nan, np.nan, np.nan, np.nan, np.nan]   # Unused
     ])
     
+    print(f"\nConfiguration:")
+    print(f"  Task: {args.task}")
+    print(f"  Timesteps: {int(args.timesteps):,}")
+    print(f"  Parallel environments: {args.num_envs}")
+    print(f"  Device: {args.device}")
+    print(f"  Output directory: {args.output_dir}")
+    print(f"  Create videos: {not args.no_videos}\n")
+    
     # Evaluate the drone
     fitness = evaluate_drone(
         individual=example_individual,
-        task='figure8',
-        output_dir='simple_evaluation',
-        timesteps=int(1e8),  # Much smaller for debugging
-        num_envs=1,          # Single environment for debugging
-        create_videos=True   # Enable video creation after training
+        task=args.task,
+        output_dir=args.output_dir,
+        timesteps=int(args.timesteps),
+        num_envs=args.num_envs,
+        create_videos=not args.no_videos,
+        device=args.device
     )
     
-    print(f"Final fitness: {fitness}")
+    print(f"\nFinal fitness: {fitness}")
 
 
 if __name__ == "__main__":
