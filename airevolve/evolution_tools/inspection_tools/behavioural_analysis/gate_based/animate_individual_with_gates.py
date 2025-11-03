@@ -1,6 +1,6 @@
 from airevolve.simulator.visualization.animation import view, animate
 from airevolve.evolution_tools.evaluators.drone_gate_env import DroneGateEnv
-from airevolve.evolution_tools.evaluators.gate_train import backandforth, circle, slalom, figure8, animate_policy
+from airevolve.evolution_tools.evaluators.gate_train import backandforth, circle, slalom, figure8, timedlr, lrcontinuous, animate_policy
 from airevolve.evolution_tools.inspection_tools.morphological_descriptors.hovering_info import get_sim
 
 import os
@@ -15,6 +15,7 @@ def animate_individual(
     save_dir,
     file_name,
     device=None,
+    task_seed=None,
     view_type='top', # Options: 'top', 'iso'
     follow=False,
     draw_forces=False,
@@ -62,6 +63,24 @@ def animate_individual(
         x_bounds = slalom.x_bounds
         y_bounds = slalom.y_bounds
         z_bounds = slalom.z_bounds
+    elif gate_cfg == "timedlr":
+        # Dynamically generate gates for timedlr task
+        if task_seed is None:
+            raise ValueError("task_seed is required for timedlr task")
+        gate_pos, gate_yaw = timedlr.generate_gates(seed=task_seed)
+        start_pos = timedlr.starting_pos
+        x_bounds = timedlr.x_bounds
+        y_bounds = timedlr.y_bounds
+        z_bounds = timedlr.z_bounds
+    elif gate_cfg == "lrcontinuous":
+        # Dynamically generate gates for lrcontinuous task
+        if task_seed is None:
+            raise ValueError("task_seed is required for lrcontinuous task")
+        gate_pos, gate_yaw = lrcontinuous.generate_gates(seed=task_seed)
+        start_pos = lrcontinuous.starting_pos
+        x_bounds = lrcontinuous.x_bounds
+        y_bounds = lrcontinuous.y_bounds
+        z_bounds = lrcontinuous.z_bounds
     else:
         raise ValueError("Invalid gate configuration")
 

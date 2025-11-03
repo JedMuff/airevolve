@@ -1,19 +1,20 @@
 from stable_baselines3 import PPO
 from airevolve.evolution_tools.inspection_tools.morphological_descriptors.hovering_info import get_sim
 from airevolve.evolution_tools.evaluators.drone_gate_env import DroneGateEnv
-from airevolve.evolution_tools.evaluators.gate_train import backandforth, circle, slalom, figure8
+from airevolve.evolution_tools.evaluators.gate_train import backandforth, circle, slalom, figure8, timedlr, lrcontinuous
 import torch
 import numpy as np
 
-def extract_simulation_data(individual, policy_file, gate_cfg, device):
+def extract_simulation_data(individual, policy_file, gate_cfg, device, task_seed=None):
     """
     Extract simulation data for a given individual and policy file.
 
     Args:
         individual (np.ndarray): The individual configuration.
         policy_file (str): Path to the policy file.
-        gate_cfg (str): Gate configuration (e.g., "circle", "slalom").
+        gate_cfg (str): Gate configuration (e.g., "circle", "slalom", "timedlr", "lrcontinuous").
         device (str): Device to run the simulation on (e.g., "cuda:0" or "cpu").
+        task_seed (int, optional): Seed for generating gates (timedlr and lrcontinuous).
 
     Returns:
         dict: A dictionary containing positions, velocities, angular velocities, gate passes, and actions.
@@ -23,18 +24,29 @@ def extract_simulation_data(individual, policy_file, gate_cfg, device):
         "backandforth": backandforth,
         "circle": circle,
         "slalom": slalom,
-        "figure8": figure8
+        "figure8": figure8,
+        "timedlr": timedlr,
+        "lrcontinuous": lrcontinuous
     }
     if gate_cfg not in gate_configs:
         raise ValueError("Invalid gate configuration")
 
     gate_config = gate_configs[gate_cfg]
+    
+    # Handle dynamic gate generation for timedlr and lrcontinuous
+    if gate_cfg == "timedlr":
+        gate_pos, gate_yaw = timedlr.generate_gates(seed=task_seed)
+    elif gate_cfg == "lrcontinuous":
+        gate_pos, gate_yaw = lrcontinuous.generate_gates(seed=task_seed)
+    else:
+        gate_pos = gate_config.gate_pos
+        gate_yaw = gate_config.gate_yaw
 
     env = DroneGateEnv(
         num_envs=1,
         individual=individual,
-        gates_pos=gate_config.gate_pos,
-        gate_yaw=gate_config.gate_yaw,
+        gates_pos=gate_pos,
+        gate_yaw=gate_yaw,
         start_pos=gate_config.starting_pos,
         x_bounds=gate_config.x_bounds,
         y_bounds=gate_config.y_bounds,

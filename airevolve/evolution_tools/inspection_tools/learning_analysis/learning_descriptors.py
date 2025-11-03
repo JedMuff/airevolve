@@ -10,15 +10,16 @@ import argparse
 def read_file(monitor_file):
     data = pd.read_csv(monitor_file, skiprows=1)  # Skip the first row (comments)
     episode_rewards = data["r"]  # Rewards per episode
-    time_steps = data["t"]  # Timesteps at each episode
+    episode_lengths = data["l"]  # Episode lengths in simulation steps
 
     # remove the last episode if it is not finished
     if type(episode_rewards[len(episode_rewards)-1]) == str:
         episode_rewards = episode_rewards[:-1]
-        time_steps = time_steps[:-1]
+        episode_lengths = episode_lengths[:-1]
 
     episode_rewards = np.array(episode_rewards, dtype=float)
-    time_steps = np.array(time_steps, dtype=int)
+    episode_lengths = np.array(episode_lengths, dtype=int)
+    time_steps = np.cumsum(episode_lengths)  # Cumulative simulation timesteps
 
     return episode_rewards, time_steps
 

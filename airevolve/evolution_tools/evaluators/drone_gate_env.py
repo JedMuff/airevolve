@@ -55,7 +55,10 @@ class DroneGateEnv(VecEnv):
                  seed=None,
                  render_mode=None,
                  device=None,
-                 dt=0.01
+                 dt=0.01,
+                 gate_generator=None,
+                 dynamic_gates=False,
+                 use_advanced_reward=False
                  ):
         
         # Set device
@@ -75,6 +78,14 @@ class DroneGateEnv(VecEnv):
         if self.seed is not None:
             np.random.seed(self.seed)
             torch.manual_seed(self.seed)
+        
+        # Dynamic gate generation
+        self.gate_generator = gate_generator
+        self.dynamic_gates = dynamic_gates
+        self.gate_generator_rng = None  # Will be initialized per environment
+        
+        # Reward function selection
+        self.use_advanced_reward = use_advanced_reward
         
         # Initialize drone simulator
         if propellers is not None:
@@ -139,6 +150,16 @@ class DroneGateEnv(VecEnv):
 
         # Initialize number of gates passed
         self.num_gates_passed = np.zeros(num_envs, dtype=int)
+        
+        # Initialize per-environment random number generators for dynamic gates
+        if self.dynamic_gates and self.gate_generator is not None:
+            self.env_rng_seeds = np.arange(num_envs) + (self.seed if self.seed is not None else 0)
+            # Store gate positions per environment for dynamic generation
+            self.gate_pos_per_env = np.tile(self.gate_pos[np.newaxis, :, :], (num_envs, 1, 1))
+            self.gate_yaw_per_env = np.tile(self.gate_yaw[np.newaxis, :], (num_envs, 1))
+            # Store relative gates per environment
+            self.gate_pos_rel_per_env = np.tile(self.gate_pos_rel[np.newaxis, :, :], (num_envs, 1, 1))
+            self.gate_yaw_rel_per_env = np.tile(self.gate_yaw_rel[np.newaxis, :], (num_envs, 1))
 
         # action space: [cmd1, cmd2, cmd3, cmd4]
         # U = (u+1)/2 --> u = 2U-1
@@ -219,11 +240,39 @@ class DroneGateEnv(VecEnv):
         if self.seed is not None:
             np.random.seed(self.seed)
             torch.manual_seed(self.seed)
+    
+    def _recalculate_relative_gates(self, env_idx):
+        """Recalculate relative gate positions for a specific environment."""
+        gate_pos_rel = np.zeros((self.num_gates, 3), dtype=np.float32)
+        gate_yaw_rel = np.zeros(self.num_gates, dtype=np.float32)
+        
+        for i in range(self.num_gates):
+            gate_pos_rel[i] = self.gate_pos_per_env[env_idx, i] - self.gate_pos_per_env[env_idx, i-1]
+            # Rotation matrix
+            R = np.array([
+                [np.cos(self.gate_yaw_per_env[env_idx, i-1]), np.sin(self.gate_yaw_per_env[env_idx, i-1])],
+                [-np.sin(self.gate_yaw_per_env[env_idx, i-1]), np.cos(self.gate_yaw_per_env[env_idx, i-1])]
+            ])
+            gate_pos_rel[i, 0:2] = R @ gate_pos_rel[i, 0:2]
+            gate_yaw_rel[i] = self.gate_yaw_per_env[env_idx, i] - self.gate_yaw_per_env[env_idx, i-1]
+            # wrap yaw
+            gate_yaw_rel[i] %= 2*np.pi
+            if gate_yaw_rel[i] > np.pi:
+                gate_yaw_rel[i] -= 2*np.pi
+            elif gate_yaw_rel[i] < -np.pi:
+                gate_yaw_rel[i] += 2*np.pi
+        
+        return gate_pos_rel, gate_yaw_rel
 
     def update_states_gate(self):
         # Transform pos and vel in gate frame
-        gate_pos = self.gate_pos[self.target_gates%self.num_gates]
-        gate_yaw = self.gate_yaw[self.target_gates%self.num_gates]
+        if self.dynamic_gates and self.gate_generator is not None:
+            # Use per-environment gate positions
+            gate_pos = self.gate_pos_per_env[np.arange(self.num_envs), self.target_gates%self.num_gates]
+            gate_yaw = self.gate_yaw_per_env[np.arange(self.num_envs), self.target_gates%self.num_gates]
+        else:
+            gate_pos = self.gate_pos[self.target_gates%self.num_gates]
+            gate_yaw = self.gate_yaw[self.target_gates%self.num_gates]
 
         # Rotation matrix from world frame to gate frame
         R = np.array([
@@ -263,8 +312,13 @@ class DroneGateEnv(VecEnv):
             # loop when out of bounds
             indices = indices % self.num_gates
             valid = indices < self.num_gates
-            new_states[valid,12+4*i:12+4*i+3] = self.gate_pos_rel[indices[valid]]
-            new_states[valid,12+4*i+3] = self.gate_yaw_rel[indices[valid]]
+            if self.dynamic_gates and self.gate_generator is not None:
+                env_indices = np.arange(self.num_envs)[valid]
+                new_states[valid,12+4*i:12+4*i+3] = self.gate_pos_rel_per_env[env_indices, indices[valid]]
+                new_states[valid,12+4*i+3] = self.gate_yaw_rel_per_env[env_indices, indices[valid]]
+            else:
+                new_states[valid,12+4*i:12+4*i+3] = self.gate_pos_rel[indices[valid]]
+                new_states[valid,12+4*i+3] = self.gate_yaw_rel[indices[valid]]
 
         # update action history
         self.action_hist = np.roll(self.action_hist, 1, axis=1)
@@ -284,6 +338,26 @@ class DroneGateEnv(VecEnv):
         num_reset = dones.sum()
         # Track number of gates passed
         self.num_gates_passed[dones] = np.zeros(num_reset)
+        
+        # Regenerate gates for dynamic gate environments
+        if self.dynamic_gates and self.gate_generator is not None and num_reset > 0:
+            done_indices = np.where(dones)[0]
+            for env_idx in done_indices:
+                # Generate new gates for this environment with unique seed
+                episode_seed = self.env_rng_seeds[env_idx]
+                self.env_rng_seeds[env_idx] += self.num_envs  # Increment for next episode
+                
+                # Call gate generator
+                new_gate_pos, new_gate_yaw = self.gate_generator(seed=episode_seed)
+                
+                # Update gate positions for this environment
+                self.gate_pos_per_env[env_idx] = new_gate_pos
+                self.gate_yaw_per_env[env_idx] = new_gate_yaw
+                
+                # Recalculate relative gates
+                gate_pos_rel, gate_yaw_rel = self._recalculate_relative_gates(env_idx)
+                self.gate_pos_rel_per_env[env_idx] = gate_pos_rel
+                self.gate_yaw_rel_per_env[env_idx] = gate_yaw_rel
         
         if self.initialize_at_random_gates:
             # set target gates to random gates
@@ -353,17 +427,46 @@ class DroneGateEnv(VecEnv):
 
         pos_old = self.world_states[:,0:3]
         pos_new = new_states[:,0:3]
-        pos_gate = self.gate_pos[self.target_gates%self.num_gates]
-        yaw_gate = self.gate_yaw[self.target_gates%self.num_gates]
+        if self.dynamic_gates and self.gate_generator is not None:
+            pos_gate = self.gate_pos_per_env[np.arange(self.num_envs), self.target_gates%self.num_gates]
+            yaw_gate = self.gate_yaw_per_env[np.arange(self.num_envs), self.target_gates%self.num_gates]
+        else:
+            pos_gate = self.gate_pos[self.target_gates%self.num_gates]
+            yaw_gate = self.gate_yaw[self.target_gates%self.num_gates]
 
         # Rewards
         d2g_old = np.linalg.norm(pos_old - pos_gate, axis=1)
         d2g_new = np.linalg.norm(pos_new - pos_gate, axis=1)
-        rat_penalty = 0.001*np.linalg.norm(new_states[:,9:12], axis=1)
-        action_penalty_delta = 0.001*np.linalg.norm((self.actions-self.prev_actions), axis=1)
-
-        prog_rewards = d2g_old - d2g_new
-        rewards = prog_rewards - rat_penalty
+        
+        if self.use_advanced_reward:
+            # Advanced reward structure (for timedlr task) - matches aerial_gym_dev
+            # Exponential distance rewards (two components for different scales)
+            pos_reward = 5.0 * np.exp(-d2g_new**2 / (3.5**2)) + 5.0 * np.exp(-2.0 * d2g_new**2)
+            
+            # Getting closer reward (asymmetric - penalize moving away 2x)
+            getting_closer = d2g_old - d2g_new
+            getting_closer_reward = np.where(getting_closer > 0, 
+                                            10.0 * getting_closer, 
+                                            20.0 * getting_closer)
+            
+            # Distance from goal reward
+            distance_reward = (20.0 - d2g_new) / 20.0
+            
+            # Action smoothness penalty
+            action_diff = self.actions - self.prev_actions
+            action_diff_penalty = -0.8 * np.sum(np.exp(-3.333 * action_diff**2) - 1.0, axis=1)
+            
+            # Angular velocity penalty
+            angular_velocity = new_states[:,9:12]
+            ang_vel_penalty = -0.5 * np.linalg.norm(angular_velocity, axis=1)**2
+            
+            # Combined reward
+            rewards = pos_reward + getting_closer_reward + distance_reward + action_diff_penalty + ang_vel_penalty
+        else:
+            # Original simple reward structure (for figure8, circle, slalom, backandforth)
+            rat_penalty = 0.001 * np.linalg.norm(new_states[:,9:12], axis=1)
+            prog_rewards = d2g_old - d2g_new
+            rewards = prog_rewards - rat_penalty
 
         # Gate passing/collision
         normal = np.array([np.cos(yaw_gate), np.sin(yaw_gate)]).T
@@ -380,11 +483,19 @@ class DroneGateEnv(VecEnv):
         z_bounds_broken = np.logical_or(new_states[:,2] < self.z_bounds[0], new_states[:,2] > self.z_bounds[1])
         out_of_bounds = x_bounds_broken | y_bounds_broken | z_bounds_broken
 
-        rewards[out_of_bounds] = -10
+        # Collision/out-of-bounds penalty
+        if self.use_advanced_reward:
+            rewards[out_of_bounds] = -100.0  # Matching aerial_gym_dev
+        else:
+            rewards[out_of_bounds] = -10.0  # Original penalty
         
         # Check number of steps
         max_steps_reached = self.step_counts >= self.max_steps
 
+        # Gate passing bonus (only for advanced reward)
+        if self.use_advanced_reward:
+            rewards[gate_passed] += 50.0
+        
         # Update target gate
         self.target_gates[gate_passed] += 1
         self.target_gates[gate_passed] %= self.num_gates

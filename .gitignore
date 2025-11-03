@@ -131,4 +131,7 @@ cython_debug/
 .claude/
 
 # VSCode
-.vscode/
+.vscode/examples/*_results*/
+examples/*.db
+examples/simple_evaluation/
+examples/test_*/

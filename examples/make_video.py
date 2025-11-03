@@ -11,13 +11,13 @@ from airevolve.evolution_tools.inspection_tools.behavioural_analysis.gate_based.
 
 def process_individual(individual_dir, gate_cfg="slalom", device=None, fps=100, width=864, height=700, dpi=200, 
                        gate_label_ylevel=11.0, fontsize=7, pad=0.05, offset_val=0.5, gate_line_alpha=0.5, alpha=1.0, 
-                       motor_colors=None, color='blue'):
+                       motor_colors=None, color='blue', task_seed=None):
     """
     Process an individual drone to create visualization videos and analysis plots.
     
     Args:
         individual_dir (str): Directory containing individual.npy and policy.zip
-        gate_cfg (str): Gate configuration ('slalom', 'figure8', 'circle', 'backandforth')
+        gate_cfg (str): Gate configuration ('slalom', 'figure8', 'circle', 'backandforth', 'timedlr', 'lrcontinuous')
         device (str): Device to use for computation ('cpu', 'cuda:0', etc.)
         fps (int): Frames per second for videos
         width (int): Video width in pixels
@@ -31,6 +31,7 @@ def process_individual(individual_dir, gate_cfg="slalom", device=None, fps=100, 
         alpha (float): Alpha value for plots
         motor_colors (list): Colors for motors
         color (str): Primary color for plots
+        task_seed (int): Seed for generating dynamic gates (timedlr only)
         
     Returns:
         dict: Statistics about the individual's performance
@@ -66,7 +67,7 @@ def process_individual(individual_dir, gate_cfg="slalom", device=None, fps=100, 
     print(f"Using device: {device}")
 
     # Extract simulation data
-    ind_data = extract_simulation_data(individual, ind_policy_file, gate_cfg, device)
+    ind_data = extract_simulation_data(individual, ind_policy_file, gate_cfg, device, task_seed=task_seed)
 
     # Access extracted data
     ind_speed = np.linalg.norm(ind_data["velocities"], axis=1)
@@ -80,6 +81,10 @@ def process_individual(individual_dir, gate_cfg="slalom", device=None, fps=100, 
 
     if gate_cfg == "figure8":
         n_gates = 8
+    elif gate_cfg == "timedlr":
+        n_gates = 100
+    elif gate_cfg == "lrcontinuous":
+        n_gates = 100
     else:
         n_gates = 4 
     stats = calculate_stats(gate_times_sec, n_gates)
@@ -111,6 +116,7 @@ def process_individual(individual_dir, gate_cfg="slalom", device=None, fps=100, 
             save_dir=vid_dir,
             file_name="/top_view.mp4",
             device=device,
+            task_seed=task_seed,
             view_type='top',
             follow=True,
             draw_forces=False,
@@ -127,6 +133,7 @@ def process_individual(individual_dir, gate_cfg="slalom", device=None, fps=100, 
             save_dir=vid_dir,
             file_name="/iso_view.mp4",
             device=device,
+            task_seed=task_seed,
             view_type='iso',
             follow=True,
             draw_forces=False,
@@ -169,7 +176,7 @@ def parse_args():
     
     parser.add_argument(
         "--gate-cfg", 
-        choices=["slalom", "figure8", "circle", "backandforth"],
+        choices=["slalom", "figure8", "circle", "backandforth", "lrcontinuous", "timedlr"],
         default="figure8",
         help="Gate configuration used during training"
     )
@@ -207,6 +214,13 @@ def parse_args():
         help="Primary color for plots"
     )
     
+    parser.add_argument(
+        "--task-seed",
+        type=int,
+        default=None,
+        help="Seed for generating dynamic gates (timedlr task only)"
+    )
+    
     return parser.parse_args()
 
 
@@ -222,7 +236,8 @@ def main():
             fps=args.fps,
             width=args.width,
             height=args.height,
-            color=args.color
+            color=args.color,
+            task_seed=args.task_seed
         )
         print("Processing completed successfully!")
         return stats

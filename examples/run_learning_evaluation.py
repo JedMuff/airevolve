@@ -11,25 +11,26 @@ import argparse
 from airevolve.evolution_tools.evaluators.gate_train import evaluate_individual
 
 def evaluate_drone(individual, task='circle', output_dir='evaluation_results', 
-                  timesteps=int(1e8), num_envs=100, create_videos=False, device='cpu'):
+                  timesteps=int(1e8), num_envs=100, create_videos=False, device='cpu', task_seed=None):
     """
     Evaluate a single drone design on a specified task.
     
     Args:
         individual (np.ndarray): Drone design array (6x6 format)
-        task (str): Task name ('circle', 'figure8', 'slalom', 'backandforth')
+        task (str): Task name ('circle', 'figure8', 'slalom', 'backandforth', 'timedlr')
         output_dir (str): Directory to save results
         timesteps (int): Training timesteps
         num_envs (int): Number of parallel environments
         create_videos (bool): Whether to create visualization videos after training
         device (str): Device to use for training ('cpu' or 'cuda:0')
+        task_seed (int): Seed for generating dynamic gates (timedlr task only)
     
     Returns:
         float: Fitness score
     """
     
     # Validate task
-    valid_tasks = ['backandforth', 'figure8', 'circle', 'slalom']
+    valid_tasks = ['backandforth', 'figure8', 'circle', 'slalom', 'lrcontinuous', 'timedlr']
     if task not in valid_tasks:
         raise ValueError(f"Task must be one of {valid_tasks}, got '{task}'")
     
@@ -59,7 +60,7 @@ def evaluate_drone(individual, task='circle', output_dir='evaluation_results',
     
     try:
         # Run the evaluation
-        fitness = evaluate_individual(individual, output_dir, timesteps, num_envs, task, device=device)
+        fitness = evaluate_individual(individual, output_dir, timesteps, num_envs, task, device=device, task_seed=task_seed)
         
         end_time = time.time()
         duration = end_time - start_time
@@ -89,7 +90,7 @@ def evaluate_drone(individual, task='circle', output_dir='evaluation_results',
             try:
                 from make_video import process_individual
                 print("Creating visualization videos...")
-                process_individual(output_dir, gate_cfg=task)
+                process_individual(output_dir, gate_cfg=task, task_seed=task_seed)
                 print("Videos created successfully!")
             except ImportError:
                 print("Warning: make_video module not found. Videos not created.")
@@ -126,7 +127,7 @@ def main():
     """
     parser = argparse.ArgumentParser(description='Evaluate a drone design on a flight task')
     parser.add_argument('--task', type=str, default='figure8',
-                       choices=['circle', 'figure8', 'slalom', 'backandforth'],
+                       choices=['circle', 'figure8', 'slalom', 'backandforth', 'lrcontinuous', 'timedlr'],
                        help='Flight task to evaluate on')
     parser.add_argument('--timesteps', type=float, default=1e5,
                        help='Number of training timesteps (e.g., 1e5, 1e7, 1e8)')
@@ -141,6 +142,8 @@ def main():
                        help='Disable video creation after training')
     parser.add_argument('--production', action='store_true',
                        help='Use production settings (1e8 timesteps, 100 envs, cpu)')
+    parser.add_argument('--task-seed', type=int, default=None,
+                       help='Seed for generating dynamic gates (lrcontinuous and timedlr tasks)')
     
     args = parser.parse_args()
     
@@ -167,7 +170,11 @@ def main():
     print(f"  Parallel environments: {args.num_envs}")
     print(f"  Device: {args.device}")
     print(f"  Output directory: {args.output_dir}")
-    print(f"  Create videos: {not args.no_videos}\n")
+    print(f"  Create videos: {not args.no_videos}")
+    if args.task == 'timedlr':
+        print(f"  Task seed: {args.task_seed}\n")
+    else:
+        print()
     
     # Evaluate the drone
     fitness = evaluate_drone(
@@ -177,7 +184,8 @@ def main():
         timesteps=int(args.timesteps),
         num_envs=args.num_envs,
         create_videos=not args.no_videos,
-        device=args.device
+        device=args.device,
+        task_seed=args.task_seed
     )
     
     print(f"\nFinal fitness: {fitness}")
