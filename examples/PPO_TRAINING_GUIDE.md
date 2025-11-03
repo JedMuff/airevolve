@@ -33,13 +33,79 @@ python run_learning_evaluation.py \
 
 #### Available Options:
 
-- `--task`: Flight task (circle, figure8, slalom, backandforth)
+- `--task`: Flight task (circle, figure8, slalom, backandforth, **lrcontinuous**, **timedlr**)
 - `--timesteps`: Training timesteps (e.g., 1e5, 1e7, 1e8)
 - `--num-envs`: Number of parallel environments
 - `--device`: Training device (cpu, cuda:0, cuda:1) - **cpu recommended for MLP policies**
 - `--output-dir`: Directory to save results
 - `--no-videos`: Disable video creation
 - `--production`: Use production settings (1e8 timesteps, 100 envs, cpu)
+- `--task-seed`: Seed for generating dynamic gates (**lrcontinuous and timedlr tasks**)
+
+#### New Task: LRContinuous (Task A)
+
+The **lrcontinuous** task is an exact replication of Task A from AirframeOptimization2:
+- **100 gates over 50m course** - easier spacing than Task B
+- **0.5m between gates** - 2x more space than timedlr, more forgiving
+- **Fixed left-right pattern** - gates follow predictable continuous pattern (left, center, right, center)
+- **Fixed lateral offset (0.25m)** - simpler than random offsets
+- **No vertical variation** - gates stay at same height
+- **Gates regenerate per episode** to prevent overfitting
+- Reproducible via `--task-seed` parameter
+- **Uses original simple reward function** - suitable for standard training
+
+**Comparison to Task B:**
+- Task A (lrcontinuous): Easier, **2x gate spacing**, fixed pattern, standard reward
+- Task B (timedlr): Very hard, **0.25m spacing**, random offsets, advanced reward
+
+**Example:**
+```bash
+# Train on Task A (lrcontinuous) with seed 42
+python run_learning_evaluation.py \
+    --task lrcontinuous \
+    --task-seed 42 \
+    --timesteps 1e7 \
+    --num-envs 50 \
+    --device cpu
+```
+
+#### New Task: TimedLR (Task B)
+
+The **timedlr** task is an exact replication of Task B from AirframeOptimization2:
+- **100 gates over 25m course** - extremely dense gate spacing
+- **0.25m between gates** - very challenging for standard drone size (~0.2-0.3m)
+- Random left/right offsets (0.5-0.7m radius) with 5% probability
+- Vertical variation (±0.1m)
+- **Gates regenerate per episode** to prevent overfitting
+- Reproducible via `--task-seed` parameter
+- **Reward function matches aerial_gym_dev** - exponential distance rewards, action smoothness penalties
+
+**Reward Structure** (matching AirframeOptimization2 - **only for timedlr**):
+- Exponential distance rewards: stronger when close to gates
+- Getting closer bonus: 10x progress, -20x for moving away
+- Action smoothness penalty: discourages jerky control
+- Angular velocity penalty: encourages stable flight
+- Gate passing bonus: +50.0
+- Out-of-bounds penalty: -100.0
+
+**Note:** Other tasks (figure8, circle, slalom, backandforth) use the original simple reward structure:
+- Progress reward: linear distance reduction to next gate
+- Small angular velocity penalty (0.001x)
+- Out-of-bounds penalty: -10.0
+
+**Warning:** This task is extremely difficult - gates are spaced only 0.25m apart, requiring very slow, precise flight. Original research used this spacing with specialized drones and IsaacGym physics.
+
+See [TIMEDLR_TASK_GUIDE.md](TIMEDLR_TASK_GUIDE.md) for complete documentation.
+
+**Example:**
+```bash
+# Train on timedlr task with seed 42
+python run_learning_evaluation.py \
+    --task timedlr \
+    --task-seed 42 \
+    --timesteps 1e7 \
+    --num-envs 50
+```
 
 ---
 
@@ -202,13 +268,10 @@ The Optuna search optimizes 13 key PPO hyperparameters. Here's what each one con
 ---
 
 ## Workflow Recommendations
-
-### 1. Quick Testing
 ```bash
 # Test that everything works (1-2 minutes)
 python run_learning_evaluation.py --timesteps 1e5 --num-envs 1
 ```
-
 ### 2. Baseline Training (Before Optimization)
 ```bash
 # Train with default hyperparameters to establish baseline (~20-40 minutes)
@@ -242,12 +305,16 @@ python run_learning_evaluation_optimized.py \
 
 ### 5. Compare Results
 ```bash
-# Compare baseline vs optimized performance (~1-2 minutes)
-python compare_training_results.py \
+# Compare baseline vs optimized reward histories (~1-2 minutes)
+python compare_reward_histories.py \
     --baseline baseline_results \
     --optimized optimized_results \
-    --output comparison_results
+    --output-dir comparison_results
 ```
+
+Notes:
+- The comparison plot uses cumulative simulation timesteps on the X-axis so both curves span the same training budget.
+- The upper panel shows raw rewards plus a 100-episode moving average; the lower panel shows a 500-episode moving average.
 
 ---
 
@@ -313,11 +380,15 @@ python run_learning_evaluation_optimized.py \
     --output-dir quick_optimized \
     --optuna-results optuna_results
 
+# Generate plots (optional)
+python generate_reward_plot.py --results-dir quick_baseline
+python generate_reward_plot.py --results-dir quick_optimized
+
 # Compare results (<1 minute)
-python compare_training_results.py \
+python compare_reward_histories.py \
     --baseline quick_baseline \
     --optimized quick_optimized \
-    --output quick_comparison
+    --output-dir quick_comparison
 ```
 
 ### 🏭 Production Workflow (~8-24 hours total):
@@ -408,9 +479,9 @@ conda run -n python3.9 pip install plotly kaleido
 
 ### Method 1: Using Training Curves
 
-Both `run_learning_evaluation.py` and the optimized version automatically save training curves as:
-- `monitor.csv`: Episode rewards over time
-- `figure.png`: Reward plot
+Both `run_learning_evaluation.py` and the optimized version save training curves as:
+- `monitor.csv`: Episode rewards over time (columns: `r`=reward, `l`=episode length in simulation steps, `t`=wall-clock seconds)
+- `figure.pdf`: Reward plot vs cumulative simulation timesteps (X-axis = cumsum of `l`)
 
 **Key metrics to compare:**
 - **Final performance**: Last 100 episodes average reward
@@ -420,7 +491,7 @@ Both `run_learning_evaluation.py` and the optimized version automatically save t
 
 ### Method 2: Using the Comparison Script
 
-The `compare_training_results.py` script (see below) automatically:
+The `compare_reward_histories.py` utility automatically:
 1. Loads training data from both runs
 2. Creates side-by-side comparison plots
 3. Calculates statistical comparisons
