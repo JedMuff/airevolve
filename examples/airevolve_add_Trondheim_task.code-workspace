@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../AirframeOptimization2"
+		},
+		{
+			"path": "../../aerial_gym_dev"
+		}
+	],
+	"settings": {}
+}
