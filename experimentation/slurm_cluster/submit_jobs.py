@@ -25,14 +25,14 @@ def create_slurm_script(job_configs, base_dir="drone_evaluations"):
 #SBATCH --array=0-{num_array_tasks-1}
 #SBATCH --exclude=ripper2
 
-VENV_PATH=/home/jed/workspace/airevolve/.venv
+VENV_PATH=/home/user/workspace/airevolve/.venv
 
 echo "Node: $(hostname)"
 echo "Using Python from: $VENV_PATH"
 
 export PATH="$VENV_PATH/bin:$PATH"
 export PYTHONPATH="$VENV_PATH/lib/python3.10/site-packages:$PYTHONPATH"
-export PYTHONPATH="/home/jed/workspace/drone-hover:$PYTHONPATH"
+export PYTHONPATH="/home/user/workspace/drone-hover:$PYTHONPATH"
 
 which python3
 python3 --version
@@ -40,7 +40,7 @@ python3 --version
 # Create output directory if it doesn't exist
 mkdir -p out_files
 
-source /home/jed/workspace/airevolve/.venv/bin/activate
+source /home/user/workspace/airevolve/.venv/bin/activate
 
 echo "Starting drone evaluation array job"
 echo "Array task ID: $SLURM_ARRAY_TASK_ID"

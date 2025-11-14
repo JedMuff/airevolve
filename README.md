@@ -1,16 +1,6 @@
 # AirEvolve
 
-An evolutionary algorithm framework for optimizing drone morphology and control. AirEvolve uses evolutionary computation techniques to evolve drone designs that can navigate through complex gate courses and perform various flight tasks.
-
-## Features
-
-- **Multiple Genome Representations**: Support for both spherical angular and Cartesian Euler coordinate systems
-- **Evolutionary Strategies**: μ+λ and μ,λ evolution strategies with configurable selection pressure
-- **Morphological Optimization**: Evolve drone arm configurations, motor placements, and propeller orientations
-- **Gate Navigation**: Built-in support for training drones to navigate through gate courses
-- **Symmetry Constraints**: Optional bilateral symmetry enforcement (XY, XZ, YZ planes)
-- **Visualization Tools**: Comprehensive plotting and animation capabilities for analysis
-- **Flexible Evaluation**: Multiple evaluation environments including gate navigation, hover tasks, and custom scenarios
+An evolutionary algorithm framework for optimizing drone morphology and control. AirEvolve uses evolutionary computation techniques to evolve drone designs that can navigate through gate courses.
 
 ## Installation
 
@@ -22,7 +12,7 @@ An evolutionary algorithm framework for optimizing drone morphology and control.
 ### Install from source
 
 ```bash
-git clone https://github.com/JedMuff/airevolve.git
+git clone ---
 cd airevolve
 pip install -e .
 ```
@@ -108,8 +98,8 @@ If you use AirEvolve in your research, please cite:
 ```bibtex
 @software{airevolve2025,
   title={Unconventional Hexacopters via Evolution and Learning: Performance Gains and New Insights},
-  author={Jed Muff},
+  author={---},
   year={2025},
-  url={https://github.com/JedMuff/airevolve}
+  url={---}
 }
 ```
