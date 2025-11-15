@@ -348,8 +348,9 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         gate_generator = None
         dynamic_gates = False
     
-    # Use advanced reward function only for timedlr task (not lrcontinuous)
-    use_advanced_reward = (gate_cfg == "timedlr")
+    # Use advanced reward function for timedlr and lrcontinuous
+    # This enables comparable shaping options across Task A and Task B
+    use_advanced_reward = (gate_cfg in ["timedlr", "lrcontinuous"])
 
     env = DroneGateEnv(
         num_envs=num_envs,

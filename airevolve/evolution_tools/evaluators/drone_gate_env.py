@@ -86,6 +86,14 @@ class DroneGateEnv(VecEnv):
         
         # Reward function selection
         self.use_advanced_reward = use_advanced_reward
+
+        # Curriculum parameters (to align with AirframeOptimization2)
+        # Epoch is approximated as total env steps divided by horizon length (16 in AerialGym RL-Games)
+        self.curriculum_enabled = True if self.use_advanced_reward else False
+        self.curriculum_horizon_length = 16
+        self.curriculum_start_epoch = 300
+        self.curriculum_end_epoch = 800
+        self._total_steps = 0  # counts step_wait calls (vectorized single step across envs)
         
         # Initialize drone simulator
         if propellers is not None:
@@ -420,10 +428,11 @@ class DroneGateEnv(VecEnv):
         # Convert actions from [-1,1] to [0,1] range for motor commands
         motor_commands = np.clip((self.actions + 1) / 2, 0, 1)
         
-        # Use the new simulator's dynamics function
+    # Use the new simulator's dynamics function
         new_states = self.world_states + self.dt * self.drone_sim.dynamics_func(self.world_states.T, motor_commands.T).T
 
         self.step_counts += 1
+        self._total_steps += 1
 
         pos_old = self.world_states[:,0:3]
         pos_new = new_states[:,0:3]
@@ -439,6 +448,14 @@ class DroneGateEnv(VecEnv):
         d2g_new = np.linalg.norm(pos_new - pos_gate, axis=1)
         
         if self.use_advanced_reward:
+            # ----- Curriculum scheduling (AirframeOptimization2-inspired) -----
+            if self.curriculum_enabled:
+                epoch = self._total_steps // self.curriculum_horizon_length
+                denom = max(self.curriculum_end_epoch - self.curriculum_start_epoch, 1)
+                curriculum_progress = np.clip((epoch - self.curriculum_start_epoch) / denom, 0.0, 1.0)
+            else:
+                curriculum_progress = 1.0
+
             # Advanced reward structure (for timedlr task) - matches aerial_gym_dev
             # Exponential distance rewards (two components for different scales)
             pos_reward = 5.0 * np.exp(-d2g_new**2 / (3.5**2)) + 5.0 * np.exp(-2.0 * d2g_new**2)
@@ -460,8 +477,14 @@ class DroneGateEnv(VecEnv):
             angular_velocity = new_states[:,9:12]
             ang_vel_penalty = -0.5 * np.linalg.norm(angular_velocity, axis=1)**2
             
-            # Combined reward
-            rewards = pos_reward + getting_closer_reward + distance_reward + action_diff_penalty + ang_vel_penalty
+            # Curriculum scaling (AirframeOptimization2-like):
+            # - Scale proximity shaping terms by (1 - progress)
+            shaping = pos_reward + getting_closer_reward + distance_reward
+            shaping *= (1.0 - curriculum_progress)
+
+            # - Angular velocity penalty remains unscaled (thresholded in AirframeOptimization2; here we keep constant)
+            # Combined reward so far
+            rewards = shaping + action_diff_penalty + ang_vel_penalty
         else:
             # Original simple reward structure (for figure8, circle, slalom, backandforth)
             rat_penalty = 0.001 * np.linalg.norm(new_states[:,9:12], axis=1)
@@ -485,7 +508,10 @@ class DroneGateEnv(VecEnv):
 
         # Collision/out-of-bounds penalty
         if self.use_advanced_reward:
-            rewards[out_of_bounds] = -100.0  # Matching aerial_gym_dev
+            # Scale by curriculum_progress (0 early training -> 1 late training)
+            # Note: keep magnitude at 100.0 for now; value parity can be tuned later
+            # If curriculum is disabled, curriculum_progress defaults to 1.0 above
+            rewards[out_of_bounds] = -100.0 * (curriculum_progress if 'curriculum_progress' in locals() else 1.0)
         else:
             rewards[out_of_bounds] = -10.0  # Original penalty
         
@@ -494,7 +520,8 @@ class DroneGateEnv(VecEnv):
 
         # Gate passing bonus (only for advanced reward)
         if self.use_advanced_reward:
-            rewards[gate_passed] += 50.0
+            # Scale by curriculum_progress to match AirframeOptimization2 schedule
+            rewards[gate_passed] += 50.0 * (curriculum_progress if 'curriculum_progress' in locals() else 1.0)
         
         # Update target gate
         self.target_gates[gate_passed] += 1
@@ -533,6 +560,9 @@ class DroneGateEnv(VecEnv):
             infos[i]["out_of_bounds"] = out_of_bounds[i]
             infos[i]["gate_passed"] = gate_passed[i]
             infos[i]["num_gates_passed"] = self.num_gates_passed
+            if self.use_advanced_reward and self.curriculum_enabled:
+                infos[i]["curriculum_progress"] = float(curriculum_progress)
+                infos[i]["curriculum_epoch"] = int(self._total_steps // self.curriculum_horizon_length)
             
         return self.states, rewards, dones, infos
     

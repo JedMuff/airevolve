@@ -44,7 +44,7 @@ def get_gate_config(gate_cfg: str):
 
 
 def objective(trial: optuna.Trial, individual: np.ndarray, gate_cfg: str, 
-              num_envs: int, timesteps: int, device: str) -> float:
+              num_envs: int, timesteps: int, device: str, stability_weight: float = 0.3) -> float:
     """
     Objective function for Optuna optimization.
     
@@ -138,11 +138,15 @@ def objective(trial: optuna.Trial, individual: np.ndarray, gate_cfg: str,
         device=device
     )
     
-    # Train the model
+    # Train the model and collect training statistics
     try:
+        # Train with monitoring to track stability during training
         model.learn(total_timesteps=timesteps, progress_bar=False)
         
-        # Evaluate
+        # Get training episode rewards from monitor to measure learning stability
+        monitor_data = env.get_attr('episode_returns')[0]  # Get episode returns from VecMonitor
+        
+        # Evaluate final performance
         test_env = DroneGateEnv(
             num_envs=1,
             individual=individual,
@@ -165,8 +169,22 @@ def objective(trial: optuna.Trial, individual: np.ndarray, gate_cfg: str,
         for _ in range(1000):
             actions, _ = model.predict(test_env.states, deterministic=True)
             states, rewards, dones, infos = test_env.step(actions)
+            if dones[0]:
+                break
         
         fitness = infos[0]["num_gates_passed"][0]
+        
+        # Calculate stability from training episode rewards (second half of training)
+        # This measures how stable the learning was, not evaluation consistency
+        if len(monitor_data) > 100:
+            second_half = monitor_data[len(monitor_data)//2:]
+            stability_penalty = np.std(second_half) / (np.mean(second_half) + 1e-8)
+        else:
+            stability_penalty = 1.0  # Default penalty if not enough data
+        
+        # Combined objective: maximize fitness while minimizing training instability
+        # stability_weight passed from main() determines importance of stability vs performance
+        combined_score = fitness - (stability_weight * stability_penalty)
         
         # Clean up
         env.close()
@@ -174,10 +192,11 @@ def objective(trial: optuna.Trial, individual: np.ndarray, gate_cfg: str,
         del model
         torch.cuda.empty_cache() if device != 'cpu' else None
         
-        print(f"Trial {trial.number}: fitness = {fitness}")
+        print(f"Trial {trial.number}: fitness = {fitness:.2f}, "
+              f"stability_penalty = {stability_penalty:.3f}, combined_score = {combined_score:.2f}")
         
-        # Return negative fitness (Optuna minimizes)
-        return -float(fitness)
+        # Return negative combined score (Optuna minimizes)
+        return -float(combined_score)
         
     except Exception as e:
         print(f"Trial {trial.number} failed: {e}")
@@ -207,6 +226,8 @@ def main():
                        help='Number of parallel jobs (use >1 for parallel optimization)')
     parser.add_argument('--output-dir', type=str, default='optuna_results',
                        help='Directory to save results')
+    parser.add_argument('--stability-weight', type=float, default=0.3,
+                       help='Weight for stability in objective (0.0=only performance, 1.0=heavy stability focus)')
     
     args = parser.parse_args()
     
@@ -231,6 +252,7 @@ def main():
     print(f"  Device: {args.device}")
     print(f"  Study name: {args.study_name}")
     print(f"  Parallel jobs: {args.n_jobs}")
+    print(f"  Stability weight: {args.stability_weight} (0.0=performance only, 1.0=stability focus)")
     print(f"  Output directory: {args.output_dir}\n")
     
     # Create Optuna study
@@ -255,7 +277,8 @@ def main():
             args.task, 
             args.num_envs, 
             int(args.timesteps_per_trial),
-            args.device
+            args.device,
+            args.stability_weight
         ),
         n_trials=args.n_trials,
         n_jobs=args.n_jobs,
