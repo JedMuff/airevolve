@@ -95,7 +95,7 @@ The **timedlr** task is an exact replication of Task B from AirframeOptimization
 
 **Warning:** This task is extremely difficult - gates are spaced only 0.25m apart, requiring very slow, precise flight. Original research used this spacing with specialized drones and IsaacGym physics.
 
-See [TIMEDLR_TASK_GUIDE.md](TIMEDLR_TASK_GUIDE.md) for complete documentation.
+See [TIMEDLR_TASK_GUIDE.md](TIMEDLR_TASK_GUIDE.md) for further documentation.
 
 **Example:**
 ```bash
