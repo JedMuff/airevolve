@@ -19,19 +19,19 @@ from airevolve.evolution_tools.inspection_tools.morphological_descriptors.hoveri
 
 
 # TODO: Replace these with your optimized hyperparameters from Optuna
-OPTIMIZED_HYPERPARAMETERS = {
-    'learning_rate': 3e-4,          # Replace with Optuna result
-    'n_steps': 1000,                # Replace with Optuna result
-    'batch_size': 256,              # Replace with Optuna result
-    'n_epochs': 10,                 # Replace with Optuna result
-    'gamma': 0.999,                 # Replace with Optuna result
-    'gae_lambda': 0.95,             # Replace with Optuna result
-    'clip_range': 0.2,              # Replace with Optuna result
-    'ent_coef': 1e-4,               # Replace with Optuna result
-    'vf_coef': 0.5,                 # Replace with Optuna result
-    'max_grad_norm': 0.5,           # Replace with Optuna result
-    'log_std_init': 0.0,            # Replace with Optuna result
-    'net_arch': 'medium',           # Replace with Optuna result ('small', 'medium', 'large')
+OPTIMIZED_HYPERPARAMETERS = { # best for slalom task
+    'learning_rate': 0.0000113,          # Replace with Optuna result
+    'n_steps': 256,                # Replace with Optuna result
+    'batch_size': 64,              # Replace with Optuna result
+    'n_epochs': 27,                 # Replace with Optuna result
+    'gamma': 0.997,                 # Replace with Optuna result
+    'gae_lambda': 0.9835,             # Replace with Optuna result
+    'clip_range': 0.107,              # Replace with Optuna result
+    'ent_coef': 0.0175,               # Replace with Optuna result
+    'vf_coef': 0.4322,                 # Replace with Optuna result
+    'max_grad_norm': 3.8497,           # Replace with Optuna result
+    'log_std_init': 0.3505,            # Replace with Optuna result
+    'net_arch': 'large',           # Replace with Optuna result ('small', 'medium', 'large')
 }
 
 
