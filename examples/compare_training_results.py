@@ -303,7 +303,7 @@ def plot_training_comparison(baseline_data: Dict, optimized_data: List[Dict], ou
     ax6.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'training_comparison.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, 'training_comparison.pdf'), bbox_inches='tight')
     plt.close()
 
 
@@ -491,8 +491,8 @@ def generate_comparison_report(baseline_data: Dict, optimized_data: List[Dict], 
 
 def main():
     parser = argparse.ArgumentParser(description='Compare training results before and after optimization')
-    parser.add_argument('--baseline', type=str, required=True,
-                       help='Directory containing baseline training results')
+    parser.add_argument('--baseline', type=str, nargs='+', required=True,
+                       help='Directory(ies) containing baseline training results')
     parser.add_argument('--optimized', type=str, nargs='+', required=True,
                        help='Directory(ies) containing optimized training results')
     parser.add_argument('--output', type=str, default='comparison_results',
@@ -505,9 +505,12 @@ def main():
     
     print("Loading training data...")
     
-    # Load baseline data
-    baseline_data = load_training_data(args.baseline)
-    print(f"Loaded baseline from: {args.baseline}")
+    # Load baseline data (now supports multiple)
+    baseline_data_list = []
+    for baseline_dir in args.baseline:
+        baseline_data = load_training_data(baseline_dir)
+        baseline_data_list.append(baseline_data)
+        print(f"Loaded baseline from: {baseline_dir}")
     
     # Load optimized data
     optimized_data = []
@@ -517,14 +520,14 @@ def main():
         print(f"Loaded optimized from: {opt_dir}")
     
     print("\nGenerating comparison plots...")
-    plot_training_comparison(baseline_data, optimized_data, args.output)
+    plot_training_comparison(baseline_data_list, optimized_data, args.output)
     
     print("Generating comparison report...")
-    generate_comparison_report(baseline_data, optimized_data, args.output)
+    generate_comparison_report(baseline_data_list, optimized_data, args.output)
     
     print(f"\nComparison complete! Results saved to: {args.output}")
     print("Files generated:")
-    print(f"  - {args.output}/training_comparison.png")
+    print(f"  - {args.output}/training_comparison.pdf")
     print(f"  - {args.output}/comparison_report.txt")
 
 

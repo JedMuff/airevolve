@@ -94,10 +94,11 @@ The Optuna search optimizes 13 key PPO hyperparameters. Here's what each one con
 - Controls the "brain size" - bigger brains learn more complex behaviors
 
 **3. N Steps** (256, 512, 1000, 2048)
-- How many actions the drone takes before updating its policy
+- How many **NEW** environment timesteps PPO collects BEFORE updating the policy
 - Low values: Updates frequently, more reactive to recent experiences
 - High values: Updates less frequently, considers longer sequences
-- Like how long you practice before reflecting on what you learned
+- Think of it as: "How many times should the drone act before we learn from it?"
+- Example: n_steps=1000 means collect 1000 experiences, then update the policy
 
 **4. Batch Size** (32, 64, 128, 256, 512, 1000)  
 - How many experiences to process together when learning
@@ -106,10 +107,48 @@ The Optuna search optimizes 13 key PPO hyperparameters. Here's what each one con
 - Like studying from 10 examples vs 1000 examples at once
 
 **5. N Epochs** (3 to 30)
-- How many times to review the same batch of experiences  
+- How many **times** PPO goes through the SAME collected data to update the policy
 - Low: Quick learning, might miss patterns
 - High: Thorough learning, but risk of overthinking
-- Like how many times you re-read your notes when studying
+- Think of it as: "How many times should we learn from the same data?"
+- Example: n_epochs=10 means process the collected data 10 times before collecting new data
+
+**Key Difference: n_steps vs n_epochs**
+
+These control **different levels** of the training loop:
+
+```
+Timeline of one training cycle:
+═══════════════════════════════════════════════════════════════════
+
+PHASE 1: COLLECT (n_steps = 1000 timesteps)
+  Step 1: Action → Reward → New State
+  Step 2: Action → Reward → New State
+  ...
+  Step 1000: Action → Reward → New State
+  
+  Result: 1000 experiences stored in memory
+
+PHASE 2: OPTIMIZE (n_epochs = 10 passes)
+  Epoch 1: Process all 1000 experiences → update network weights
+  Epoch 2: Process all 1000 experiences AGAIN → update network weights
+  Epoch 3: Process all 1000 experiences AGAIN → update network weights
+  ...
+  Epoch 10: Process all 1000 experiences AGAIN → update network weights
+  
+  Total: 10 passes through the same 1000 experiences
+
+THEN: Collect 1000 NEW experiences and repeat
+```
+
+**Analogy:**
+- **n_steps**: How long you practice before studying your notes
+- **n_epochs**: How many times you re-read the same notes
+
+**Impact:**
+- Higher n_steps = fresher data but less optimization
+- Higher n_epochs = more thorough learning but stale data
+- Total gradient updates per cycle = n_epochs × (n_steps / batch_size)
 
 **6. Gamma** (0.9 to 0.9999, log scale)
 - How much the drone cares about future rewards vs immediate rewards
@@ -241,13 +280,37 @@ python run_learning_evaluation_optimized.py \
 ```
 
 ### 5. Compare Results
+
+The `compare_training_results.py` script creates comprehensive comparisons between baseline and optimized training runs. It supports **multiple baseline and optimized runs** with mean ± std visualization.
+
+#### Basic Usage (Single Baseline vs Multiple Optimized):
 ```bash
-# Compare baseline vs optimized performance (~1-2 minutes)
+# Compare 1 baseline vs 3 optimized runs
 python compare_training_results.py \
     --baseline baseline_results \
-    --optimized optimized_results \
+    --optimized optimized_run_1 optimized_run_2 optimized_run_3 \
     --output comparison_results
 ```
+
+#### Advanced Usage (Multiple Baselines vs Multiple Optimized):
+```bash
+# Compare 3 baseline runs vs 3 optimized runs (with statistical analysis)
+python compare_training_results.py \
+    --baseline baseline_run_1 baseline_run_2 baseline_run_3 \
+    --optimized optimized_run_1 optimized_run_2 optimized_run_3 \
+    --output comparison_results
+```
+
+#### Output Files:
+- `training_comparison.pdf` - 6-panel comparison plot with mean ± std bands
+- `comparison_report.txt` - Detailed statistical analysis and metrics
+
+#### What It Shows:
+- **Training curves**: Mean and standard deviation across all runs
+- **Learning speed**: Episodes to reach performance milestones
+- **Convergence analysis**: How quickly policies stabilize
+- **Learning stability**: Variance in training rewards
+- **Statistical summary**: Mean ± std for all key metrics
 
 ---
 
@@ -431,25 +494,38 @@ The `compare_training_results.py` script (see below) automatically:
 For robust comparison, run multiple training sessions:
 
 ```bash
-# Baseline (3 runs)
+# Baseline: 3 independent runs
 for i in {1..3}; do
     python run_learning_evaluation.py \
-        --output-dir baseline_run_$i \
-        --task figure8 --timesteps 1e7
+        --task figure8 \
+        --timesteps 1e7 \
+        --num-envs 50 \
+        --output-dir baseline_run_$i
 done
 
-# Optimized (3 runs)  
+# Optimized: 3 independent runs with different seeds
 for i in {1..3}; do
     python run_learning_evaluation_optimized.py \
+        --task figure8 \
+        --timesteps 1e7 \
+        --num-envs 50 \
+        --seed $((42 + i)) \
         --output-dir optimized_run_$i \
-        --task figure8 --timesteps 1e7
+        --optuna-results optuna_results
 done
 
-# Compare all runs
-python compare_multiple_runs.py \
-    --baseline-dirs baseline_run_1 baseline_run_2 baseline_run_3 \
-    --optimized-dirs optimized_run_1 optimized_run_2 optimized_run_3
+# Compare with statistical analysis (mean ± std)
+python compare_training_results.py \
+    --baseline baseline_run_1 baseline_run_2 baseline_run_3 \
+    --optimized optimized_run_1 optimized_run_2 optimized_run_3 \
+    --output comparison_results
 ```
+
+**Benefits of Multiple Runs:**
+- **Error bars**: Show variance across runs
+- **Robust comparison**: Not affected by single outlier runs
+- **Statistical significance**: Multiple runs enable proper averaging
+- **PDF report**: Publication-quality figures with mean ± std visualization
 
 ### What to Look For
 
