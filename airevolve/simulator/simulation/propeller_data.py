@@ -35,6 +35,11 @@ PROPELLER_LIBRARY = {
         "constants": [7.60e-06, 1.14e-07],
         "wmax": 1963,
         "mass": 0.056
+    },
+    "matched": {
+        "constants": [1.076e-05, 1.61e-07],  # Matched to original framework (kTh = 1.076e-5)
+        "wmax": 1963,
+        "mass": 0.300  # Increased to match original 1.2kg total mass exactly
     }
 }
 
@@ -48,22 +53,26 @@ BEAM_DENSITY = 1500 * 0.005 * 0.01  # kg/m, carbon fiber: density * thickness * 
 def get_propeller_specs(prop_size):
     """
     Get propeller specifications for a given size.
-    
+
     Args:
-        prop_size (int): Propeller size in inches (4-8)
-        
+        prop_size (int or str): Propeller size in inches (4-8) or "matched"
+
     Returns:
         dict: Propeller specifications including constants, wmax, and mass
-        
+
     Raises:
         ValueError: If propeller size is not available
     """
-    prop_key = f"prop{prop_size}"
+    if prop_size == "matched":
+        prop_key = "matched"
+    else:
+        prop_key = f"prop{prop_size}"
+
     if prop_key not in PROPELLER_LIBRARY:
-        available_sizes = [int(key[4:]) for key in PROPELLER_LIBRARY.keys()]
+        available_sizes = [int(key[4:]) if key.startswith('prop') else key for key in PROPELLER_LIBRARY.keys()]
         raise ValueError(f"Propeller size {prop_size} not available. "
                         f"Available sizes: {available_sizes}")
-    
+
     return PROPELLER_LIBRARY[prop_key].copy()
 
 def validate_propeller_config(props):
@@ -86,9 +95,9 @@ def validate_propeller_config(props):
                 raise KeyError(f"'{key}' is missing in propeller {i}")
         
         # Validate propeller size
-        if prop["propsize"] not in [4, 5, 6, 7, 8]:
+        if prop["propsize"] not in [4, 5, 6, 7, 8, "matched"]:
             raise ValueError(f"Invalid propeller size {prop['propsize']} in propeller {i}. "
-                           f"Available sizes: [4, 5, 6, 7, 8]")
+                           f"Available sizes: [4, 5, 6, 7, 8, 'matched']")
         
         # Validate direction format
         if len(prop["dir"]) != 4:

@@ -170,12 +170,13 @@ class DroneConfiguration:
             # Add small positive value to diagonal to ensure positive definiteness
             min_eigenval = max(1e-6, -np.min(eigenvals) + 1e-6)
             self.inertia_matrix += min_eigenval * np.eye(3)
-        
+
         # Add minimum inertia values to prevent numerical instability in dynamics
         min_inertia = 0.01  # kg*m^2 - reasonable minimum for small drones
         self.inertia_matrix[0,0] = max(self.inertia_matrix[0,0], min_inertia)
         self.inertia_matrix[1,1] = max(self.inertia_matrix[1,1], min_inertia)
         self.inertia_matrix[2,2] = max(self.inertia_matrix[2,2], min_inertia)
+
     def _compute_allocation_matrices(self):
         """Compute force and moment allocation matrices."""
         self.Bf = np.zeros((3, self.num_motors))
