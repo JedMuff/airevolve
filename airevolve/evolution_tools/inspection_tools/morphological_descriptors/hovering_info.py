@@ -5,7 +5,7 @@ from dronehover.bodies.custom_bodies import Custombody
 from dronehover.optimization import Hover
 
 
-import evolution_tools.inspection_tools.utils as u
+from airevolve.evolution_tools.inspection_tools import utils as u
 from airevolve.evolution_tools.inspection_tools.morphological_descriptors.mass import compute_total_mass
 from airevolve.evolution_tools.inspection_tools.morphological_descriptors.centre_of_gravity import centre_of_gravity
 from airevolve.evolution_tools.inspection_tools.morphological_descriptors.inertia import inertia
@@ -61,9 +61,10 @@ def get_sim(individual, motor_template = {"propsize": 5}):
     # remove rows with nan values
     individual = individual[~np.isnan(individual).any(axis=1)]
 
-    mass = compute_total_mass(individual)
+    mass = float(compute_total_mass(individual))
     cg = centre_of_gravity(individual)
     Ix, Iy, Iz, Ixy, Ixz, Iyz = inertia(individual)
+    Ix, Iy, Iz, Ixy, Ixz, Iyz = float(Ix), float(Iy), float(Iz), float(Ixy), float(Ixz), float(Iyz)
 
     
     props = []
@@ -88,7 +89,7 @@ def get_sim(individual, motor_template = {"propsize": 5}):
     # for p in props:
 
     #     print(p)
-    drone = Custombody(props, mass, cg, Ix, Iy, Iz, Ixy, Ixz, Iyz)
+        drone = Custombody(props, mountpoints=None, mass=mass, cg=cg, Ix=Ix, Iy=Iy, Iz=Iz, Ixy=Ixy, Ixz=Ixz, Iyz=Iyz)
 
     # Define hovpropsering optimizer for drone
     try:

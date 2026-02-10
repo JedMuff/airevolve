@@ -171,11 +171,32 @@ class DroneConfiguration:
             min_eigenval = max(1e-6, -np.min(eigenvals) + 1e-6)
             self.inertia_matrix += min_eigenval * np.eye(3)
         
-        # Add minimum inertia values to prevent numerical instability in dynamics
-        min_inertia = 0.01  # kg*m^2 - reasonable minimum for small drones
-        self.inertia_matrix[0,0] = max(self.inertia_matrix[0,0], min_inertia)
-        self.inertia_matrix[1,1] = max(self.inertia_matrix[1,1], min_inertia)
-        self.inertia_matrix[2,2] = max(self.inertia_matrix[2,2], min_inertia)
+        # Note: Minimum inertia clamping is skipped here to preserve morphological diversity.
+        # Numerical stability is instead handled via method selection in get_inertia_inverse():
+        # - "clamp" method applies min_inertia threshold before standard inversion
+        # - "svd" method uses pseudo-inverse which naturally handles small singular values
+
+    def get_inertia_inverse(self, method: str = "clamp", min_inertia: float = 0.01, rcond: float = 1e-10):
+        """Return a numerically stable inverse of the inertia matrix.
+
+        Args:
+            method: "clamp" to use diagonal clamping then invert,
+                or "svd" to use pseudo-inverse via SVD (does NOT use clamping).
+            min_inertia: Minimum diagonal inertia for the "clamp" method only.
+            rcond: Relative cutoff for singular values in the "svd" method.
+        """
+        if method == "clamp":
+            inertia = self.inertia_matrix.copy()
+            inertia[0, 0] = max(inertia[0, 0], min_inertia)
+            inertia[1, 1] = max(inertia[1, 1], min_inertia)
+            inertia[2, 2] = max(inertia[2, 2], min_inertia)
+            return np.linalg.inv(inertia)
+        elif method == "svd":
+            # SVD-based pseudo-inverse: no clamping, handles singular values via rcond
+            return np.linalg.pinv(self.inertia_matrix, rcond=rcond)
+        else:
+            raise ValueError(f"Unknown inertia inversion method: {method}")
+
     def _compute_allocation_matrices(self):
         """Compute force and moment allocation matrices."""
         self.Bf = np.zeros((3, self.num_motors))
