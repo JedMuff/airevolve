@@ -11,6 +11,11 @@ from .symmetry_cartesian import CartesianSymmetryOperator
 from .symmetry_spherical import SphericalSymmetryOperator
 from .repair_cartesian import CartesianRepairOperator
 from .repair_spherical import SphericalRepairOperator
+from .optimization_repair_operator import (
+    OptimizationBasedRepairOperator,
+    OptimizationRepairConfig,
+    optimization_repair_individual
+)
 
 __all__ = [
     'SymmetryOperator',
@@ -24,5 +29,8 @@ __all__ = [
     'CartesianSymmetryOperator',
     'SphericalSymmetryOperator',
     'CartesianRepairOperator',
-    'SphericalRepairOperator'
+    'SphericalRepairOperator',
+    'OptimizationBasedRepairOperator',
+    'OptimizationRepairConfig',
+    'optimization_repair_individual'
 ]
