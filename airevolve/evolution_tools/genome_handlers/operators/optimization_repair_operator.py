@@ -64,9 +64,9 @@ class OptimizationRepairConfig:
     normalize_angles: bool = True      # Wrap angles to [-π, π] before optimization
 
     # Clearance parameters
-    propeller_radius: float = 0.0762
+    propeller_radius: float = 0.0254  # 2-inch propeller radius in meters
     propeller_tolerance: float = 0.1
-    cylinder_height: float = 0.3048
+    cylinder_height: float = None  # Will be set to 8 * propeller_radius in __post_init__
 
     # Boundary constraints
     inner_boundary_radius: float = 0.09
@@ -83,11 +83,16 @@ class OptimizationRepairConfig:
     yaw_bounds: Tuple[float, float] = (-np.pi, np.pi)
 
     def __post_init__(self):
-        """Validate configuration parameters."""
+        """Validate configuration parameters and set derived values."""
+        # Set cylinder_height to 8 * propeller_radius if not explicitly set
+        if self.cylinder_height is None:
+            object.__setattr__(self, 'cylinder_height', 8 * self.propeller_radius)
+
         assert self.disc_radius > self.core_radius, \
             "Disc radius must be greater than core radius"
         assert self.core_radius > 0, "Core radius must be positive"
         assert self.propeller_radius > 0, "Propeller radius must be positive"
+        assert self.cylinder_height > 0, "Cylinder height must be positive"
         assert self.inner_boundary_radius < self.outer_boundary_radius, \
             "Inner boundary must be less than outer boundary"
         assert self.n_starts >= 1, "Must have at least one starting point"

@@ -62,7 +62,7 @@ except ImportError as e:
 def genome_to_drone_hover_props(
     genome: npt.NDArray[Any],
     coordinate_system: str = 'spherical',
-    propeller_radius: float = 0.0762,
+    propeller_radius: float = 0.0254,  # 2-inch propeller radius in meters
     cylinder_height: float = 0.3048,
     default_propsize: int = 2
 ) -> List[Dict[str, Any]]:
@@ -84,7 +84,7 @@ def genome_to_drone_hover_props(
     coordinate_system : str
         'spherical' or 'cartesian'
     propeller_radius : float
-        Radius of propeller (default: 0.0762m = 3 inches)
+        Radius of propeller (default: 0.0254m = 1 inch, for 2-inch diameter propellers)
     cylinder_height : float
         Height of motor cylinder (default: 0.3048m = 12 inches)
     default_propsize : int

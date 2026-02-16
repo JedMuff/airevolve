@@ -107,7 +107,7 @@ def demo_custom_config():
         disc_radius=0.12,           # Smaller disc
         disc_height=0.0,
         core_radius=0.06,           # Larger core
-        propeller_radius=0.0762,
+        propeller_radius=0.0254,    # 2-inch propeller radius in meters
         optimization_method='SLSQP',
         max_iterations=500,
         constraint_tolerance=1e-6,
