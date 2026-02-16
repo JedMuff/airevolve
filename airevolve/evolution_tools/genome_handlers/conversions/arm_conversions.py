@@ -332,7 +332,7 @@ if __name__ == "__main__":
     
     # Test conversion to cylinders
     print("\n--- Converting to Cylinders ---")
-    cylinders = spherical_angular_arms_to_cylinders(test_arms, propeller_radius=0.0762, cylinder_height=0.3048)
+    cylinders = spherical_angular_arms_to_cylinders(test_arms, propeller_radius=0.0254, cylinder_height=0.3048)
     
     print(f"Created {len(cylinders)} cylinders")
     for i, cyl in enumerate(cylinders):
@@ -517,8 +517,10 @@ def cartesian_positions_and_quaternions_to_cartesian_euler_arms(positions, quate
 # ============================================================================
 
 # Create aliases that match the existing pattern used in particle_repair_operator.py
-def arms_to_cylinders_cartesian_euler(individual, propeller_radius=0.0762, cylinder_height=0.3048):
+def arms_to_cylinders_cartesian_euler(individual, propeller_radius=0.0254, cylinder_height=None):
     """Alias for cartesian_euler_arms_to_cylinders with default parameters."""
+    if cylinder_height is None:
+        cylinder_height = 8 * propeller_radius
     valid_arms = ~np.isnan(individual).any(axis=-1)
     if not np.any(valid_arms):
         return []
@@ -530,8 +532,10 @@ def cylinders_to_arms_cartesian_euler(cylinders):
     return cylinders_to_cartesian_euler_arms(cylinders)
 
 # Create aliases that match the existing pattern used in particle_repair_operator.py for polar angular
-def arms_to_cylinders_polar_angular(individual, propeller_radius=0.0762, cylinder_height=0.3048):
+def arms_to_cylinders_polar_angular(individual, propeller_radius=0.0254, cylinder_height=None):
     """Alias for spherical_angular_arms_to_cylinders with default parameters."""
+    if cylinder_height is None:
+        cylinder_height = 8 * propeller_radius
     valid_arms = ~np.isnan(individual).any(axis=-1)
     if not np.any(valid_arms):
         return []

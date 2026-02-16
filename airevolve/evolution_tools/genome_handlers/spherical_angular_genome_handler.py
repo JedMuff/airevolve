@@ -40,7 +40,7 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
         bilateral_plane_for_symmetry: str | None = None,
         repair: bool = False,
         enable_collision_repair: bool = False,
-        propeller_radius: float = 0.0762,
+        propeller_radius: float = 0.0254,  # 2-inch propeller radius in meters
         inner_boundary_radius: float = 0.09,
         outer_boundary_radius: float = 0.4,
         max_repair_iterations: int = 100,
