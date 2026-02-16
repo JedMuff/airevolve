@@ -9,8 +9,8 @@ for realistic mass, center of gravity, inertia, and control allocation calculati
 import numpy as np
 from numpy.linalg import norm, inv
 from .propeller_data import (
-    get_propeller_specs, validate_propeller_config, 
-    GRAVITY, CONTROLLER_MASS, BEAM_DENSITY
+    get_propeller_specs, validate_propeller_config,
+    GRAVITY, CONTROLLER_MASS, BATTERY_MASS, BEAM_DENSITY
 )
 
 class DroneConfiguration:
@@ -25,32 +25,50 @@ class DroneConfiguration:
     - Moment allocation matrix (Bm) mapping motor commands to body moments
     """
     
-    def __init__(self, propellers):
+    def __init__(self, propellers, mountpoints=None):
         """
         Initialize drone configuration from propeller specifications.
-        
+
         Args:
             propellers (list): List of propeller dictionaries, each containing:
                 - "loc": [x, y, z] position in body frame (meters)
                 - "dir": [x, y, z, rotation] thrust direction and spin direction
                 - "propsize": propeller size in inches (4-8)
-                
+            mountpoints (list, optional): List of np.array mounting points for each propeller.
+                If None, defaults to origin [0,0,0] for all propellers (backward compatible).
+
         Example:
             propellers = [
                 {"loc": [0.11, 0.11, 0], "dir": [0, 0, -1, "ccw"], "propsize": 5},
                 {"loc": [-0.11, 0.11, 0], "dir": [0, 0, -1, "cw"], "propsize": 5},
                 # ... more propellers
             ]
+
+            # Optional: specify mounting points
+            mountpoints = [
+                np.array([0.03, 0.03, 0]),   # Mounting point for propeller 1
+                np.array([-0.03, 0.03, 0]),  # Mounting point for propeller 2
+                # ...
+            ]
         """
         # Validate input format
         validate_propeller_config(propellers)
-        
+
         self.propellers = propellers
         self.num_motors = len(propellers)
-        
+
+        # Set up mounting points
+        self.mountpoints = mountpoints
+        if self.mountpoints is None:
+            self.mountpoints = [np.array([0.0, 0.0, 0.0]) for _ in range(self.num_motors)]
+
+        if len(self.mountpoints) != self.num_motors:
+            raise ValueError(f"Number of mounting points ({len(self.mountpoints)}) "
+                           f"must equal number of propellers ({self.num_motors})")
+
         # Add propeller specifications to each propeller
         self._add_propeller_specs()
-        
+
         # Compute physical properties
         self._compute_mass_and_cg()
         self._compute_inertia()
@@ -66,60 +84,73 @@ class DroneConfiguration:
     
     def _compute_mass_and_cg(self):
         """Compute total mass and center of gravity location."""
-        # Start with controller mass
-        self.mass = CONTROLLER_MASS
-        
+        # Start with controller and battery mass
+        self.mass = CONTROLLER_MASS + BATTERY_MASS
+
         # Add propeller and beam masses
-        for prop in self.propellers:
+        for prop, mountpoint in zip(self.propellers, self.mountpoints):
             prop_mass = prop["mass"]
-            beam_length = norm(np.array(prop["loc"]))
+            prop_loc = np.array(prop["loc"])
+            beam_length = norm(prop_loc - mountpoint)
             beam_mass = BEAM_DENSITY * beam_length
-            
+
             self.mass += prop_mass + beam_mass
-        
+
         # Compute center of gravity
         self.cg = np.zeros(3)
-        for prop in self.propellers:
+        for prop, mountpoint in zip(self.propellers, self.mountpoints):
             prop_mass = prop["mass"]
-            beam_length = norm(np.array(prop["loc"]))
-            beam_mass = BEAM_DENSITY * beam_length
             prop_loc = np.array(prop["loc"])
-            
+            beam_length = norm(prop_loc - mountpoint)
+            beam_mass = BEAM_DENSITY * beam_length
+
             # Propeller contributes at its location
             self.cg += (prop_mass / self.mass) * prop_loc
-            
+
             # Beam contributes at its midpoint
-            self.cg += (beam_mass / self.mass) * prop_loc * 0.5
+            beam_midpoint = (prop_loc + mountpoint) * 0.5
+            self.cg += (beam_mass / self.mass) * beam_midpoint
     
     def _compute_inertia(self):
         """Compute inertia matrix components using parallel axis theorem."""
-        # Controller inertia about its own center (approximated as rectangular block)
-        # Typical flight controller dimensions: 105mm x 36mm x 35mm
-        controller_Ix = (1/12) * CONTROLLER_MASS * (0.036**2 + 0.035**2)
-        controller_Iy = (1/12) * CONTROLLER_MASS * (0.105**2 + 0.035**2)
-        controller_Iz = (1/12) * CONTROLLER_MASS * (0.105**2 + 0.036**2)
-        
-        # Translate controller inertia to center of gravity using parallel axis theorem
-        cg_offset_sq = np.dot(self.cg, self.cg)
-        self.Ix = controller_Ix + CONTROLLER_MASS * (self.cg[1]**2 + self.cg[2]**2)
-        self.Iy = controller_Iy + CONTROLLER_MASS * (self.cg[0]**2 + self.cg[2]**2)
-        self.Iz = controller_Iz + CONTROLLER_MASS * (self.cg[0]**2 + self.cg[1]**2)
-        
+        # Battery inertia (approximated as rectangular block)
+        # Typical battery dimensions: 60mm x 16mm x 18mm
+        battery_Ix = (1/12) * BATTERY_MASS * (0.016**2 + 0.018**2)
+        battery_Iy = (1/12) * BATTERY_MASS * (0.060**2 + 0.018**2)
+        battery_Iz = (1/12) * BATTERY_MASS * (0.060**2 + 0.016**2)
+
+        # Controller inertia (approximated as rectangular block)
+        # Speedybee F405 dimensions: ~33mm x 8mm x 8mm
+        controller_Ix = (1/12) * CONTROLLER_MASS * (0.008**2 + 0.033**2)
+        controller_Iy = (1/12) * CONTROLLER_MASS * (0.008**2 + 0.033**2)
+        controller_Iz = (1/12) * CONTROLLER_MASS * (0.033**2 + 0.033**2)
+
+        # Translate to center of gravity using parallel axis theorem
+        self.Ix = battery_Ix + BATTERY_MASS * (self.cg[1]**2 + self.cg[2]**2)
+        self.Ix += controller_Ix + CONTROLLER_MASS * (self.cg[1]**2 + self.cg[2]**2)
+
+        self.Iy = battery_Iy + BATTERY_MASS * (self.cg[0]**2 + self.cg[2]**2)
+        self.Iy += controller_Iy + CONTROLLER_MASS * (self.cg[0]**2 + self.cg[2]**2)
+
+        self.Iz = battery_Iz + BATTERY_MASS * (self.cg[0]**2 + self.cg[1]**2)
+        self.Iz += controller_Iz + CONTROLLER_MASS * (self.cg[0]**2 + self.cg[1]**2)
+
         # Initialize products of inertia
-        self.Ixy = -CONTROLLER_MASS * self.cg[0] * self.cg[1]
-        self.Ixz = -CONTROLLER_MASS * self.cg[0] * self.cg[2]
-        self.Iyz = -CONTROLLER_MASS * self.cg[1] * self.cg[2]
+        self.Ixy = -BATTERY_MASS * self.cg[0] * self.cg[1] - CONTROLLER_MASS * self.cg[0] * self.cg[1]
+        self.Ixz = -BATTERY_MASS * self.cg[0] * self.cg[2] - CONTROLLER_MASS * self.cg[0] * self.cg[2]
+        self.Iyz = -BATTERY_MASS * self.cg[1] * self.cg[2] - CONTROLLER_MASS * self.cg[1] * self.cg[2]
         
-        # Add contributions from propellers and beams
-        for prop in self.propellers:
+        # Add contributions from propellers and beams (using mounting points)
+        for prop, mountpoint in zip(self.propellers, self.mountpoints):
             prop_mass = prop["mass"]
             pos = np.array(prop["loc"])
-            beam_length = norm(pos)
-            beam_mass = BEAM_DENSITY * beam_length
-            
+            arm_length = norm(pos - mountpoint)
+            arm_midpoint = (pos + mountpoint) / 2
+            beam_mass = BEAM_DENSITY * arm_length
+
             # Propeller position relative to CG
             r_prop = pos - self.cg
-            
+
             # Propeller contributions (treated as point mass)
             self.Ix += prop_mass * (r_prop[1]**2 + r_prop[2]**2)
             self.Iy += prop_mass * (r_prop[0]**2 + r_prop[2]**2)
@@ -127,26 +158,30 @@ class DroneConfiguration:
             self.Ixy -= prop_mass * r_prop[0] * r_prop[1]
             self.Ixz -= prop_mass * r_prop[0] * r_prop[2]
             self.Iyz -= prop_mass * r_prop[1] * r_prop[2]
-            
-            # Beam contributions (rod along beam direction)
-            beam_center = pos * 0.5  # Beam center at midpoint
-            r_beam = beam_center - self.cg
-            
-            # For a rod along the beam direction, add both translational and rotational inertia
-            beam_direction = pos / beam_length  # Unit vector along beam
-            
-            # Perpendicular moment of inertia for rod: I_perp = (1/12) * m * L²
-            I_beam_perp = (1/12) * beam_mass * beam_length**2
-            
-            # Add translational inertia (parallel axis theorem)
-            self.Ix += beam_mass * (r_beam[1]**2 + r_beam[2]**2) + I_beam_perp * (beam_direction[1]**2 + beam_direction[2]**2)
-            self.Iy += beam_mass * (r_beam[0]**2 + r_beam[2]**2) + I_beam_perp * (beam_direction[0]**2 + beam_direction[2]**2)
-            self.Iz += beam_mass * (r_beam[0]**2 + r_beam[1]**2) + I_beam_perp * (beam_direction[0]**2 + beam_direction[1]**2)
-            
-            # Add products of inertia
-            self.Ixy -= beam_mass * r_beam[0] * r_beam[1]
-            self.Ixz -= beam_mass * r_beam[0] * r_beam[2]
-            self.Iyz -= beam_mass * r_beam[1] * r_beam[2]
+
+            # Beam contributions (rod from mounting point to propeller)
+            r_beam = arm_midpoint - self.cg
+
+            # Use cross product method for inertia (drone-hover approach)
+            # For moments of inertia (Ix, Iy, Iz)
+            self.Ix += (1/12) * norm(np.cross(np.array([1, 0, 0]), pos))**2 * beam_mass
+            self.Ix += beam_mass * norm(np.cross(np.array([1, 0, 0]), r_beam))**2
+
+            self.Iy += (1/12) * norm(np.cross(np.array([0, 1, 0]), pos))**2 * beam_mass
+            self.Iy += beam_mass * norm(np.cross(np.array([0, 1, 0]), r_beam))**2
+
+            self.Iz += (1/12) * norm(np.cross(np.array([0, 0, 1]), pos))**2 * beam_mass
+            self.Iz += beam_mass * norm(np.cross(np.array([0, 0, 1]), r_beam))**2
+
+            # Products of inertia
+            self.Ixy -= (1/12) * pos[0] * pos[1] * beam_mass
+            self.Ixy -= beam_mass * (arm_midpoint[0] - self.cg[0]) * (arm_midpoint[1] - self.cg[1])
+
+            self.Ixz -= (1/12) * pos[0] * pos[2] * beam_mass
+            self.Ixz -= beam_mass * (arm_midpoint[0] - self.cg[0]) * (arm_midpoint[2] - self.cg[2])
+
+            self.Iyz -= (1/12) * pos[1] * pos[2] * beam_mass
+            self.Iyz -= beam_mass * (arm_midpoint[1] - self.cg[1]) * (arm_midpoint[2] - self.cg[2])
         
         # Create inertia matrix with numerical stability improvements
         self.inertia_matrix = np.array([
