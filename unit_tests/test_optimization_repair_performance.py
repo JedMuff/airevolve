@@ -150,7 +150,7 @@ class TestOptimizationRepairPerformance(unittest.TestCase):
 
         # Optimization repair configuration
         self.opt_config = OptimizationRepairConfig(
-            propeller_radius=0.0762,
+            propeller_radius=0.0254,
             propeller_tolerance=0.1,
             inner_boundary_radius=0.09,
             outer_boundary_radius=0.4,
@@ -160,7 +160,7 @@ class TestOptimizationRepairPerformance(unittest.TestCase):
 
         # Particle repair parameters
         self.particle_config = {
-            'propeller_radius': 0.0762,
+            'propeller_radius': 0.0254,
             'inner_boundary_radius': 0.09,
             'outer_boundary_radius': 0.4,
             'max_iterations': 25,
@@ -183,7 +183,7 @@ class TestOptimizationRepairPerformance(unittest.TestCase):
                 min_max_narms=(6, 6),
                 repair=False,
                 enable_collision_repair=False,
-                propeller_radius=0.0762,
+                propeller_radius=0.0254,
                 inner_boundary_radius=0.09,
                 outer_boundary_radius=0.4,
                 append_arm_chance=0.0,
@@ -195,7 +195,7 @@ class TestOptimizationRepairPerformance(unittest.TestCase):
                 min_max_narms=(6, 6),
                 repair=False,
                 enable_collision_repair=False,
-                propeller_radius=0.0762,
+                propeller_radius=0.0254,
                 inner_boundary_radius=0.09,
                 outer_boundary_radius=0.4,
                 append_arm_chance=0.0,
@@ -299,7 +299,7 @@ class TestOptimizationRepairPerformance(unittest.TestCase):
                 bilateral_plane_for_symmetry="yz",
                 repair=False,
                 enable_collision_repair=False,
-                propeller_radius=0.0762,
+                propeller_radius=0.0254,
                 inner_boundary_radius=0.09,
                 outer_boundary_radius=0.4,
                 append_arm_chance=0.0,
@@ -312,7 +312,7 @@ class TestOptimizationRepairPerformance(unittest.TestCase):
                 bilateral_plane_for_symmetry="yz",
                 repair=False,
                 enable_collision_repair=False,
-                propeller_radius=0.0762,
+                propeller_radius=0.0254,
                 inner_boundary_radius=0.09,
                 outer_boundary_radius=0.4,
                 append_arm_chance=0.0,
@@ -410,7 +410,7 @@ class TestComparisonWithParticleRepair(unittest.TestCase):
 
         # Optimization repair configuration
         self.opt_config = OptimizationRepairConfig(
-            propeller_radius=0.0762,
+            propeller_radius=0.0254,
             propeller_tolerance=0.1,
             inner_boundary_radius=0.09,
             outer_boundary_radius=0.4,
@@ -420,7 +420,7 @@ class TestComparisonWithParticleRepair(unittest.TestCase):
 
         # Particle repair parameters
         self.particle_config = {
-            'propeller_radius': 0.0762,
+            'propeller_radius': 0.0254,
             'inner_boundary_radius': 0.09,
             'outer_boundary_radius': 0.4,
             'max_iterations': 25,
@@ -443,7 +443,7 @@ class TestComparisonWithParticleRepair(unittest.TestCase):
                 min_max_narms=(6, 6),
                 repair=False,
                 enable_collision_repair=False,
-                propeller_radius=0.0762,
+                propeller_radius=0.0254,
                 inner_boundary_radius=0.09,
                 outer_boundary_radius=0.4,
                 append_arm_chance=0.0,
@@ -455,7 +455,7 @@ class TestComparisonWithParticleRepair(unittest.TestCase):
                 min_max_narms=(6, 6),
                 repair=False,
                 enable_collision_repair=False,
-                propeller_radius=0.0762,
+                propeller_radius=0.0254,
                 inner_boundary_radius=0.09,
                 outer_boundary_radius=0.4,
                 append_arm_chance=0.0,

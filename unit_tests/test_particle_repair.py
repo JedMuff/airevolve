@@ -154,7 +154,7 @@ class TestCollisionDetectionAccuracy(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.propeller_radius = 0.0762
+        self.propeller_radius = 0.0254
         self.inner_boundary_radius = 0.09
         self.outer_boundary_radius = 0.4
         self.tolerance = 0.1
@@ -164,18 +164,18 @@ class TestCollisionDetectionAccuracy(unittest.TestCase):
         # Create cylinders with various constraint violations
 
         cylinders_in_bounds = [
-            Cylinder(position=np.array([0.1, 0.0, 0.0]), radius=0.0762, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),
-            Cylinder(position=np.array([0.0, 0.3, 0.0]), radius=0.0762, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),
+            Cylinder(position=np.array([0.1, 0.0, 0.0]), radius=0.0254, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),
+            Cylinder(position=np.array([0.0, 0.3, 0.0]), radius=0.0254, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),
         ]
 
         cylinders_too_close = [
-            Cylinder(position=np.array([0.02, 0.0, 0.0]), radius=0.0762, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),  # Too close to origin
-            Cylinder(position=np.array([0.09, 0.0, 0.0]), radius=0.0762, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),
+            Cylinder(position=np.array([0.02, 0.0, 0.0]), radius=0.0254, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),  # Too close to origin
+            Cylinder(position=np.array([0.09, 0.0, 0.0]), radius=0.0254, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),
         ]   
 
         cylinders_too_far = [
-            Cylinder(position=np.array([1.0, 0.0, 0.0]), radius=0.0762, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),
-            Cylinder(position=np.array([3.0, 0.0, 0.0]), radius=0.0762, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),  # Too far from origin
+            Cylinder(position=np.array([1.0, 0.0, 0.0]), radius=0.0254, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),
+            Cylinder(position=np.array([3.0, 0.0, 0.0]), radius=0.0254, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),  # Too far from origin
         ]
         
         # Test detection accuracy
@@ -192,8 +192,8 @@ class TestCollisionDetectionAccuracy(unittest.TestCase):
         """Test accuracy of distance constraint enforcement."""
         # Create cylinders outside boundaries
         cylinders = [
-            Cylinder(position=np.array([0.1, 0.0, 0.0]), radius=0.0762, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),
-            Cylinder(position=np.array([5.0, 0.0, 0.0]), radius=0.0762, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),
+            Cylinder(position=np.array([0.1, 0.0, 0.0]), radius=0.0254, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),
+            Cylinder(position=np.array([5.0, 0.0, 0.0]), radius=0.0254, height=0.1, orientation=np.array([1.0, 0.0, 0.0, 0.0])),
         ]
         # Enforce constraints
         corrected = enforce_distance_constraints(
@@ -238,7 +238,7 @@ class TestRepairPerformance(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.propeller_radius = 0.0762
+        self.propeller_radius = 0.0254
         self.inner_boundary_radius = 0.09
         self.outer_boundary_radius = 0.4
         self.rng = np.random.default_rng(42)
@@ -357,7 +357,7 @@ class TestCoordinateSystemIntegration(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.propeller_radius = 0.0762
+        self.propeller_radius = 0.0254
         self.inner_boundary_radius = 0.09
         self.outer_boundary_radius = 0.4
     
@@ -401,7 +401,7 @@ class TestParticleRepairSymmetry(unittest.TestCase):
         self.rng = np.random.default_rng(42)  # Fixed seed for reproducibility
         
         # Common repair parameters
-        self.propeller_radius = 0.0762
+        self.propeller_radius = 0.0254
         self.inner_boundary_radius = 0.09
         self.outer_boundary_radius = 0.4
         self.max_iterations = 25
@@ -812,7 +812,7 @@ class TestCollisionDetectionAndRepair(unittest.TestCase):
         self.rng = np.random.default_rng(42)  # Fixed seed for reproducibility
         
         # Common repair parameters
-        self.propeller_radius = 0.0762
+        self.propeller_radius = 0.0254
         self.inner_boundary_radius = 0.09
         self.outer_boundary_radius = 0.4
         self.max_iterations = 25
@@ -854,7 +854,7 @@ class TestCollisionDetectionAndRepair(unittest.TestCase):
                 # bilateral_plane_for_symmetry="xz",  # YZ plane symmetry
                 repair=False,
                 enable_collision_repair=False,
-                propeller_radius=0.0762,
+                propeller_radius=0.0254,
                 inner_boundary_radius=0.09,
                 outer_boundary_radius=0.4,
                 append_arm_chance=0.0,  # No appending for this test
@@ -866,7 +866,7 @@ class TestCollisionDetectionAndRepair(unittest.TestCase):
                 # bilateral_plane_for_symmetry="xz",  # YZ plane symmetry
                 repair=True,
                 enable_collision_repair=True,
-                propeller_radius=0.0762,
+                propeller_radius=0.0254,
                 inner_boundary_radius=0.09,
                 outer_boundary_radius=0.4,
                 append_arm_chance=0.0,  # No appending for this test
@@ -931,7 +931,7 @@ class TestCollisionDetectionAndRepair(unittest.TestCase):
                 bilateral_plane_for_symmetry="yz",  # YZ plane symmetry
                 repair=False,
                 enable_collision_repair=False,
-                propeller_radius=0.0762,
+                propeller_radius=0.0254,
                 inner_boundary_radius=0.09,
                 outer_boundary_radius=0.4,
                 append_arm_chance=0.0,  # No appending for this test
@@ -943,7 +943,7 @@ class TestCollisionDetectionAndRepair(unittest.TestCase):
                 bilateral_plane_for_symmetry="yz",  # YZ plane symmetry
                 repair=True,
                 enable_collision_repair=True,
-                propeller_radius=0.0762,
+                propeller_radius=0.0254,
                 inner_boundary_radius=0.09,
                 outer_boundary_radius=0.4,
                 append_arm_chance=0.0,  # No appending for this test
@@ -999,7 +999,7 @@ class TestParticleRepairEdgeCases(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.propeller_radius = 0.0762
+        self.propeller_radius = 0.0254
         self.inner_boundary_radius = 0.09
         self.outer_boundary_radius = 0.4
     

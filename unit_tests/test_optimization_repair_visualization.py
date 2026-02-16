@@ -42,7 +42,7 @@ class TestOptimizationRepairVisualization(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.rnd = np.random.default_rng(42)  # Fixed seed for reproducibility
-        self.propeller_radius = 0.0762
+        self.propeller_radius = 0.0254
         self.cylinder_height = 0.3048
         self.inner_boundary_radius = 0.09
         self.outer_boundary_radius = 0.4
