@@ -82,6 +82,11 @@ class OptimizationRepairConfig:
     pitch_bounds: Tuple[float, float] = (-2*np.pi/3, 2*np.pi/3)  # ±120° (was ±180°)
     yaw_bounds: Tuple[float, float] = (-np.pi, np.pi)
 
+    # Fixed parameters (parameters that should not be modified during optimization)
+    # List of parameter indices to fix: 0=r, 1=theta, 2=phi, 3=pitch, 4=yaw
+    # For example, [1, 2] will fix theta and phi
+    fixed_params: List[int] = None  # None means all parameters can be optimized
+
     def __post_init__(self):
         """Validate configuration parameters and set derived values."""
         # Set cylinder_height to 8 * propeller_radius if not explicitly set
@@ -810,8 +815,8 @@ def optimization_repair_individual(
     # Extract parameters (exclude direction column)
     x0 = valid_genome[:, :-1].flatten()  # Shape: (n_arms * n_params,)
 
-    # Define parameter bounds
-    bounds = _create_bounds(n_valid_arms, config, arms_to_cylinders)
+    # Define parameter bounds (pass x0 to support fixed parameters)
+    bounds = _create_bounds(n_valid_arms, config, arms_to_cylinders, x0)
 
     # Get bounds for normalization
     bounds_lb = np.array(bounds.lb)
@@ -955,7 +960,7 @@ def optimization_repair_individual(
     return result_individual
 
 
-def _create_bounds(n_arms: int, config: OptimizationRepairConfig, arms_to_cylinders_func: Callable) -> Bounds:
+def _create_bounds(n_arms: int, config: OptimizationRepairConfig, arms_to_cylinders_func: Callable, x0: npt.NDArray[Any] = None) -> Bounds:
     """Create bounds for optimization variables.
 
     Parameters:
@@ -966,6 +971,8 @@ def _create_bounds(n_arms: int, config: OptimizationRepairConfig, arms_to_cylind
         Configuration with parameter bounds
     arms_to_cylinders_func : callable
         Function to convert genome to cylinders (determines coordinate system)
+    x0 : array, optional
+        Initial parameter values (needed if config.fixed_params is set)
 
     Returns:
     --------
@@ -978,41 +985,56 @@ def _create_bounds(n_arms: int, config: OptimizationRepairConfig, arms_to_cylind
     # Determine coordinate system based on conversion function
     is_cartesian = (arms_to_cylinders_func == arms_to_cylinders_cartesian_euler)
 
-    for _ in range(n_arms):
+    for arm_idx in range(n_arms):
         if is_cartesian:
             # Cartesian: x, y, z, roll, pitch, yaw
-            lower.extend([
+            arm_lower = [
                 -config.outer_boundary_radius,  # x
                 -config.outer_boundary_radius,  # y
                 -config.outer_boundary_radius,  # z
                 -np.pi,  # roll
                 config.pitch_bounds[0],  # pitch
                 config.yaw_bounds[0]  # yaw
-            ])
-            upper.extend([
+            ]
+            arm_upper = [
                 config.outer_boundary_radius,  # x
                 config.outer_boundary_radius,  # y
                 config.outer_boundary_radius,  # z
                 np.pi,  # roll
                 config.pitch_bounds[1],  # pitch
                 config.yaw_bounds[1]  # yaw
-            ])
+            ]
         else:
             # Spherical: r, theta, phi, pitch, yaw
-            lower.extend([
-                config.r_bounds[0],
-                config.theta_bounds[0],
-                config.phi_bounds[0],
-                config.pitch_bounds[0],
-                config.yaw_bounds[0]
-            ])
-            upper.extend([
-                config.r_bounds[1],
-                config.theta_bounds[1],
-                config.phi_bounds[1],
-                config.pitch_bounds[1],
-                config.yaw_bounds[1]
-            ])
+            arm_lower = [
+                config.r_bounds[0],       # 0: r
+                config.theta_bounds[0],   # 1: theta
+                config.phi_bounds[0],     # 2: phi
+                config.pitch_bounds[0],   # 3: pitch
+                config.yaw_bounds[0]      # 4: yaw
+            ]
+            arm_upper = [
+                config.r_bounds[1],       # 0: r
+                config.theta_bounds[1],   # 1: theta
+                config.phi_bounds[1],     # 2: phi
+                config.pitch_bounds[1],   # 3: pitch
+                config.yaw_bounds[1]      # 4: yaw
+            ]
+
+        # Fix parameters if specified
+        if config.fixed_params is not None and x0 is not None:
+            n_params = 6 if is_cartesian else 5
+            param_start_idx = arm_idx * n_params
+
+            for param_idx in config.fixed_params:
+                if param_idx < len(arm_lower):
+                    # Fix this parameter at its initial value
+                    initial_value = x0[param_start_idx + param_idx]
+                    arm_lower[param_idx] = initial_value
+                    arm_upper[param_idx] = initial_value
+
+        lower.extend(arm_lower)
+        upper.extend(arm_upper)
 
     return Bounds(lower, upper)
 
