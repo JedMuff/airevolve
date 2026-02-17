@@ -8,7 +8,7 @@ from airevolve.evolution_tools.genome_handlers.mounting_points import (
     assign_nearest_mounting_point
 )
 
-import evolution_tools.inspection_tools.utils as u
+import airevolve.evolution_tools.inspection_tools.utils as u
 from airevolve.evolution_tools.inspection_tools.morphological_descriptors.mass import compute_total_mass
 from airevolve.evolution_tools.inspection_tools.morphological_descriptors.centre_of_gravity import centre_of_gravity
 from airevolve.evolution_tools.inspection_tools.morphological_descriptors.inertia import inertia
