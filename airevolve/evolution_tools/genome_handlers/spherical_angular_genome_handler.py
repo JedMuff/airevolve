@@ -251,16 +251,27 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
     def _generate_random_genome(self) -> npt.NDArray[Any]:
         """Generate a single random genome."""
         genome = np.full((self.max_narms, 6), np.nan)
-        
+
         # Determine number of arms for this individual
         num_arms = self.rnd.integers(self.min_narms, self.max_narms + 1)
-        
-        # Generate random parameters for the arms
-        genome[:num_arms, :5] = self.rnd.uniform(
-            low=self.parameter_limits[:5, 0],
-            high=self.parameter_limits[:5, 1],
-            size=(num_arms, 5)
-        )
+
+        # Generate random parameters for the arms (excluding phi)
+        for i in [0, 1, 3, 4]:  # r, theta, pitch, yaw
+            genome[:num_arms, i] = self.rnd.uniform(
+                low=self.parameter_limits[i, 0],
+                high=self.parameter_limits[i, 1],
+                size=num_arms
+            )
+
+        # For phi (index 2), sample to achieve uniform spatial distribution on sphere
+        phi_min, phi_max = self.parameter_limits[2, 0], self.parameter_limits[2, 1]
+        cos_phi_min = np.cos(phi_max)  # Note: cos is decreasing
+        cos_phi_max = np.cos(phi_min)
+
+        # Sample cos(phi) uniformly and convert to phi
+        cos_phi = self.rnd.uniform(low=cos_phi_min, high=cos_phi_max, size=num_arms)
+        genome[:num_arms, 2] = np.arccos(cos_phi)
+
         genome[:num_arms, 5] = self.rnd.integers(0, 2, size=num_arms)
 
         # If symmetry is enabled, apply symmetry to the genome
@@ -314,22 +325,41 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
     def random_population(self, pop_size: int) -> npt.NDArray[Any]:
         """
         Generate a random population as a numpy array (vectorized version).
-        
+
         Args:
             pop_size: Size of the population to generate
-            
+
         Returns:
             Population array of shape (pop_size, max_narms, 6)
         """
         array_shape = (pop_size, self.max_narms, 6)
         population = np.empty(array_shape)
-        
+
         # Generate random arms for all individuals
-        population[:, :, :5] = self.rnd.uniform(
-            low=self.parameter_limits[:5, 0], 
-            high=self.parameter_limits[:5, 1], 
-            size=(pop_size, self.max_narms, 5)
+        # For parameters other than phi (index 2), sample uniformly
+        for i in [0, 1, 3, 4]:  # r, theta, pitch, yaw
+            population[:, :, i] = self.rnd.uniform(
+                low=self.parameter_limits[i, 0],
+                high=self.parameter_limits[i, 1],
+                size=(pop_size, self.max_narms)
+            )
+
+        # For phi (index 2), sample to achieve uniform spatial distribution on sphere
+        # Sample cos(phi) uniformly, then convert back to phi
+        phi_min, phi_max = self.parameter_limits[2, 0], self.parameter_limits[2, 1]
+        cos_phi_min = np.cos(phi_max)  # Note: cos is decreasing, so max phi gives min cos
+        cos_phi_max = np.cos(phi_min)
+
+        # Sample cos(phi) uniformly
+        cos_phi = self.rnd.uniform(
+            low=cos_phi_min,
+            high=cos_phi_max,
+            size=(pop_size, self.max_narms)
         )
+
+        # Convert back to phi
+        population[:, :, 2] = np.arccos(cos_phi)
+
         population[:, :, 5] = self.rnd.integers(0, 2, size=(pop_size, self.max_narms))
         
         if self.symmetry:

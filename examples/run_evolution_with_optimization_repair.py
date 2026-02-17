@@ -135,7 +135,9 @@ def get_genome_handler_config(handler_type):
     """
 
     # Spherical coordinate parameters: [magnitude, arm_rotation, arm_pitch, motor_rotation, motor_pitch, direction]
-    spherical_params = np.array([[0.055,0.105], [-np.pi, np.pi] ,[-2*np.pi/3, 2*np.pi/3], [-np.pi, np.pi], [-np.pi, np.pi], [0,1]])
+    # Spherical parameter limits: [r, theta, phi, pitch, yaw, direction]
+    # phi: [0, π] for full sphere coverage with uniform spatial sampling
+    spherical_params = np.array([[0.055,0.105], [-np.pi, np.pi], [0, np.pi], [-np.pi, np.pi], [-np.pi, np.pi], [0,1]])
 
     if handler_type == 'spherical':
         return {
