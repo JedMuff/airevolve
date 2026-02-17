@@ -62,8 +62,8 @@ except ImportError as e:
 def genome_to_drone_hover_props(
     genome: npt.NDArray[Any],
     coordinate_system: str = 'spherical',
-    propeller_radius: float = 0.0254,  # 2-inch propeller radius in meters
-    cylinder_height: float = 0.3048,
+    propeller_radius: float = 0.0127,  # 1-inch radius (2-inch diameter propellers)
+    cylinder_height: float = None,  # Will default to 8 * propeller_radius
     default_propsize: int = 2
 ) -> List[Dict[str, Any]]:
     """
@@ -84,17 +84,21 @@ def genome_to_drone_hover_props(
     coordinate_system : str
         'spherical' or 'cartesian'
     propeller_radius : float
-        Radius of propeller (default: 0.0254m = 1 inch, for 2-inch diameter propellers)
-    cylinder_height : float
-        Height of motor cylinder (default: 0.3048m = 12 inches)
+        Radius of propeller (default: 0.0127m = 1 inch radius, 2-inch diameter propellers)
+    cylinder_height : float, optional
+        Height of motor cylinder (default: 8 * propeller_radius = swept area)
     default_propsize : int
-        Default propeller size (default: 2)
+        Default propeller size (default: 2 for 2-inch diameter)
 
     Returns:
     --------
     props : list of dicts
         List of propeller configurations in drone-hover format
     """
+    # Set default cylinder height to 8 * propeller_radius if not provided
+    if cylinder_height is None:
+        cylinder_height = 8 * propeller_radius
+
     # Filter out NaN arms
     valid_arms = ~np.isnan(genome).any(axis=-1)
     if not np.any(valid_arms):
@@ -344,6 +348,9 @@ def stage2_hover_check(
     try:
         if verbose:
             print("  Stage 2: Hover Check...")
+            # Debug: Print individual info
+            print(f"    Individual shape: {individual.shape}")
+            print(f"    Valid arms: {(~np.isnan(individual).any(axis=-1)).sum()}")
 
         # Lazy import to avoid module-level import issues
         from airevolve.evolution_tools.inspection_tools.morphological_descriptors.hovering_info import get_sim
@@ -377,11 +384,23 @@ def stage2_hover_check(
         else:
             if verbose:
                 print("  ✗ Stage 2: Failed (cannot hover)")
+                # Debug: Print why it failed
+                print(f"    static_success: {sim.static_success}")
+                print(f"    spinning_success: {sim.spinning_success}")
+                print(f"    allow_spinning: {allow_spinning}")
+                # Check if hover solution exists
+                if hasattr(sim, 'eta') and sim.eta is not None:
+                    print(f"    eta (motor thrusts): {sim.eta}")
+                    print(f"    eta min/max: {sim.eta.min():.4f} / {sim.eta.max():.4f}")
+                if hasattr(sim, 'residual'):
+                    print(f"    residual: {sim.residual}")
             return False, "Failed at Stage 2: Hover Check (cannot hover)"
 
     except Exception as e:
         if verbose:
             print(f"  ✗ Stage 2: Failed with exception: {e}")
+            import traceback
+            traceback.print_exc()
         return False, f"Failed at Stage 2: Hover Check (exception: {e})"
 
 
@@ -417,26 +436,27 @@ def stage3_hover_repair(
         if verbose:
             print("  Stage 3: Hover Repair...")
 
-        # Convert genome to props
-        props = genome_to_drone_hover_props(individual, coordinate_system)
+        # Use the same get_sim() function as Stage 2 to ensure consistency
+        from airevolve.evolution_tools.inspection_tools.morphological_descriptors.hovering_info import get_sim
 
-        if len(props) == 0:
+        sim = get_sim(individual)
+
+        if sim is None:
             if verbose:
-                print("  ✗ Stage 3: Failed (no valid props)")
-            return None, "Failed at Stage 3: Hover Repair (no valid props)"
-
-        # Create drone
-        drone = Custombody(props)
+                print("  ✗ Stage 3: Failed (could not create simulator)")
+            return None, "Failed at Stage 3: Hover Repair (could not create simulator)"
 
         # Apply hover repair
         # Reimplementation of hover_repair() from drone-hover/examples/hover_repair.py
-        sim = Hover(drone)
         sim.compute_hover(verbose=False)
 
         if not sim.static_success:
             if verbose:
                 print("  ✗ Stage 3: Failed (hover repair requires hoverable drone)")
             return None, "Failed at Stage 3: Hover Repair (drone cannot hover)"
+
+        # Get the drone from sim
+        drone = sim.drone
 
         # Get thrust direction
         f = sim.Bf @ sim.eta
@@ -530,6 +550,9 @@ def repair_operation_process(
         if verbose:
             print(f"✗ Repair failed: {msg}\n")
         return nan_individual, msg
+
+    if verbose:
+        print(f"  Post-Stage 1 genome:\n{repaired}")
 
     # Stage 2: Hover Check
     can_hover, msg = stage2_hover_check(repaired, verbose, allow_spinning_hover)
