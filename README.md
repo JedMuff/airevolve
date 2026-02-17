@@ -17,6 +17,20 @@ cd airevolve
 pip install -e .
 ```
 
+### Additional dependency: dronehover
+
+AirEvolve requires the `dronehover` package for hover feasibility checks and motor thrust computation. This package is not on PyPI and must be installed manually:
+
+```bash
+pip install git+<dronehover-repo-url>
+```
+
+For trimesh-based 3D visualisation, install the optional extra:
+
+```bash
+pip install -e ".[vis]"
+```
+
 ## Quick Start
 
 Run a complete evolution experiment:
