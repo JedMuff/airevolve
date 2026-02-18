@@ -188,34 +188,47 @@ class DroneGateEnv(VecEnv):
         self.num_motors = num_motors
     
     def _convert_individual_to_propellers(self, individual):
-        """Convert legacy individual array to propeller configuration."""
+        """
+        Convert legacy individual array to propeller configuration.
+
+        Uses the same NED coordinate conventions as get_sim() in hovering_info.py:
+        - Position: spherical → ENU cartesian → NED via (x,y,z) → (y,x,-z)
+        - Thrust: orientation_to_unit_vector(0, pitch, yaw) with internal ENU→NED transform
+        """
         # Remove NaN rows
         valid_rows = ~np.isnan(individual).any(axis=1)
         individual_clean = individual[valid_rows]
-        
+
         propellers = []
         for row in individual_clean:
             magnitude, arm_yaw, arm_pitch, mot_yaw, mot_pitch, direction = row
-            
-            # Convert spherical to Cartesian coordinates
-            x = magnitude * np.cos(arm_pitch) * np.cos(arm_yaw)
-            y = magnitude * np.cos(arm_pitch) * np.sin(arm_yaw)
-            z = magnitude * np.sin(arm_pitch)
-            
-            # Motor orientation from angles (simplified - assume mostly downward thrust)
-            thrust_x = np.sin(mot_pitch) * np.cos(mot_yaw)
-            thrust_y = np.sin(mot_pitch) * np.sin(mot_yaw)
-            thrust_z = -np.cos(mot_pitch)  # Mostly downward
-            
+
+            # Position: spherical to ENU cartesian
+            enu_x = magnitude * np.cos(arm_pitch) * np.cos(arm_yaw)
+            enu_y = magnitude * np.cos(arm_pitch) * np.sin(arm_yaw)
+            enu_z = magnitude * np.sin(arm_pitch)
+
+            # ENU to NED: (x, y, z) → (y, x, -z)
+            x, y, z = enu_y, enu_x, -enu_z
+
+            # Thrust direction in NED frame
+            # Matches orientation_to_unit_vector(0, mot_pitch, mot_yaw) from hovering_info.py:
+            #   R = ENU_to_NED @ euler_R(0, pitch, yaw); thrust = R @ [0, 0, -1]
+            sp, cp = np.sin(mot_pitch), np.cos(mot_pitch)
+            sy, cy = np.sin(mot_yaw), np.cos(mot_yaw)
+            thrust_x = -sy * sp
+            thrust_y = -cy * sp
+            thrust_z = cp
+
             # Rotation direction
             rotation = "cw" if direction > 0.5 else "ccw"
-            
+
             propellers.append({
                 "loc": [x, y, z],
                 "dir": [thrust_x, thrust_y, thrust_z, rotation],
                 "propsize": 2  # Default prop size
             })
-        
+
         return propellers
     
     def reset_seed(self):
