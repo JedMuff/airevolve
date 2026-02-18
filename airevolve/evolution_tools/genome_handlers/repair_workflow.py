@@ -177,74 +177,83 @@ def drone_hover_props_to_genome(
         else:
             return np.array([])
 
-    # Extract positions and directions
-    positions = []
-    thrust_directions = []
+    # Extract positions and directions (in NED frame from drone-hover)
+    positions_ned = []
+    thrust_dirs_ned = []
     rotations = []
 
     for prop in props:
-        positions.append(prop["loc"])
-        thrust_directions.append(prop["dir"][:3])  # x, y, z components
+        positions_ned.append(prop["loc"])
+        thrust_dirs_ned.append(prop["dir"][:3])  # x, y, z components
         rotations.append(0.0 if prop["dir"][3] == "ccw" else 1.0)
 
-    positions = np.array(positions)
-    thrust_directions = np.array(thrust_directions)
+    positions_ned = np.array(positions_ned)
+    thrust_dirs_ned = np.array(thrust_dirs_ned)
     rotations = np.array(rotations)
-
-    # Compute orientations from thrust directions
-    # The thrust direction is the z-axis of the motor orientation
-    # We need to compute the full orientation quaternion
-    from scipy.spatial.transform import Rotation
-
-    quaternions = []
-    for thrust_dir in thrust_directions:
-        # Normalize thrust direction
-        thrust_dir = thrust_dir / np.linalg.norm(thrust_dir)
-
-        # Default z-axis
-        default_z = np.array([0, 0, 1])
-
-        # If thrust direction is already aligned with z-axis, use identity rotation
-        if np.allclose(thrust_dir, default_z):
-            quat = np.array([1, 0, 0, 0])  # [w, x, y, z]
-        elif np.allclose(thrust_dir, -default_z):
-            # 180 degree rotation around x-axis
-            quat = np.array([0, 1, 0, 0])
-        else:
-            # Compute rotation that aligns default z with thrust direction
-            rotation_axis = np.cross(default_z, thrust_dir)
-            rotation_axis = rotation_axis / np.linalg.norm(rotation_axis)
-            rotation_angle = np.arccos(np.clip(np.dot(default_z, thrust_dir), -1, 1))
-
-            # Create rotation using axis-angle
-            rot = Rotation.from_rotvec(rotation_angle * rotation_axis)
-            quat = rot.as_quat()  # [x, y, z, w] in scipy
-            quat = np.array([quat[3], quat[0], quat[1], quat[2]])  # Convert to [w, x, y, z]
-
-        quaternions.append(quat)
-
-    quaternions = np.array(quaternions)
 
     # Convert to genome format based on coordinate system
     if coordinate_system == 'spherical':
-        from airevolve.evolution_tools.genome_handlers.conversions.arm_conversions import (
-            cartesian_positions_and_quaternions_to_spherical_angular_arms
-        )
-        genome_without_dir = cartesian_positions_and_quaternions_to_spherical_angular_arms(
-            positions, quaternions
-        )
+        # Props are in NED frame (from get_sim's ENU_to_NED conversion).
+        # We must invert the conversions in get_sim/hovering_info.py:
+        #   Position: ENU = convert_to_cartesian(mag, arm_yaw, arm_pitch)
+        #             NED = ENU_to_NED(ENU) = (ENU_y, ENU_x, -ENU_z)
+        #   Direction: NED = orientation_to_unit_vector(0, mot_pitch, mot_yaw)
+        #            = ENU_to_NED @ euler_R(0, pitch, yaw) @ [0, 0, -1]
+
+        # --- Arm positions: NED -> (mag, arm_yaw, arm_pitch) ---
+        # NED_to_ENU: (ned_x, ned_y, ned_z) -> (ned_y, ned_x, -ned_z)
+        enu_x = positions_ned[:, 1]
+        enu_y = positions_ned[:, 0]
+        enu_z = -positions_ned[:, 2]
+
+        mag = np.sqrt(enu_x**2 + enu_y**2 + enu_z**2)
+        arm_yaw = np.arctan2(enu_y, enu_x)
+        # convert_to_cartesian uses: z = mag * sin(pitch), so pitch = arcsin(z/mag)
+        arm_pitch = np.where(mag > 0, np.arcsin(np.clip(enu_z / mag, -1, 1)), 0.0)
+
+        # --- Motor orientation: NED direction -> (mot_yaw, mot_pitch) ---
+        # orientation_to_unit_vector(0, p, y) produces NED direction:
+        #   [-sin(p)*sin(y), -sin(p)*cos(y), cos(p)]
+        # Inversion: mot_pitch = arccos(ned_z), mot_yaw = arctan2(-ned_x, -ned_y)
+        dirs_norm = np.linalg.norm(thrust_dirs_ned, axis=1, keepdims=True)
+        dirs_norm = np.where(dirs_norm > 0, dirs_norm, 1.0)
+        dirs_normalized = thrust_dirs_ned / dirs_norm
+        mot_pitch = np.arccos(np.clip(dirs_normalized[:, 2], -1, 1))
+        mot_yaw = np.arctan2(-dirs_normalized[:, 0], -dirs_normalized[:, 1])
+
+        # Genome columns: [mag, arm_yaw, arm_pitch, mot_yaw, mot_pitch, direction]
+        genome = np.column_stack([mag, arm_yaw, arm_pitch, mot_yaw, mot_pitch, rotations])
+
     elif coordinate_system == 'cartesian':
+        from scipy.spatial.transform import Rotation as ScipyRotation
+
+        quaternions = []
+        for thrust_dir in thrust_dirs_ned:
+            thrust_dir = thrust_dir / np.linalg.norm(thrust_dir)
+            default_z = np.array([0, 0, 1])
+            if np.allclose(thrust_dir, default_z):
+                quat = np.array([1, 0, 0, 0])
+            elif np.allclose(thrust_dir, -default_z):
+                quat = np.array([0, 1, 0, 0])
+            else:
+                rotation_axis = np.cross(default_z, thrust_dir)
+                rotation_axis = rotation_axis / np.linalg.norm(rotation_axis)
+                rotation_angle = np.arccos(np.clip(np.dot(default_z, thrust_dir), -1, 1))
+                rot = ScipyRotation.from_rotvec(rotation_angle * rotation_axis)
+                quat = rot.as_quat()
+                quat = np.array([quat[3], quat[0], quat[1], quat[2]])
+            quaternions.append(quat)
+        quaternions = np.array(quaternions)
+
         from airevolve.evolution_tools.genome_handlers.conversions.arm_conversions import (
             cartesian_positions_and_quaternions_to_cartesian_euler_arms
         )
         genome_without_dir = cartesian_positions_and_quaternions_to_cartesian_euler_arms(
-            positions, quaternions
+            positions_ned, quaternions
         )
+        genome = np.column_stack([genome_without_dir, rotations])
     else:
         raise ValueError(f"Unknown coordinate system: {coordinate_system}")
-
-    # Add direction column
-    genome = np.column_stack([genome_without_dir, rotations])
 
     # Pad with NaN if necessary
     if original_genome_shape is not None:
