@@ -38,12 +38,12 @@ def parse_arguments():
     # Genome and evolution parameters
     parser.add_argument('--genome-handler', choices=['spherical', 'cartesian'],
                        default='spherical', help='Genome handler to use (default: spherical)')
-    parser.add_argument('--population-size', type=int, default=12,
-                       help='Population size (default: 12)')
+    parser.add_argument('--population-size', type=int, default=30,
+                       help='Population size (default: 30)')
     parser.add_argument('--generations', type=int, default=40,
                        help='Number of generations (default: 40)')
-    parser.add_argument('--num-mutate', type=int, default=12,
-                       help='Number of individuals to mutate per generation (default: 12)')
+    parser.add_argument('--num-mutate', type=int, default=30,
+                       help='Number of individuals to mutate per generation (default: 30)')
     parser.add_argument('--num-crossover', type=int, default=0,
                        help='Number of crossover operations per generation (default: 0)')
     parser.add_argument('--log-dir', default='./.data',
@@ -68,8 +68,8 @@ def parse_arguments():
                        help='Check hover threshold every N steps (default: 10000)')
 
     # Gate training parameters (Stage 2)
-    parser.add_argument('--gate-timesteps', type=float, default=1e7,
-                       help='Training timesteps for gate stage (default: 1e7)')
+    parser.add_argument('--gate-timesteps', type=float, default=1e8/4,
+                       help='Training timesteps for gate stage (default: 1e8/4)')
     parser.add_argument('--gate-window-size', type=int, default=100,
                        help='Window size for gate progress tracking (default: 100)')
     parser.add_argument('--gate-check-freq', type=int, default=10000,
@@ -85,6 +85,12 @@ def parse_arguments():
     parser.add_argument('--num-workers', type=int, default=1,
                        help='Number of parallel workers for evaluation (default: 1). '
                             'When >1, automatically uses device=cpu for parallel CPU-based PPO.')
+
+    # Morphology parameters
+    parser.add_argument('--min-narms', type=int, default=6,
+                       help='Minimum number of arms (default: 6)')
+    parser.add_argument('--max-narms', type=int, default=6,
+                       help='Maximum number of arms (default: 6)')
 
     return parser.parse_args()
 
@@ -292,7 +298,7 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
 
     return np.array(successful_individuals[:pop_size]) if len(successful_individuals) > 0 else None
 
-def get_genome_handler_config(handler_type):
+def get_genome_handler_config(handler_type, min_narms=6, max_narms=6):
     """
     Get genome handler class and configuration based on type.
 
@@ -305,12 +311,14 @@ def get_genome_handler_config(handler_type):
     # phi: [0, π] for full sphere coverage with uniform spatial sampling
     spherical_params = np.array([[0.055,0.105], [-np.pi, np.pi], [0, np.pi], [-np.pi, np.pi], [-np.pi, np.pi], [0,1]])
 
+    append_arm_chance = 0.0 if min_narms == max_narms else 0.5
+
     if handler_type == 'spherical':
         return {
             'handler_class': SphericalAngularDroneGenomeHandler,
             'handler_kwargs': {
-                'min_max_narms': (4, 4),
-                'append_arm_chance': 0.0,
+                'min_max_narms': (min_narms, max_narms),
+                'append_arm_chance': append_arm_chance,
                 'parameter_limits': spherical_params,
                 'bilateral_plane_for_symmetry': None,  # No symmetry
                 'repair': False  # Disable built-in repair (use external workflow)
@@ -323,8 +331,8 @@ def get_genome_handler_config(handler_type):
         return {
             'handler_class': CartesianEulerDroneGenomeHandler,
             'handler_kwargs': {
-                'min_max_narms': (4, 4),
-                'append_arm_chance': 0.0,
+                'min_max_narms': (min_narms, max_narms),
+                'append_arm_chance': append_arm_chance,
                 'bilateral_plane_for_symmetry': None,  # No symmetry
                 'repair': False  # Disable built-in repair (use external workflow)
             },
@@ -411,7 +419,8 @@ def main():
 
     # Generate automatic experiment name with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    exp_name = f"curriculum_{args.gate_cfg}_{timestamp}"
+    narms_str = f"{args.min_narms}arms" if args.min_narms == args.max_narms else f"{args.min_narms}-{args.max_narms}arms"
+    exp_name = f"curriculum_{args.gate_cfg}_{narms_str}_{timestamp}"
 
     # Create full log directory path
     full_log_dir = os.path.join(args.log_dir, exp_name)
@@ -430,6 +439,7 @@ def main():
     print(f"Crossovers per generation: {args.num_crossover}")
     print(f"Strategy type: {args.strategy_type}")
     print(f"Gate configuration: {args.gate_cfg}")
+    print(f"Number of arms: {args.min_narms}-{args.max_narms}")
     print(f"Device: {args.device}")
     print(f"Parallel workers: {args.num_workers}")
     print()
@@ -457,7 +467,7 @@ def main():
         args.device = 'cpu'
 
     # Get genome handler configuration
-    config = get_genome_handler_config(args.genome_handler)
+    config = get_genome_handler_config(args.genome_handler, args.min_narms, args.max_narms)
 
     # Create fitness function
     fitness_function = create_fitness_function(args)
