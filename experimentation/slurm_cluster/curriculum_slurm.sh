@@ -47,6 +47,13 @@ fi
 
 echo "Arm configuration: ${NARMS} arms"
 
+# --- Set up temporary and final output directories ---
+TMP_DIR="/tmp/curriculum_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
+FINAL_DIR="/scratch/jed/airevolve_data_180226"
+
+mkdir -p "$TMP_DIR"
+echo "Temporary data directory: $TMP_DIR"
+
 # --- Run Evolution with Curriculum ---
 cd "$PROJECT_DIR"
 
@@ -54,7 +61,13 @@ srun python3 examples/run_evolution_with_curriculum.py \
     --num-workers 32 \
     --min-narms $NARMS \
     --max-narms $NARMS \
-    --log-dir ./logs/curriculum_runs
+    --log-dir "$TMP_DIR/curriculum_runs"
+
+# --- Move results to scratch ---
+echo "Moving results from $TMP_DIR to $FINAL_DIR ..."
+mkdir -p "$FINAL_DIR"
+mv "$TMP_DIR" "$FINAL_DIR/curriculum_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
+echo "Results saved to $FINAL_DIR/curriculum_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 
 echo "Task $SLURM_ARRAY_TASK_ID finished at: $(date)"
 echo "done"
