@@ -3,9 +3,9 @@ import stable_baselines3
 import sys
 import numpy as np
 
-# set device
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-torch.set_default_device(device)
+# Device is managed per-instance, not globally.
+# Do NOT call torch.set_default_device() here — it is a global side effect
+# that interferes with explicit device='cpu' passed to PPO/environments.
 
 # Efficient vectorized version of the environment
 from gymnasium import spaces
