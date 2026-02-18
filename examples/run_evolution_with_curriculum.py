@@ -68,7 +68,7 @@ def parse_arguments():
                        help='Check hover threshold every N steps (default: 10000)')
 
     # Gate training parameters (Stage 2)
-    parser.add_argument('--gate-timesteps', type=float, default=1e6,
+    parser.add_argument('--gate-timesteps', type=float, default=1e7,
                        help='Training timesteps for gate stage (default: 1e7)')
     parser.add_argument('--gate-window-size', type=int, default=100,
                        help='Window size for gate progress tracking (default: 100)')
@@ -76,12 +76,15 @@ def parse_arguments():
                        help='Check gate progress every N steps (default: 10000)')
 
     # Environment parameters
-    parser.add_argument('--num-envs', type=int, default=2,
-                       help='Number of environments for training (default: 2)')
+    parser.add_argument('--num-envs', type=int, default=100,
+                       help='Number of environments for training (default: 100)')
     parser.add_argument('--gate-cfg', choices=['backandforth', 'figure8', 'circle', 'slalom'],
                        default='figure8', help='Gate configuration (default: figure8)')
     parser.add_argument('--device', default='cuda:0',
                        help='Device for training (default: cuda:0)')
+    parser.add_argument('--num-workers', type=int, default=1,
+                       help='Number of parallel workers for evaluation (default: 1). '
+                            'When >1, automatically uses device=cpu for parallel CPU-based PPO.')
 
     return parser.parse_args()
 
@@ -199,7 +202,7 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
 
     # Prepare arguments for parallel workers
     # We'll sample in batches until we have enough
-    batch_size = pop_size * 100  # Sample 100x population size per batch
+    batch_size = pop_size * 1000  # Sample 100x population size per batch
     max_batches = 100
 
     successful_individuals = []
@@ -334,35 +337,31 @@ def get_genome_handler_config(handler_type):
 
 
 def create_fitness_function(args):
-    """Create fitness function for curriculum learning evaluation."""
-    def fitness_function_wrapper(genome_array, log_dir):
-        """
-        Wrapper function that converts raw genome arrays to the format expected by evaluate_individual_curriculum.
-        """
-        return evaluate_individual_curriculum(
-            genome_array,
-            log_dir,
-            hover_max_timesteps=int(args.hover_max_timesteps),
-            hover_success_threshold=args.hover_success_threshold,
-            gate_timesteps=int(args.gate_timesteps),
-            num_envs=args.num_envs,
-            gate_cfg=args.gate_cfg,
-            device=args.device,
-            hover_window_size=args.hover_window_size,
-            hover_check_freq=args.hover_check_freq,
-            gate_window_size=args.gate_window_size,
-            gate_check_freq=args.gate_check_freq,
-            num=None
-        )
+    """Create fitness function for curriculum learning evaluation.
 
-    return fitness_function_wrapper
+    Uses functools.partial for picklability (required for multiprocessing).
+    """
+    return functools.partial(
+        evaluate_individual_curriculum,
+        hover_max_timesteps=int(args.hover_max_timesteps),
+        hover_success_threshold=args.hover_success_threshold,
+        gate_timesteps=int(args.gate_timesteps),
+        num_envs=args.num_envs,
+        gate_cfg=args.gate_cfg,
+        device=args.device,
+        hover_window_size=args.hover_window_size,
+        hover_check_freq=args.hover_check_freq,
+        gate_window_size=args.gate_window_size,
+        gate_check_freq=args.gate_check_freq,
+        num=None
+    )
 
 def create_genome_handler_wrapper(handler_class, handler_kwargs):
     """Create a wrapper class that provides the correct constructor interface."""
     class GenomeHandlerWrapper(handler_class):
-        def __init__(self, *_args, **_kwargs):
-            # Ignore args/kwargs from evolution function and use our configured parameters
-            super().__init__(**handler_kwargs)
+        def __init__(self, *_args, genome=None, **_kwargs):
+            # Use our configured parameters, but pass through the genome if provided
+            super().__init__(genome=genome, **handler_kwargs)
 
     return GenomeHandlerWrapper
 
@@ -432,6 +431,7 @@ def main():
     print(f"Strategy type: {args.strategy_type}")
     print(f"Gate configuration: {args.gate_cfg}")
     print(f"Device: {args.device}")
+    print(f"Parallel workers: {args.num_workers}")
     print()
     print("CURRICULUM LEARNING PARAMETERS:")
     print(f"  Stage 1 (Hover):")
@@ -451,6 +451,11 @@ def main():
     print("=" * 80)
     print()
 
+    # Switch to CPU when using parallel workers
+    if args.num_workers > 1 and args.device != 'cpu':
+        print(f"Parallel mode: switching device to 'cpu' for {args.num_workers} workers")
+        args.device = 'cpu'
+
     # Get genome handler configuration
     config = get_genome_handler_config(args.genome_handler)
 
@@ -469,7 +474,7 @@ def main():
         args.population_size,
         coordinate_system=config['coordinate_system'],
         verbose=args.repair_verbose,
-        num_workers=None  # Use all CPUs
+        num_workers=32  # Use all CPUs
     )
 
     if initial_population is None or len(initial_population) == 0:
@@ -492,6 +497,7 @@ def main():
         genome_handler=WrappedHandler,
         log_dir=full_log_dir,
         initial_population=initial_population,
+        num_workers=args.num_workers,
     )
 
     # Save complete evolution data as CSV
