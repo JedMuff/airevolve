@@ -71,7 +71,7 @@ def debug_repair(genome_handler: CartesianEulerDroneGenomeHandler,
     visualizer = DroneVisualizer(config)
     
     # Step 1: Initial genome
-    initial_cylinders = arms_to_cylinders(genome, 0.0762, 0.3048)
+    initial_cylinders = arms_to_cylinders(genome, 0.0254, 0.3048)
     
     # Unapply symmetry if it was applied
     symmetry_axis = None
@@ -87,7 +87,7 @@ def debug_repair(genome_handler: CartesianEulerDroneGenomeHandler,
         print(f"Using symmetry axis: {symmetry_axis}")
     
     # Step 2: After unapplying symmetry
-    symmetry_cylinders = arms_to_cylinders(result, 0.0762, 0.3048)
+    symmetry_cylinders = arms_to_cylinders(result, 0.0254, 0.3048)
     # fig1, axes1 = compare_cylinder_arrangements(
     #     [initial_cylinders, symmetry_cylinders],
     #     labels=["Initial Genome", "After Unapplying Symmetry"],
@@ -100,7 +100,7 @@ def debug_repair(genome_handler: CartesianEulerDroneGenomeHandler,
     # Step 4: Clip parameters to bounds
     result = genome_handler.repair_operator._clip_parameters(result)
     genome_handler.genome = result.copy()
-    clipped_cylinders = arms_to_cylinders(result, 0.0762, 0.3048)
+    clipped_cylinders = arms_to_cylinders(result, 0.0254, 0.3048)
     
     # fig3, axes3 = compare_cylinder_arrangements(
     #     [symmetry_cylinders, clipped_cylinders],
@@ -128,7 +128,7 @@ def debug_repair(genome_handler: CartesianEulerDroneGenomeHandler,
             visualizer=visualizer
         )
 
-    repaired_cylinders = arms_to_cylinders(result, 0.0762, 0.3048)
+    repaired_cylinders = arms_to_cylinders(result, 0.0254, 0.3048)
     # fig4, axes4 = compare_cylinder_arrangements(
     #     [clipped_cylinders, repaired_cylinders],
     #     labels=["Before Collision Repair", "After Collision Repair"],
@@ -156,7 +156,7 @@ def debug_repair(genome_handler: CartesianEulerDroneGenomeHandler,
             visualizer=visualizer
         )
     
-    final_cylinders = arms_to_cylinders(result, 0.0762, 0.3048)
+    final_cylinders = arms_to_cylinders(result, 0.0254, 0.3048)
     # fig5, axes5 = compare_cylinder_arrangements(
     #     [repaired_cylinders, final_cylinders],
     #     labels=["Before Symmetry", "After Restoring Symmetry"],
@@ -328,7 +328,7 @@ if __name__ == "__main__":
             # bilateral_plane_for_symmetry="xz",  # YZ plane symmetry
             repair=False,
             enable_collision_repair=False,
-            propeller_radius=0.0762,
+            propeller_radius=0.0254,
             inner_boundary_radius=0.09,
             outer_boundary_radius=0.4,
             append_arm_chance=0.0,  # No appending for this test
@@ -352,7 +352,7 @@ if __name__ == "__main__":
             # bilateral_plane_for_symmetry="xz",  # YZ plane symmetry
             repair=True,
             enable_collision_repair=True,
-            propeller_radius=0.0762,
+            propeller_radius=0.0254,
             inner_boundary_radius=0.09,
             outer_boundary_radius=0.4,
             append_arm_chance=0.0,  # No appending for this test

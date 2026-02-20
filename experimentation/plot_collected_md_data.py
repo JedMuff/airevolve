@@ -315,7 +315,7 @@ def plot_metrics_vs_fitness(all_data, save_dir=None):
             plt.show()
 
 def represent_morphology_3d(ax, individual, elev=30, azim=30, fitness=None, generation=None,
-                            circle_radius=0.0762, axis_labels=True, show_axis=True, show_axis_ticks=True, fontsize=10,
+                            circle_radius=0.0254, axis_labels=True, show_axis=True, show_axis_ticks=True, fontsize=10,
                             include_motor_orientation=True):
     """
     Plot axes at given positions with specified rotations and draw lines from each point to the origin.

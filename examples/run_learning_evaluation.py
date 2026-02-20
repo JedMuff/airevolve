@@ -125,10 +125,10 @@ def main():
     
     # Example: Use a simple quadcopter design (4 motors in X configuration)
     example_individual = np.array([
-        [0.25,  np.pi/4,   0.0,  0.0,  0.0,  1.0],  # Front-right motor (CW)
-        [0.25, -np.pi/4,   0.0,  0.0,  0.0,  0.0],  # Front-left motor (CCW)
-        [0.25,  3*np.pi/4, 0.0,  0.0,  0.0,  0.0],  # Back-left motor (CCW)  
-        [0.25, -3*np.pi/4, 0.0,  0.0,  0.0,  1.0],  # Back-right motor (CW)
+        [0.06,  np.pi/4,   0.0,  0.0,  0.0,  1.0],  # Front-right motor (CW)
+        [0.06, -np.pi/4,   0.0,  0.0,  0.0,  0.0],  # Front-left motor (CCW)
+        [0.06,  3*np.pi/4, 0.0,  0.0,  0.0,  0.0],  # Back-left motor (CCW)  
+        [0.06, -3*np.pi/4, 0.0,  0.0,  0.0,  1.0],  # Back-right motor (CW)
         [np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],  # Unused
         [np.nan, np.nan, np.nan, np.nan, np.nan, np.nan]   # Unused
     ])
@@ -139,7 +139,7 @@ def main():
         task='figure8',
         output_dir='simple_evaluation',
         timesteps=int(1e8),  # Much smaller for debugging
-        num_envs=1,          # Single environment for debugging
+        num_envs=100,          # Single environment for debugging
         create_videos=True   # Enable video creation after training
     )
     

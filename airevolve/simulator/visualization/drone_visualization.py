@@ -191,7 +191,7 @@ def group(mesh_list):
     ])
     return Mesh(vertices, edges)
 
-def create_drone(propellers, box_size=[0.2,0.2,0.2], prop_radius=0.08, scale=0.5, motor_colors=None):
+def create_drone(propellers, box_size=[0.2,0.2,0.2], prop_radius=0.0254, scale=0.5, motor_colors=None):
     """
     Create a complete drone mesh from propeller configuration.
     

@@ -29,7 +29,7 @@ ZOOM_FACTOR = 1.05
 GATE_SIZE = 1.5
 GRID_SIZE = 20
 DRONE_BOX_SIZE = [0.1, 0.1, 0.1]
-PROP_RADIUS = 0.06
+PROP_RADIUS = 0.0254  # 2-inch propeller radius in meters
 PATH_SUBSAMPLE = 5
 
 # Camera constants

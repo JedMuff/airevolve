@@ -127,6 +127,9 @@ cython_debug/
 # macOS
 .DS_Store
 
+# Experiment results
+.data/
+
 # Claude Code
 .claude/
 

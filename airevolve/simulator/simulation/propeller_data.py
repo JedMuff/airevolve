@@ -11,6 +11,11 @@ import numpy as np
 
 # Propeller library with specifications for different sizes
 PROPELLER_LIBRARY = {
+    "prop2": {
+        "constants": [8.12e-08, 6.40e-10],  # [k_f, k_m] force and moment constants
+        "wmax": 5000,                       # Maximum angular velocity (rad/s)
+        "mass": 0.0046                      # Propeller + motor mass (kg)
+    },
     "prop4": {
         "constants": [7.24e-07, 8.20e-09],  # [k_f, k_m] force and moment constants
         "wmax": 3927,                       # Maximum angular velocity (rad/s)
@@ -47,8 +52,10 @@ PROPELLER_LIBRARY = {
 GRAVITY = 9.81  # m/s^2
 
 # Material properties for mass/inertia calculations
-CONTROLLER_MASS = 0.250  # kg, based on 4S 2200mAh LiPo + flight controller
-BEAM_DENSITY = 1500 * 0.005 * 0.01  # kg/m, carbon fiber: density * thickness * width
+# Updated to match drone-hover small drone configuration
+CONTROLLER_MASS = 0.0136  # kg, speedybee f405 aio flight controller
+BATTERY_MASS = 0.043  # kg, 3s 450mah lipo battery
+BEAM_DENSITY = 0.034  # kg/m, carbon fiber tube: 8mm outer diameter, 6mm inner diameter
 
 def get_propeller_specs(prop_size):
     """
@@ -95,9 +102,9 @@ def validate_propeller_config(props):
                 raise KeyError(f"'{key}' is missing in propeller {i}")
         
         # Validate propeller size
-        if prop["propsize"] not in [4, 5, 6, 7, 8, "matched"]:
+        if prop["propsize"] not in [2, 4, 5, 6, 7, 8, "matched"]:
             raise ValueError(f"Invalid propeller size {prop['propsize']} in propeller {i}. "
-                           f"Available sizes: [4, 5, 6, 7, 8, 'matched']")
+                           f"Available sizes: [2, 4, 5, 6, 7, 8, 'matched']")
         
         # Validate direction format
         if len(prop["dir"]) != 4:
@@ -111,7 +118,7 @@ def validate_propeller_config(props):
         if len(prop["loc"]) != 3:
             raise ValueError(f"Location must have 3 elements [x, y, z] for propeller {i}")
 
-def create_standard_propeller_config(config_type, arm_length=0.11, prop_size=5):
+def create_standard_propeller_config(config_type, arm_length=0.11, prop_size=2):
     """
     Create standard propeller configurations for common drone types.
     

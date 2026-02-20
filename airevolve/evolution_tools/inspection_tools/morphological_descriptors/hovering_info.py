@@ -1,11 +1,14 @@
 import numpy as np
-import copy 
+import copy
 
 from dronehover.bodies.custom_bodies import Custombody
 from dronehover.optimization import Hover
+from airevolve.evolution_tools.genome_handlers.mounting_points import (
+    generate_disc_mounting_points,
+    assign_nearest_mounting_point
+)
 
-
-import evolution_tools.inspection_tools.utils as u
+import airevolve.evolution_tools.inspection_tools.utils as u
 from airevolve.evolution_tools.inspection_tools.morphological_descriptors.mass import compute_total_mass
 from airevolve.evolution_tools.inspection_tools.morphological_descriptors.centre_of_gravity import centre_of_gravity
 from airevolve.evolution_tools.inspection_tools.morphological_descriptors.inertia import inertia
@@ -57,7 +60,7 @@ def orientation_to_unit_vector(roll, pitch, yaw):
     
     return unit_vector
 
-def get_sim(individual, motor_template = {"propsize": 5}):
+def get_sim(individual, motor_template = {"propsize": 2}):
     # remove rows with nan values
     individual = individual[~np.isnan(individual).any(axis=1)]
 
@@ -65,12 +68,15 @@ def get_sim(individual, motor_template = {"propsize": 5}):
     cg = centre_of_gravity(individual)
     Ix, Iy, Iz, Ixy, Ixz, Iyz = inertia(individual)
 
-    
+
     props = []
+    propeller_positions = []
     mypypd = individual[:,:6] # [mag, arm_yaw, arm_pitch, mot_yaw, mot_pitch, dir]
     for mag, arm_yaw, arm_pitch, mot_yaw, mot_pitch, dir in mypypd:
         global_x,global_y,global_z = u.convert_to_cartesian(mag, arm_yaw, arm_pitch)
         x,y,z = u.ENU_to_NED(global_x,global_y,global_z)
+
+        propeller_positions.append([float(x), float(y), float(z)])
 
         tmp = copy.deepcopy(motor_template)
         tmp.update({"loc": [float(x),float(y),float(z)]})
@@ -84,13 +90,18 @@ def get_sim(individual, motor_template = {"propsize": 5}):
         tmp.update({"dir": [float(unit_vector[0]),float(unit_vector[1]),float(unit_vector[2]), d]})
 
         props.append(tmp)
-    
-    # for p in props:
 
-    #     print(p)
-    drone = Custombody(props, mass, cg, Ix, Iy, Iz, Ixy, Ixz, Iyz)
+    # Generate 8 mounting points on 60mm diameter disc
+    disc_mounting_points = generate_disc_mounting_points(num_points=8, diameter=0.060)
 
-    # Define hovpropsering optimizer for drone
+    # Assign each propeller to nearest mounting point
+    mounting_points = assign_nearest_mounting_point(propeller_positions, disc_mounting_points)
+
+    # Create drone with mounting points
+    # Note: We override mass/inertia calculations since we use our own descriptors
+    drone = Custombody(props, mountpoints=mounting_points, mass=mass, cg=cg, Ix=Ix, Iy=Iy, Iz=Iz, Ixy=Ixy, Ixz=Ixz, Iyz=Iyz)
+
+    # Define hovering optimizer for drone
     try:
         sim = Hover(drone)
     except:

@@ -41,7 +41,7 @@ class DroneSimulator:
         
         # Use default quadrotor if no propellers specified
         if propellers is None:
-            propellers = create_standard_propeller_config("quad", arm_length=0.11, prop_size=5)
+            propellers = create_standard_propeller_config("quad", arm_length=0.11, prop_size=2)
         
         # Create drone configuration and compute physical properties
         self.config = DroneConfiguration(propellers)
@@ -70,7 +70,7 @@ class DroneSimulator:
         self.control_history = []
     
     @classmethod
-    def create_standard_drone(cls, drone_type="quad", arm_length=0.11, prop_size=5, **kwargs):
+    def create_standard_drone(cls, drone_type="quad", arm_length=0.11, prop_size=2, **kwargs):
         """
         Create standard drone configuration.
         
@@ -343,7 +343,7 @@ class DroneSimulator:
 
 
 # Factory functions for easy drone creation
-def create_quadrotor(arm_length=0.11, prop_size=5, **kwargs):
+def create_quadrotor(arm_length=0.11, prop_size=2, **kwargs):
     """Create standard quadrotor configuration."""
     return DroneSimulator.create_standard_drone("quad", arm_length, prop_size, **kwargs)
 

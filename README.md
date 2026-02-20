@@ -17,6 +17,20 @@ cd airevolve
 pip install -e .
 ```
 
+### Additional dependency: dronehover
+
+AirEvolve requires the `dronehover` package for hover feasibility checks and motor thrust computation. This package is not on PyPI and must be installed manually:
+
+```bash
+pip install git+<dronehover-repo-url>
+```
+
+For trimesh-based 3D visualisation, install the optional extra:
+
+```bash
+pip install -e ".[vis]"
+```
+
 ## Quick Start
 
 Run a complete evolution experiment:
@@ -29,9 +43,18 @@ python examples/run_evolution.py --genome-handler spherical --population-size 50
 The `examples/` directory contains several demonstration scripts:
 
 - `run_evolution.py`: Complete evolution pipeline with gate training
+- `run_evolution_with_curriculum.py`: Evolution with curriculum learning
+- `run_evolution_with_optimization_repair.py`: Evolution with optimization-based repair
+- `run_hover_learning.py`: Hover learning for evolved individuals
+- `run_curriculum_learning.py`: Curriculum learning experiment runner
+- `run_learning_evaluation.py`: Evaluate learned policies
 - `genome_visualizer_demo.py`: Visualize drone morphologies
-- `make_video.py`: Create animations of drone behavior
 - `sample_genomes.py`: Generate and analyze random drone designs
+- `make_video.py`: Create animations of drone flight behavior
+- `make_hover_video.py`: Create hover behavior animations
+- `generate_drone_stl_from_genome.py`: Export evolved drone to printable STL/STEP files
+- `optimization_repair_demo.py`: Demonstrate genome repair via optimization
+- `draw_blueprint.py`: Render a blueprint-style top-down view of a drone design
 
 ## Architecture
 
@@ -50,6 +73,10 @@ The `examples/` directory contains several demonstration scripts:
 - **Analysis Tools**: Post-evolution analysis and visualization
   - `inspection_tools/`: Fitness plotting, diversity analysis, morphological descriptors, learning descriptors
   - `behavioural_analysis/`: Trajectory analysis and performance metrics
+
+- **Phenotype Assembly**: Physical fabrication from evolved genomes
+  - Converts a genome into printable STL / editable STEP files
+  - See [`airevolve/phenotype_assembly/README.md`](airevolve/phenotype_assembly/README.md) for full documentation
 
 - **Experimentation Tools**
   - `experimentation/`: Research scripts and data collection tools
@@ -103,3 +130,6 @@ If you use AirEvolve in your research, please cite:
   url={---}
 }
 ```
+
+# TODO
+- Add remaining parts to assembly as optional parameter for full aesthetics: landing legs, battery, control board+stand offs, rasperry pi holder and raspberry pi, motor intermediary part, motors, propellers.

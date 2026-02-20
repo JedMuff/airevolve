@@ -3,9 +3,9 @@ import stable_baselines3
 import sys
 import numpy as np
 
-# set device
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-torch.set_default_device(device)
+# Device is managed per-instance, not globally.
+# Do NOT call torch.set_default_device() here — it is a global side effect
+# that interferes with explicit device='cpu' passed to PPO/environments.
 
 # Efficient vectorized version of the environment
 from gymnasium import spaces
@@ -48,7 +48,7 @@ class DroneGateEnv(VecEnv):
                  gates_ahead=2,
                  pause_if_collision=False,
                  motor_limit=1.0,
-                 initialize_at_random_gates=False,
+                 initialize_at_random_gates=True,
                  num_state_history=0,
                  num_action_history=0,
                  history_step_size=1,
@@ -87,11 +87,14 @@ class DroneGateEnv(VecEnv):
         else:
             # Default quadrotor configuration
             self.drone_sim = DroneSimulator.create_standard_drone("quad", dt=dt)
-        
+
         # Get allocation matrices from the configured simulator
         self.Bf, self.Bm = self.drone_sim.config.get_allocation_matrices()
 
         num_motors = self.drone_sim.num_motors
+
+        # Motor time constant for first-order dynamics
+        self.motor_tau = 0.01
 
         # Define the race track
         self.start_pos = start_pos.astype(np.float32)
@@ -148,7 +151,7 @@ class DroneGateEnv(VecEnv):
         # observation space: pos[G], vel[G], att[eulerB->G], rates[B], rpms, future_gates[G], future_gate_dirs[G]
         # [G] = reference frame aligned with target gate
         # [B] = body frame
-        self.state_len = 12+4*self.gates_ahead+4*self.num_action_history
+        self.state_len = 12+num_motors+4*self.gates_ahead+4*self.num_action_history
         self.obs_len = self.state_len*(1+self.num_state_history)
         observation_space = spaces.Box(
             low  = np.array([-np.inf]*self.obs_len),
@@ -159,7 +162,7 @@ class DroneGateEnv(VecEnv):
         VecEnv.__init__(self, num_envs, observation_space, action_space)
 
         # world state: pos[W], vel[W], att[eulerB->W], rates[B], rpms
-        self.world_states = np.zeros((num_envs,12), dtype=np.float32)
+        self.world_states = np.zeros((num_envs,12+num_motors), dtype=np.float32)
         # observation state
         self.states = np.zeros((num_envs,self.obs_len), dtype=np.float32)
         # state history tracking
@@ -185,34 +188,47 @@ class DroneGateEnv(VecEnv):
         self.num_motors = num_motors
     
     def _convert_individual_to_propellers(self, individual):
-        """Convert legacy individual array to propeller configuration."""
+        """
+        Convert legacy individual array to propeller configuration.
+
+        Uses the same NED coordinate conventions as get_sim() in hovering_info.py:
+        - Position: spherical → ENU cartesian → NED via (x,y,z) → (y,x,-z)
+        - Thrust: orientation_to_unit_vector(0, pitch, yaw) with internal ENU→NED transform
+        """
         # Remove NaN rows
         valid_rows = ~np.isnan(individual).any(axis=1)
         individual_clean = individual[valid_rows]
-        
+
         propellers = []
         for row in individual_clean:
             magnitude, arm_yaw, arm_pitch, mot_yaw, mot_pitch, direction = row
-            
-            # Convert spherical to Cartesian coordinates
-            x = magnitude * np.cos(arm_pitch) * np.cos(arm_yaw)
-            y = magnitude * np.cos(arm_pitch) * np.sin(arm_yaw)
-            z = magnitude * np.sin(arm_pitch)
-            
-            # Motor orientation from angles (simplified - assume mostly downward thrust)
-            thrust_x = np.sin(mot_pitch) * np.cos(mot_yaw)
-            thrust_y = np.sin(mot_pitch) * np.sin(mot_yaw)
-            thrust_z = -np.cos(mot_pitch)  # Mostly downward
-            
+
+            # Position: spherical to ENU cartesian
+            enu_x = magnitude * np.cos(arm_pitch) * np.cos(arm_yaw)
+            enu_y = magnitude * np.cos(arm_pitch) * np.sin(arm_yaw)
+            enu_z = magnitude * np.sin(arm_pitch)
+
+            # ENU to NED: (x, y, z) → (y, x, -z)
+            x, y, z = enu_y, enu_x, -enu_z
+
+            # Thrust direction in NED frame
+            # Matches orientation_to_unit_vector(0, mot_pitch, mot_yaw) from hovering_info.py:
+            #   R = ENU_to_NED @ euler_R(0, pitch, yaw); thrust = R @ [0, 0, -1]
+            sp, cp = np.sin(mot_pitch), np.cos(mot_pitch)
+            sy, cy = np.sin(mot_yaw), np.cos(mot_yaw)
+            thrust_x = -sy * sp
+            thrust_y = -cy * sp
+            thrust_z = cp
+
             # Rotation direction
             rotation = "cw" if direction > 0.5 else "ccw"
-            
+
             propellers.append({
                 "loc": [x, y, z],
                 "dir": [thrust_x, thrust_y, thrust_z, rotation],
-                "propsize": 5  # Default prop size
+                "propsize": 2  # Default prop size
             })
-        
+
         return propellers
     
     def reset_seed(self):
@@ -257,21 +273,24 @@ class DroneGateEnv(VecEnv):
         # Update rates
         new_states[:,9:12] = self.world_states[:,9:12]
 
+        # Update rpms
+        new_states[:,12:12+self.num_motors] = self.world_states[:,12:12+self.num_motors]
+
         # Update future gates relative to current gate
         for i in range(self.gates_ahead):
             indices = (self.target_gates+i+1)
             # loop when out of bounds
             indices = indices % self.num_gates
             valid = indices < self.num_gates
-            new_states[valid,12+4*i:12+4*i+3] = self.gate_pos_rel[indices[valid]]
-            new_states[valid,12+4*i+3] = self.gate_yaw_rel[indices[valid]]
+            new_states[valid,12+self.num_motors+4*i:12+self.num_motors+4*i+3] = self.gate_pos_rel[indices[valid]]
+            new_states[valid,12+self.num_motors+4*i+3] = self.gate_yaw_rel[indices[valid]]
 
         # update action history
         self.action_hist = np.roll(self.action_hist, 1, axis=1)
         self.action_hist[:,0] = self.actions
-        
+
         for i in range(self.num_action_history):
-            new_states[:,12+4*self.gates_ahead+4*i:12+4*self.gates_ahead+4*i+4] = self.action_hist[:,(i+1)*self.history_step_size-1]
+            new_states[:,12+self.num_motors+4*self.gates_ahead+4*i:12+self.num_motors+4*self.gates_ahead+4*i+4] = self.action_hist[:,(i+1)*self.history_step_size-1]
         
         # update state history
         self.state_hist = np.roll(self.state_hist, 1, axis=1)
@@ -308,6 +327,8 @@ class DroneGateEnv(VecEnv):
             q0 = np.random.uniform(-0.1,0.1, size=(num_reset,))
             r0 = np.random.uniform(-0.1,0.1, size=(num_reset,))
 
+            w0 = np.random.uniform(0,1, size=(num_reset,self.num_motors))
+
         else: # always start at the first gate, fixed orientation
             # set target gates to 0
             self.target_gates[dones] = np.zeros(num_reset, dtype=int)
@@ -328,7 +349,14 @@ class DroneGateEnv(VecEnv):
             q0 = np.zeros((num_reset,))
             r0 = np.zeros((num_reset,))
 
-        self.world_states[dones] = np.stack([x0, y0, z0, vx0, vy0, vz0, phi0, theta0, psi0, p0, q0, r0], axis=1)
+            w0 = np.zeros((num_reset,self.num_motors))
+
+        w0 = np.hsplit(w0, self.num_motors)
+
+        state_vars = [x0, y0, z0, vx0, vy0, vz0, phi0, theta0, psi0, p0, q0, r0]
+        state_vars = [var.reshape(num_reset, 1) for var in state_vars]
+
+        self.world_states[dones] = np.concatenate(state_vars + list(w0), axis=1)
         self.step_counts[dones] = np.zeros(num_reset)
         
         # update states
@@ -345,9 +373,29 @@ class DroneGateEnv(VecEnv):
     def step_wait(self):
         # Convert actions from [-1,1] to [0,1] range for motor commands
         motor_commands = np.clip((self.actions + 1) / 2, 0, 1)
-        
-        # Use the new simulator's dynamics function
-        new_states = self.world_states + self.dt * self.drone_sim.dynamics_func(self.world_states.T, motor_commands.T).T
+
+        # Extract base state (12D) and motor RPMs (normalized, not actual RPM)
+        base_state = self.world_states[:, 0:12]
+        motor_rpms = self.world_states[:, 12:12+self.num_motors]
+
+        # Motor RPMs represent normalized motor speeds w in [0,1]
+        # The actual control input to the dynamics is w^2
+        motor_thrust_inputs = motor_rpms**2
+
+        # Compute base state dynamics using the simulator (expects U = w^2)
+        base_state_dot = self.drone_sim.dynamics_func(base_state.T, motor_thrust_inputs.T).T
+
+        # Compute motor dynamics: dw/dt = (sqrt(U_cmd) - w) / tau
+        # where U_cmd is the commanded motor power in [0,1]
+        motor_command_rpm = np.sqrt(motor_commands)  # Target normalized RPM sqrt(U)
+        motor_rpm_dot = (motor_command_rpm - motor_rpms) / self.motor_tau
+
+        # Euler integration
+        new_base_state = base_state + self.dt * base_state_dot
+        new_motor_rpms = motor_rpms + self.dt * motor_rpm_dot
+
+        # Combine back into full state
+        new_states = np.concatenate([new_base_state, new_motor_rpms], axis=1)
 
         self.step_counts += 1
 
@@ -371,16 +419,19 @@ class DroneGateEnv(VecEnv):
         pos_old_projected = (pos_old[:,0]-pos_gate[:,0])*normal[:,0] + (pos_old[:,1]-pos_gate[:,1])*normal[:,1]
         pos_new_projected = (pos_new[:,0]-pos_gate[:,0])*normal[:,0] + (pos_new[:,1]-pos_gate[:,1])*normal[:,1]
         passed_gate_plane = (pos_old_projected < 0) & (pos_new_projected > 0)
-        gate_size = 2.0
+        gate_size = 1.5
         gate_passed = passed_gate_plane & np.all(np.abs(pos_new - pos_gate)<gate_size/2, axis=1)
-        
+
+        # Add substantial reward for passing through gates
+        rewards[gate_passed] += 10.0
+
         # Check out of bounds
         x_bounds_broken = np.logical_or(new_states[:,0] < self.x_bounds[0], new_states[:,0] > self.x_bounds[1])
         y_bounds_broken = np.logical_or(new_states[:,1] < self.y_bounds[0], new_states[:,1] > self.y_bounds[1])
         z_bounds_broken = np.logical_or(new_states[:,2] < self.z_bounds[0], new_states[:,2] > self.z_bounds[1])
         out_of_bounds = x_bounds_broken | y_bounds_broken | z_bounds_broken
 
-        rewards[out_of_bounds] = -10
+        rewards[out_of_bounds] = -20
         
         # Check number of steps
         max_steps_reached = self.step_counts >= self.max_steps
@@ -391,11 +442,14 @@ class DroneGateEnv(VecEnv):
 
         # Track number of gates passed
         self.num_gates_passed[gate_passed] += 1
-        
+
         # Check if the episode is done
         dones = max_steps_reached | out_of_bounds
         self.dones = dones
-        
+
+        # Save gates passed before reset (for info dict)
+        gates_passed_before_reset = self.num_gates_passed.copy()
+
         # Pause if collision
         if self.pause:
             dones = dones & ~dones
@@ -421,7 +475,7 @@ class DroneGateEnv(VecEnv):
             # extra info for debugging
             infos[i]["out_of_bounds"] = out_of_bounds[i]
             infos[i]["gate_passed"] = gate_passed[i]
-            infos[i]["num_gates_passed"] = self.num_gates_passed
+            infos[i]["num_gates_passed"] = gates_passed_before_reset
             
         return self.states, rewards, dones, infos
     
@@ -444,8 +498,20 @@ class DroneGateEnv(VecEnv):
         return [False]*self.num_envs
 
     def render(self, mode='human'):
-        # Outputs a dict containing all information for rendering
-        state_dict = dict(zip(['x','y','z','vx','vy','vz','phi','theta','psi','p','q','r'], self.world_states.T))
+        # Define base state variable names
+        state_keys = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'phi', 'theta', 'psi', 'p', 'q', 'r']
+
+        # Dynamically create RPM keys based on the number of motors
+        rpm_keys = [f'w{i+1}' for i in range(self.num_motors)]
+
+        # Combine all keys
+        state_keys += rpm_keys
+
+        # Convert `self.world_states.T` into a dictionary
+        state_dict = dict(zip(state_keys, self.world_states.T))
+
         # Rescale actions to [0,1] for rendering
-        action_dict = dict(zip([f'u{i}' for i in range(1,self.num_motors+1)], (np.array(self.actions.T)+1)/2))
+        action_keys = [f'u{i+1}' for i in range(self.num_motors)]
+        action_dict = dict(zip(action_keys, (np.array(self.actions.T) + 1) / 2))
+
         return {**state_dict, **action_dict}

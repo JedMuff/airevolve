@@ -23,6 +23,7 @@ def evolve(
     log_dir: str = "./logs",
     genome_handler: Optional[object] = GenomeHandler,
     verbose: bool = True,
+    num_workers: int = 1,
 ):
     assert strategy_type in ['plus', 'comma'], "Strategy type must be 'plus' or 'comma'"
     dummy_genome = genome_handler()
@@ -35,10 +36,10 @@ def evolve(
         # Generate population using GenomeHandler interface and extract genomes
         population_handlers = dummy_genome.generate_random_population(population_size)
         gene_pool = [handler.genome for handler in population_handlers]
-    
+
     ids = [str(i).zfill(4) for i in range(population_size)] # 4 digit string
     parent_ids = [[None, None] for _ in range(population_size)] # 4 digit string
-    population = evaluate_population(fitness_function, gene_pool, ids, 0, parent_ids, log_dir_base=log_dir) 
+    population = evaluate_population(fitness_function, gene_pool, ids, 0, parent_ids, log_dir_base=log_dir, num_workers=num_workers)
     fitnesses = population['fitness'].values
     population['in_pop'] = True
     print(f"G:{0} Time:{np.round(time.time() - evo_start,2)}, MaxF={np.max(fitnesses)}, AvrF={np.mean(fitnesses)}", flush=True)
@@ -93,14 +94,14 @@ def evolve(
         mutant_parent_ids = [[i, None] for i in mutant_ids]
         parent_ids = cross_parent_ids + mutant_parent_ids
 
-        offspring = evaluate_population(fitness_function, new_gene_pool, new_ids, generation, parent_ids, log_dir_base=log_dir) 
+        offspring = evaluate_population(fitness_function, new_gene_pool, new_ids, generation, parent_ids, log_dir_base=log_dir, num_workers=num_workers)
 
         # Possibly reevaluate old individuals
         if reevaluate_old and strategy_type == 'plus': # only for plus strategy
             old_genomes = [population['genome'][i] for i in range(population_size)]
             old_ids = [population['id'][i] for i in range(population_size)]
             old_parent_ids = [population['parent_ids'][i] for i in range(population_size)]
-            new_old_pop = evaluate_population(fitness_function, old_genomes, old_ids, generation, old_parent_ids, log_dir_base=log_dir)
+            new_old_pop = evaluate_population(fitness_function, old_genomes, old_ids, generation, old_parent_ids, log_dir_base=log_dir, num_workers=num_workers)
         else:
             new_old_pop = population.copy()
         # Select next generation
@@ -139,6 +140,7 @@ def evolve_vectorized(
     log_dir: str = "./logs",
     genome_handler: Optional[object] = GenomeHandler,
     verbose: bool = True,
+    num_workers: int = 1,
 ):
     """
     Vectorized version of the mu+lambda and mu,lambda evolution strategies.
@@ -184,7 +186,7 @@ def evolve_vectorized(
     
     ids = [str(i).zfill(4) for i in range(population_size)]
     parent_ids = [[None, None] for _ in range(population_size)]
-    population = evaluate_population(fitness_function, gene_pool_array, ids, 0, parent_ids, log_dir_base=log_dir)
+    population = evaluate_population(fitness_function, gene_pool_array, ids, 0, parent_ids, log_dir_base=log_dir, num_workers=num_workers)
     fitnesses = population['fitness'].values
     population['in_pop'] = True
     print(f"G:{0} Time:{np.round(time.time() - evo_start,2)}, MaxF={np.max(fitnesses)}, AvrF={np.mean(fitnesses)}", flush=True)
@@ -245,14 +247,14 @@ def evolve_vectorized(
         mutant_parent_ids = [[i, None] for i in mutant_ids]
         parent_ids = cross_parent_ids + mutant_parent_ids
 
-        offspring = evaluate_population(fitness_function, new_gene_pool, new_ids, generation, parent_ids, log_dir_base=log_dir)
+        offspring = evaluate_population(fitness_function, new_gene_pool, new_ids, generation, parent_ids, log_dir_base=log_dir, num_workers=num_workers)
 
         # Possibly reevaluate old individuals
         if reevaluate_old and strategy_type == 'plus':
             old_genomes = [population['genome'][i] for i in range(population_size)]
             old_ids = [population['id'][i] for i in range(population_size)]
             old_parent_ids = [population['parent_ids'][i] for i in range(population_size)]
-            new_old_pop = evaluate_population(fitness_function, old_genomes, old_ids, generation, old_parent_ids, log_dir_base=log_dir)
+            new_old_pop = evaluate_population(fitness_function, old_genomes, old_ids, generation, old_parent_ids, log_dir_base=log_dir, num_workers=num_workers)
         else:
             new_old_pop = population.copy()
             
