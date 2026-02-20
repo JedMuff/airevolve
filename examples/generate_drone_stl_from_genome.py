@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from airevolve.evolution_tools.genome_handlers.spherical_angular_genome_handler import (
     SphericalAngularDroneGenomeHandler
 )
-from airevolve.phenotype_assembly import generate_stl_files
+from airevolve.phenotype_assembly import generate_stl_files, AssemblyConfig
 from airevolve.evolution_tools.inspection_tools.drone_visualizer import DroneVisualizer
 
 
@@ -90,13 +90,13 @@ def main():
     result = generate_stl_files(
         genome_handler=handler,
         output_dir="./example_drone_stls",  # Output directory
-        include_assembly=True,  # Generate full assembly STL
-        include_landing_leg=False,  # Skip landing leg for this example
-        include_individual_parts=True,  # Generate individual arm STLs
-        include_step_files=True,  # Generate STEP files for CAD editing
-        distribute_arms_evenly=False,  # Distribute arms evenly around disc
-        magnitude_to_length_scale=100.0,  # 100mm per unit magnitude
-        part_config=None  # Use default part configuration
+        include_assembly=True,              # Generate full assembly STL
+        include_landing_leg=False,          # Not yet implemented
+        include_individual_parts=True,      # Generate individual arm STLs
+        include_step_files=True,            # Generate STEP files for CAD editing
+        distribute_arms_evenly=False,       # Use genome arm_rotation for placement
+        magnitude_to_length_scale=100.0,    # 100 mm per unit magnitude
+        assembly_config=AssemblyConfig(),   # Default physical dimensions
     )
 
     # ========================================================================
@@ -258,18 +258,18 @@ def example_custom_part_config():
     population = handler.random_population(1)
     handler.genome = population[0]
 
-    # Custom part configuration
-    custom_config = {
-        'sphere_radius': 15,  # Larger sphere (default: 12)
-        'disc_diameter': 25,  # Larger motor disc (default: 23)
-        'disc_thickness': 4,  # Thicker disc (default: 3)
-    }
+    # Custom assembly configuration
+    custom_config = AssemblyConfig(
+        sphere_radius=15,   # Larger sphere (default: 12)
+        disc_diameter=25,   # Larger motor disc (default: 23)
+        disc_thickness=4,   # Thicker disc (default: 3)
+    )
 
     # Generate with custom config
     result = generate_stl_files(
         genome_handler=handler,
         output_dir="./custom_drone_stls",
-        part_config=custom_config
+        assembly_config=custom_config,
     )
 
     print(f"\nCustom drone saved to: {result.output_dir}")
