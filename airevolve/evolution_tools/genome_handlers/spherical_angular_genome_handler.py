@@ -40,9 +40,9 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
         bilateral_plane_for_symmetry: str | None = None,
         repair: bool = False,
         enable_collision_repair: bool = False,
-        propeller_radius: float = 0.0254,  # 2-inch propeller radius in meters
-        inner_boundary_radius: float = 0.09,
-        outer_boundary_radius: float = 0.4,
+        propeller_radius: float = 0.0508/2,  # 2-inch propeller radius in meters
+        inner_boundary_radius: float = 0.0055,
+        outer_boundary_radius: float = 0.11,
         max_repair_iterations: int = 100,
         repair_step_size: float = 1.0,
         propeller_tolerance: float = 0.1,
@@ -80,13 +80,15 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
         # Setup parameter limits
         if parameter_limits is None:
             # Default limits: [magnitude, arm_rotation, arm_pitch, motor_rotation, motor_pitch, direction]
+            # arm_pitch and motor_pitch use elevation convention: 0 = horizontal,
+            # +π/2 = straight up, −π/2 = straight down.
             self.parameter_limits = np.array([
-                [0.5, 2.0],        # magnitude
-                [0.0, 2*np.pi],    # arm rotation
-                [0.0, np.pi],      # arm pitch
-                [0.0, 2*np.pi],    # motor rotation
-                [0.0, np.pi],      # motor pitch
-                [0, 1]             # direction
+                [0.055, 0.17],           # magnitude (0.055 to 0.11+0.06)
+                [-np.pi, np.pi],         # arm rotation (azimuth)
+                [-np.pi/2, np.pi/2],     # arm pitch (elevation)
+                [-np.pi, np.pi],         # motor rotation (azimuth)
+                [-np.pi/2, np.pi/2],     # motor pitch (elevation)
+                [0, 1]                   # direction
             ])
         else:
             self.parameter_limits = np.asarray(parameter_limits)
@@ -263,14 +265,13 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
                 size=num_arms
             )
 
-        # For phi (index 2), sample to achieve uniform spatial distribution on sphere
+        # For phi (index 2), sample to achieve uniform spatial distribution on sphere.
+        # phi is an elevation angle (0 = horizontal, π/2 = up, −π/2 = down).
+        # Uniform sphere coverage requires sampling sin(phi) uniformly and inverting
+        # with arcsin.  This is valid for any elevation range including negatives.
         phi_min, phi_max = self.parameter_limits[2, 0], self.parameter_limits[2, 1]
-        cos_phi_min = np.cos(phi_max)  # Note: cos is decreasing
-        cos_phi_max = np.cos(phi_min)
-
-        # Sample cos(phi) uniformly and convert to phi
-        cos_phi = self.rnd.uniform(low=cos_phi_min, high=cos_phi_max, size=num_arms)
-        genome[:num_arms, 2] = np.arccos(cos_phi)
+        sin_phi = self.rnd.uniform(low=np.sin(phi_min), high=np.sin(phi_max), size=num_arms)
+        genome[:num_arms, 2] = np.arcsin(sin_phi)
 
         genome[:num_arms, 5] = self.rnd.integers(0, 2, size=num_arms)
 
@@ -344,21 +345,17 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
                 size=(pop_size, self.max_narms)
             )
 
-        # For phi (index 2), sample to achieve uniform spatial distribution on sphere
-        # Sample cos(phi) uniformly, then convert back to phi
+        # For phi (index 2), sample to achieve uniform spatial distribution on sphere.
+        # phi is an elevation angle (0 = horizontal, π/2 = up, −π/2 = down).
+        # Uniform sphere coverage requires sampling sin(phi) uniformly and inverting
+        # with arcsin.  This is valid for any elevation range including negatives.
         phi_min, phi_max = self.parameter_limits[2, 0], self.parameter_limits[2, 1]
-        cos_phi_min = np.cos(phi_max)  # Note: cos is decreasing, so max phi gives min cos
-        cos_phi_max = np.cos(phi_min)
-
-        # Sample cos(phi) uniformly
-        cos_phi = self.rnd.uniform(
-            low=cos_phi_min,
-            high=cos_phi_max,
+        sin_phi = self.rnd.uniform(
+            low=np.sin(phi_min),
+            high=np.sin(phi_max),
             size=(pop_size, self.max_narms)
         )
-
-        # Convert back to phi
-        population[:, :, 2] = np.arccos(cos_phi)
+        population[:, :, 2] = np.arcsin(sin_phi)
 
         population[:, :, 5] = self.rnd.integers(0, 2, size=(pop_size, self.max_narms))
         
