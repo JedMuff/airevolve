@@ -1,57 +1,60 @@
 """
-Phenotype Assembly Module
+Phenotype Assembly
 
-This module provides tools for generating physical drone phenotypes (STL files)
-from evolved genomes using CAD (CadQuery).
+Tools for generating physical drone parts (STL / STEP files) from evolved genomes.
 
-Main API:
-    - generate_stl_files: Generate STL files from a genome handler
-    - quick_visualize_genome: Quick single-file generation for visualization
+Typical usage
+-------------
+    from airevolve.evolution_tools.genome_handlers import SphericalAngularDroneGenomeHandler
+    from airevolve.phenotype_assembly import generate_stl_files
 
-Example:
-    >>> from airevolve.evolution_tools.genome_handlers import SphericalAngularDroneGenomeHandler
-    >>> from airevolve.phenotype_assembly import generate_stl_files
-    >>>
-    >>> # Create and evolve individual
-    >>> handler = SphericalAngularDroneGenomeHandler(...)
-    >>> # ... evolution ...
-    >>>
-    >>> # Generate STL files
-    >>> result = generate_stl_files(handler, output_dir="./my_drone")
+    handler = SphericalAngularDroneGenomeHandler(...)
+    # ... evolve ...
+    result = generate_stl_files(handler, output_dir="./my_drone")
+    print(result.assembly_file)
+
+Module layout
+-------------
+models.py           — dataclasses: ArmCADParameters, DroneCADParameters,
+                      AssemblyConfig, STLGenerationResult
+genome_adapter.py   — genome → DroneCADParameters conversion
+assembler.py        — positions and orients parts onto the plate
+generator.py        — orchestrates the full pipeline; file I/O
+parts/
+    core_plate.py   — central hub-and-spoke plate
+    arm_mount.py    — sphere-clamp that grips the plate rim
+    motor_arm.py    — arm tube + motor-mounting disc
 """
 
-from .stl_generator import (
-    generate_stl_files,
-    quick_visualize_genome,
-    STLGenerationResult
-)
-
-from .genome_adapter import (
-    genome_to_cad_parameters,
-    cad_parameters_to_assembly_vector,
-    cad_parameters_to_individual_vector,
+from .generator import generate_stl_files, quick_visualize_genome
+from .genome_adapter import genome_to_cad_parameters
+from .models import (
     ArmCADParameters,
-    DroneCADParameters
+    DroneCADParameters,
+    AssemblyConfig,
+    STLGenerationResult,
 )
-
-from .core_plate import create_core_plate
-from .part_generators import create_arm_assembly, create_landing_leg
+from .assembler import place_arm_on_plate, assemble_drone
+from .parts import create_core_plate, create_arm_mount, create_motor_arm
 
 __all__ = [
-    # Main API
-    'generate_stl_files',
-    'quick_visualize_genome',
-    'STLGenerationResult',
-    # Genome conversion
-    'genome_to_cad_parameters',
-    'cad_parameters_to_assembly_vector',
-    'cad_parameters_to_individual_vector',
-    'ArmCADParameters',
-    'DroneCADParameters',
-    # Part generation functions (advanced usage)
-    'create_core_plate',
-    'create_arm_assembly',
-    'create_landing_leg',
+    # ── Main API ───────────────────────────────────────────────────────────
+    "generate_stl_files",
+    "quick_visualize_genome",
+    # ── Data models ────────────────────────────────────────────────────────
+    "ArmCADParameters",
+    "DroneCADParameters",
+    "AssemblyConfig",
+    "STLGenerationResult",
+    # ── Conversion ─────────────────────────────────────────────────────────
+    "genome_to_cad_parameters",
+    # ── Assembly helpers (advanced usage) ──────────────────────────────────
+    "place_arm_on_plate",
+    "assemble_drone",
+    # ── Part generators (advanced usage) ───────────────────────────────────
+    "create_core_plate",
+    "create_arm_mount",
+    "create_motor_arm",
 ]
 
-__version__ = '0.1.0'
+__version__ = "0.2.0"

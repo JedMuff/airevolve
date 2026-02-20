@@ -1,45 +1,74 @@
 
+"""
+Physical constants and default dimensions for phenotype assembly.
 
+All measurements in millimeters unless otherwise noted.
+"""
 
-screw_size = 2
+# ══════════════════════════════════════════════════════════════════════════════
+# Screw / Fastener Parameters
+# ══════════════════════════════════════════════════════════════════════════════
+
+screw_size = 2.0
 screw_size_tolerance = 0.3
 
-individual_parameter_vector = [ # arm tilt, arm azimuth, motor tilt, motor azimuth
-    [-90, 0, -90, 0],  # arm1
-    [-90, 0, -90, 0],  # arm2
-    [-90, 0, -90, 0],  # arm3
-    [-90, 0, -90, 0],  # arm4
-]
+# ══════════════════════════════════════════════════════════════════════════════
+# Core Plate Parameters
+# ══════════════════════════════════════════════════════════════════════════════
 
-# Full drone assembly parameter vector
-# Format: [arm_tilt, arm_azimuth, motor_tilt, motor_azimuth, arm_attachment_angle, arm_length]
-# arm_attachment_angle: angle (0-360°) around the disc edge where the arm attaches
-# arm_length: length of the arm cylinder in mm
-full_drone_parameter_vector = [
-    [-90, 0, 90, 0, 0, 60],     # arm1 - at 0°
-    [-90, 0, 90, 0, 90, 60],    # arm2 - at 90°
-    [-90, 0, 90, 0, 180, 60],   # arm3 - at 180°
-    [-90, 0, 90, 0, 270, 60],   # arm4 - at 270°
-]
-
-# Plate (circular mounting plate)
-plate_diameter = 60
+# Overall dimensions
+plate_diameter = 60.0
 plate_thickness = 2.0
 plate_thickness_tolerance = 0.2
 
-# Arm cylinder dimensions
-arm_cylinder_inner_radius = 8/2
-arm_cylinder_inner_radius_tolerance = 0.3
+# Centre hub (solid disc at centre)
+center_hub_radius = 20.0
+central_hole_diameter = 25.0
 
-# Intermediary screw pattern
-intermediary_outer_screw_pattern_radius = 18/2
+# Outer ring (annular ring at perimeter)
+outer_ring_width = 6.5
+outer_ring_inner_radius = plate_diameter / 2 - outer_ring_width
 
-# Core plate parameters
-screw_pattern_radius = 60/2 - 7.5  # 7.5mm inset from edge
+# Radial struts (connecting hub to outer ring)
+strut_width = 12.0
+number_struts = 4
+
+# Screw holes
+screw_pattern_radius = plate_diameter / 2 - 7.5  # 7.5mm inset from edge
 number_holes = 32
 screw_square_size = 25.5
-central_hole_diameter = 25
-center_hub_radius = 20
-outer_ring_width = 7.5
-strut_width = 3
-number_struts = 8
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Arm Mount Parameters (sphere clamp on plate rim)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Inner cutout cylinders (above/below plate slot to reduce sphere overhang)
+arm_mount_inner_cutout_height = 8.0
+
+# Screw hole angles relative to slot centre (degrees)
+arm_mount_screw_angles = [180.0 - 11.25, 180.0 + 11.25]
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Motor Arm Parameters (tube + motor disc)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Arm tube dimensions
+arm_cylinder_inner_radius = 8.0 / 2
+arm_cylinder_inner_radius_tolerance = 0.3
+
+# Motor disc mounting
+intermediary_outer_screw_pattern_radius = 18.0 / 2
+
+# Flattening disc (removes overhang material beyond motor disc face)
+motor_flattening_disc_thickness = 10.0
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Motor Mount Parameters (modular separate printable mount)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Socket cylinder dimensions
+motor_mount_cylinder_height = 20.0
+motor_mount_cylinder_bottom_thickness = 20.0
+
+# Mounting screw
+motor_mount_screw_inset = 5.0

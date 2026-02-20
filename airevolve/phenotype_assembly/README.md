@@ -1,6 +1,6 @@
-# Phenotype Assembly Module
+# Phenotype Assembly
 
-This module converts evolved drone genomes into physical 3D models (STL files) that can be 3D printed or visualized.
+Converts evolved drone genomes into physical 3D models (STL / STEP files) ready for 3D printing or inspection in CAD software.
 
 ## Quick Start
 
@@ -8,211 +8,189 @@ This module converts evolved drone genomes into physical 3D models (STL files) t
 from airevolve.evolution_tools.genome_handlers import SphericalAngularDroneGenomeHandler
 from airevolve.phenotype_assembly import generate_stl_files
 
-# Create or load an evolved individual
 handler = SphericalAngularDroneGenomeHandler(...)
 # ... evolve or load genome ...
 
-# Generate STL files
-result = generate_stl_files(
-    genome_handler=handler,
-    output_dir="./my_drone"
-)
-
-print(f"Assembly file: {result.assembly_file}")
+result = generate_stl_files(handler, output_dir="./my_drone")
+print(result.assembly_file)   # Path to full_drone_assembly.stl
 ```
 
-## Main API
+See `examples/generate_drone_stl_from_genome.py` for complete worked examples.
 
-### `generate_stl_files()`
-
-The primary function for generating STL files from a genome.
-
-**Parameters:**
-- `genome_handler`: `SphericalAngularDroneGenomeHandler` instance with evolved genome
-- `output_dir`: Directory to save STL files (default: `"./drone_stls"`)
-- `include_assembly`: Generate full assembled drone STL (default: `True`)
-- `include_landing_leg`: Generate landing leg STL (default: `False`)
-- `include_individual_parts`: Generate separate STL for each arm (default: `True`)
-- `include_step_files`: Save STEP files for CAD editing (default: `True`)
-- `distribute_arms_evenly`: Distribute arms evenly around disc (default: `True`)
-- `magnitude_to_length_scale`: Scale factor (mm per unit magnitude, default: `100.0`)
-- `part_config`: Optional dict to override default part parameters
-
-**Returns:** `STLGenerationResult` with paths to all generated files
-
-### `quick_visualize_genome()`
-
-Generate a single STL file for quick visualization.
-
-```python
-from airevolve.phenotype_assembly import quick_visualize_genome
-
-output_file = quick_visualize_genome(handler, output_file="drone.stl")
-```
-
-## Genome to CAD Mapping
-
-The module converts `SphericalAngularDroneGenomeHandler` genome format to CAD parameters:
-
-### Genome Format
-- Shape: `(max_narms, 6)` with NaN masking
-- Columns: `[magnitude, arm_rotation, arm_pitch, motor_rotation, motor_pitch, direction]`
-- Angles in radians, spherical coordinates
-
-### CAD Parameters
-- `arm_length`: Magnitude × `magnitude_to_length_scale` (mm)
-- `arm_attachment_angle`: Position around disc (0-360°)
-- `arm_tilt`: Orientation from vertical (degrees)
-- `motor_tilt`, `motor_azimuth`: Motor disc orientation (degrees)
+---
 
 ## Module Structure
 
 ```
 airevolve/phenotype_assembly/
-├── __init__.py              # Public API exports
-├── README.md                # This file
-├── config.py                # Default configuration parameters
-├── genome_adapter.py        # Genome ↔ CAD parameter conversion
-├── stl_generator.py         # Main STL generation API
-├── core_plate.py            # Core plate CAD generation
-├── part_generators.py       # Arm and landing leg generation
-├── full_drone_assembly.py   # Original assembly script (legacy)
-├── main.py                  # Original batch script (legacy)
-└── [other legacy files]     # Preserved for backward compatibility
+├── __init__.py          — public API
+├── config.py            — physical constants (plate diameter, screw sizes, …)
+├── models.py            — dataclasses: ArmCADParameters, DroneCADParameters,
+│                          AssemblyConfig, STLGenerationResult
+├── genome_adapter.py    — genome → DroneCADParameters conversion
+├── assembler.py         — places parts onto the plate; assemble_drone()
+├── generator.py         — orchestrates the pipeline; file I/O
+└── parts/
+    ├── core_plate.py    — hub-and-spoke central plate
+    ├── arm_mount.py     — sphere-clamp that grips the plate rim
+    └── motor_arm.py     — arm tube + motor-mounting disc
 ```
 
-## Examples
+---
 
-See `/examples/generate_drone_stl_from_genome.py` for complete examples including:
-- Basic STL generation
-- Loading evolved individuals from files
-- Custom part configurations
-- Quick visualization
+## API Reference
+
+### `generate_stl_files()`
+
+```python
+from airevolve.phenotype_assembly import generate_stl_files, AssemblyConfig
+
+result = generate_stl_files(
+    genome_handler,                      # SphericalAngularDroneGenomeHandler
+    output_dir="./drone_stls",           # where to write files
+    include_assembly=True,               # write full_drone_assembly.stl
+    include_individual_parts=True,       # write core_plate.stl + arm_N.stl
+    include_step_files=True,             # write STEP equivalents
+    include_landing_leg=False,           # not yet implemented
+    distribute_arms_evenly=False,        # True = ignore genome arm_rotation
+    magnitude_to_length_scale=100.0,     # genome magnitude → mm
+    assembly_config=AssemblyConfig(),    # physical dimensions (see below)
+)
+```
+
+Returns `STLGenerationResult` with fields:
+- `output_dir` — `Path` to the output directory
+- `core_plate_file` — `Path` or `None`
+- `arm_files` — `List[Path]`, one per arm
+- `assembly_file` — `Path` or `None`
+- `step_files` — `List[Path]`
+
+### `quick_visualize_genome()`
+
+```python
+from airevolve.phenotype_assembly import quick_visualize_genome
+
+path = quick_visualize_genome(handler, output_file="drone.stl")
+```
+
+Generates a single combined STL with all defaults.
+
+### `AssemblyConfig`
+
+All physical dimensions in one typed dataclass (replaces the old `part_config` dict).
+
+```python
+from airevolve.phenotype_assembly import AssemblyConfig
+
+cfg = AssemblyConfig(
+    sphere_radius=15,    # mm — larger pivot sphere (default 12)
+    disc_diameter=25,    # mm — larger motor disc   (default 23)
+    disc_thickness=4,    # mm — thicker motor disc  (default 3)
+)
+
+result = generate_stl_files(handler, assembly_config=cfg)
+```
+
+Key fields and defaults:
+
+| Field | Default | Description |
+|---|---|---|
+| `plate_diameter` | 60 mm | Core plate outer diameter |
+| `plate_thickness` | 2 mm | Core plate thickness |
+| `outer_ring_width` | 7.5 mm | Width of outer annular ring |
+| `sphere_radius` | 12 mm | Pivot sphere radius |
+| `clamp_inset` | 10.5 mm | How far sphere centre sits inside the plate rim |
+| `cylinder_inner_radius` | 4 mm | Arm tube inner radius |
+| `wall_thickness` | 1 mm | Arm tube wall thickness |
+| `disc_diameter` | 23 mm | Motor mount disc diameter |
+| `disc_thickness` | 3 mm | Motor mount disc thickness |
+| `motor_screw_count` | 4 | Number of motor mounting screws |
+
+---
+
+## Genome → CAD Coordinate Mapping
+
+The genome uses spherical coordinates. The mapping to physical assembly parameters is:
+
+| Genome column | Range | CAD field | Conversion |
+|---|---|---|---|
+| `magnitude` | 0.5–2.0 | `arm_length` (mm) | `× magnitude_to_length_scale` |
+| `arm_rotation` (θ) | 0–2π rad | `attachment_angle` (°) | `degrees(θ)` |
+| `arm_pitch` (φ) | 0–π rad | `arm_elevation` (°) | `90 − degrees(φ)` |
+| `motor_rotation` | 0–2π rad | `motor_azimuth` (°) | `degrees(motor_rotation)` |
+| `motor_pitch` | 0–π rad | `motor_tilt` (°) | `90 − degrees(motor_pitch)` |
+| `direction` | {0, 1} | `direction` | unchanged |
+
+`arm_elevation = 0°` → arm lies horizontal. `arm_elevation = 90°` → arm points straight up.
+
+---
+
+## Output Files
+
+| File | Contents |
+|---|---|
+| `core_plate.stl` | Central hub-and-spoke plate |
+| `arm_N.stl` | Combined arm mount + motor arm for arm N |
+| `full_drone_assembly.stl` | All parts in assembled position |
+| `core_plate.step` | Core plate with full BREP geometry |
+| `full_drone_assembly.step` | Full assembly with named, coloured parts |
+
+---
 
 ## Advanced Usage
 
-### Custom Part Configuration
-
-```python
-custom_config = {
-    'sphere_radius': 15,       # Larger sphere (default: 12mm)
-    'disc_diameter': 25,       # Larger motor disc (default: 23mm)
-    'disc_thickness': 4,       # Thicker disc (default: 3mm)
-    'clamp_jaw_length': 13,    # Custom clamp size
-    # ... see part_generators.py for all options
-}
-
-result = generate_stl_files(
-    genome_handler=handler,
-    output_dir="./custom_drone",
-    part_config=custom_config
-)
-```
-
-### Using Individual Part Generators
-
-```python
-from airevolve.phenotype_assembly import (
-    create_core_plate,
-    create_arm_assembly,
-    create_landing_leg
-)
-
-# Generate individual parts
-core_plate = create_core_plate(plate_diameter=70)
-
-arm_parts = create_arm_assembly(
-    arm_tilt=-30,
-    arm_azimuth=0,
-    motor_tilt=-90,
-    motor_azimuth=0,
-    arm_length=60
-)
-
-landing_leg = create_landing_leg()
-```
-
-### Genome Conversion Functions
+### Accessing low-level functions
 
 ```python
 from airevolve.phenotype_assembly import (
     genome_to_cad_parameters,
-    cad_parameters_to_assembly_vector
+    place_arm_on_plate,
+    assemble_drone,
+    create_core_plate,
+    create_arm_mount,
+    create_motor_arm,
+    AssemblyConfig,
 )
 
-# Convert genome to CAD parameters
+cfg = AssemblyConfig()
 cad_params = genome_to_cad_parameters(handler)
 
-# Access individual arm parameters
-for arm in cad_params.arms:
-    print(f"Arm: length={arm.arm_length}mm, angle={arm.arm_attachment_angle}°")
+# Place one arm
+arm_parts = place_arm_on_plate(cad_params.arms[0], cfg)
+# arm_parts is a dict: {sphere, upper_jaw, lower_jaw, motor_arm} → cq.Workplane
 
-# Convert to assembly vector format
-assembly_vector = cad_parameters_to_assembly_vector(cad_params)
+# Build the full compound
+compound, named = assemble_drone(cad_params.arms, cfg, create_core_plate())
 ```
 
-## Output Files
+### Inspecting per-arm parameters
 
-The module generates:
+```python
+cad_params = genome_to_cad_parameters(handler)
+for i, arm in enumerate(cad_params.arms):
+    print(f"Arm {i+1}:")
+    print(f"  attachment_angle : {arm.attachment_angle:.1f}°")
+    print(f"  arm_elevation    : {arm.arm_elevation:.1f}°")
+    print(f"  arm_length       : {arm.arm_length:.1f} mm")
+    print(f"  motor_tilt       : {arm.motor_tilt:.1f}°")
+    print(f"  motor_azimuth    : {arm.motor_azimuth:.1f}°")
+    print(f"  direction        : {'CW' if arm.direction else 'CCW'}")
+```
 
-1. **STL files** (`.stl`) - For 3D printing and visualization
-   - `core_plate.stl` - Central mounting plate
-   - `arm_1.stl`, `arm_2.stl`, ... - Individual arms
-   - `full_drone_assembly.stl` - Complete assembled drone
-   - `landing_leg.stl` - Optional landing gear
-
-2. **STEP files** (`.step`) - For CAD editing (if `include_step_files=True`)
-   - Preserve individual parts and colors
-   - Editable in CAD software (FreeCAD, Fusion 360, etc.)
+---
 
 ## Dependencies
 
-- `cadquery` - CAD modeling
-- `numpy` - Numerical operations
-- Parent module: `airevolve.evolution_tools.genome_handlers`
+- `cadquery` — CAD solid modelling
+- `numpy` — numerical operations
+- `airevolve.evolution_tools.genome_handlers` — genome format
 
-## Backward Compatibility
-
-Legacy scripts are preserved:
-- `full_drone_assembly.py` - Can still be run as standalone script
-- `main.py` - Original batch generation script
-- Individual part scripts - Still functional
-
-## Configuration
-
-Default parameters are in `config.py`:
-- Screw sizes and tolerances
-- Plate dimensions
-- Structural parameters
-
-These can be overridden via `part_config` parameter or by modifying `config.py`.
-
-## Coordinate Systems
-
-The module handles coordinate system conversions:
-- **Genome**: Spherical coordinates (r, θ, φ) + motor angles
-- **CAD**: Cartesian with Euler angles (degrees)
-- **STL**: Right-handed coordinate system (Z-up)
+---
 
 ## Troubleshooting
 
-### Issue: No STL files generated
-- Check that genome has valid (non-NaN) arms: `handler.get_arm_count()`
-- Verify output directory permissions
+**No STL files generated** — check that the genome has at least one valid arm: `handler.get_arm_count()`.
 
-### Issue: Arms not positioned correctly
-- Adjust `distribute_arms_evenly` parameter
-- Check `magnitude_to_length_scale` for reasonable arm lengths
+**CAD errors / geometry failures** — motor tilt values very close to ±90° can cause singularities; the code nudges them by 0.001° automatically. If problems persist, try a slightly different `motor_tilt` value in `AssemblyConfig`.
 
-### Issue: CAD errors
-- Ensure CadQuery is installed: `pip install cadquery`
-- Some parameter combinations may cause geometric issues (e.g., motor_tilt=±90°)
-
-## Future Enhancements
-
-Potential improvements:
-- [ ] Support for more genome types
-- [ ] Automatic collision detection in STL
-- [ ] Assembly instructions generation
-- [ ] Bill of materials (BOM) export
-- [ ] Integration with FEA analysis tools
+**Arms look wrong in the STL** — use `distribute_arms_evenly=False` (the default) so attachment angles come directly from the genome's `arm_rotation` values, matching what the simulator sees.
