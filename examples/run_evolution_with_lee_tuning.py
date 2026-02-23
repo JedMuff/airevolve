@@ -1,0 +1,518 @@
+"""
+Evolution with Lee Controller Tuning
+
+This script runs evolutionary optimization where each morphology is evaluated by
+tuning its Lee controller gains via CMA-ES (Stage 1 optimization).
+
+Key Features:
+- Initial population generated with parallel repair workflow
+- Each individual's fitness = max gates passed during controller tuning
+- Individuals that fail tuning (0 gates) receive fitness of 0
+- Controller gains optimized per morphology using CMA-ES
+
+Usage:
+    # Basic evolution with Lee tuning
+    python examples/run_evolution_with_lee_tuning.py \\
+        --gate-cfg circle \\
+        --population-size 20 \\
+        --generations 10 \\
+        --max-evals 100
+
+    # Parallel CMA-ES workers for faster tuning
+    python examples/run_evolution_with_lee_tuning.py \\
+        --gate-cfg figure8 \\
+        --population-size 30 \\
+        --generations 20 \\
+        --max-evals 200 \\
+        --cma-workers 8
+
+    # Quick test run
+    python examples/run_evolution_with_lee_tuning.py \\
+        --gate-cfg circle \\
+        --population-size 10 \\
+        --generations 5 \\
+        --max-evals 50 \\
+        --cma-workers 4
+"""
+
+import sys
+import os
+import argparse
+import time
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import functools
+from datetime import datetime
+from multiprocessing import Pool, cpu_count
+from tqdm import tqdm
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from airevolve.evolution_tools.evaluators.lee_tune_evaluator import evaluate_individual_with_tuning
+from airevolve.evolution_tools.strategies.mu_lambda import evolve
+from airevolve.evolution_tools.selectors.tournament import tournament_selection
+from airevolve.evolution_tools.genome_handlers.spherical_angular_genome_handler import SphericalAngularDroneGenomeHandler
+from airevolve.evolution_tools.genome_handlers.cartesian_euler_genome_handler import CartesianEulerDroneGenomeHandler
+from airevolve.evolution_tools.inspection_tools.utils import evolution_dataframe_to_fitness_array
+from airevolve.evolution_tools.inspection_tools.plot_fitness import plot_fitness
+from airevolve.evolution_tools.genome_handlers.repair_workflow import (
+    stage1_optimization_repair,
+    stage2_hover_check,
+    stage3_hover_repair
+)
+from airevolve.evolution_tools.genome_handlers.operators.optimization_repair_operator import (
+    OptimizationRepairConfig
+)
+
+
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description='Run evolution with Lee controller tuning (CMA-ES Stage 1)'
+    )
+
+    # Genome and evolution parameters
+    parser.add_argument('--genome-handler', choices=['spherical', 'cartesian'],
+                       default='spherical', help='Genome handler to use (default: spherical)')
+    parser.add_argument('--population-size', type=int, default=20,
+                       help='Population size (default: 20)')
+    parser.add_argument('--generations', type=int, default=10,
+                       help='Number of generations (default: 10)')
+    parser.add_argument('--num-mutate', type=int, default=20,
+                       help='Number of individuals to mutate per generation (default: 20)')
+    parser.add_argument('--num-crossover', type=int, default=0,
+                       help='Number of crossover operations per generation (default: 0)')
+    parser.add_argument('--log-dir', default='./.data',
+                       help='Directory for logs (default: ./.data)')
+    parser.add_argument('--show-plot', action='store_true',
+                       help='Show fitness plot at the end')
+    parser.add_argument('--save-all-plots', action='store_true',
+                       help='Save comprehensive visualization plots including diversity')
+    parser.add_argument('--strategy-type', choices=['plus', 'comma'],
+                       default='plus', help='Evolution strategy type (default: plus)')
+
+    # Lee controller tuning parameters (CMA-ES Stage 1)
+    parser.add_argument('--max-evals', type=int, default=100,
+                       help='Maximum CMA-ES evaluations per individual (default: 100)')
+    parser.add_argument('--cma-workers', type=int, default=4,
+                       help='Number of parallel workers for CMA-ES (default: 4)')
+    parser.add_argument('--sim-time', type=float, default=20.0,
+                       help='Simulation time in seconds (default: 20.0)')
+    parser.add_argument('--dt', type=float, default=0.005,
+                       help='Time step in seconds (default: 0.005)')
+    parser.add_argument('--timeout', type=float, default=30.0,
+                       help='Timeout per evaluation in seconds (default: 30.0)')
+    parser.add_argument('--n-startup-points', type=int, default=1,
+                       help='Number of startup control points (default: 1)')
+
+    # Gate configuration
+    parser.add_argument('--gate-cfg', choices=['backandforth', 'figure8', 'circle', 'slalom'],
+                       default='circle', help='Gate configuration (default: circle)')
+
+    # Evolution workers (for parallel evaluation of individuals)
+    parser.add_argument('--num-workers', type=int, default=1,
+                       help='Number of parallel workers for evolution (default: 1)')
+
+    # Morphology parameters
+    parser.add_argument('--min-narms', type=int, default=6,
+                       help='Minimum number of arms (default: 6)')
+    parser.add_argument('--max-narms', type=int, default=6,
+                       help='Maximum number of arms (default: 6)')
+
+    return parser.parse_args()
+
+
+def _try_generate_individual(args):
+    """
+    Worker function to try generating a single hoverable individual.
+
+    Returns:
+        Tuple of (success_individual, status_dict) where status_dict tracks failures.
+    """
+    idx, base_seed, handler_kwargs, param_limits, coordinate_system = args
+
+    # Create genome handler with unique seed
+    seed = base_seed + idx
+    handler = SphericalAngularDroneGenomeHandler(
+        **handler_kwargs,
+        rnd=np.random.default_rng(seed)
+    )
+
+    status = {
+        'failed_hover': 0,
+        'failed_stage1': 0,
+        'failed_stage3': 0,
+        'success': 0
+    }
+
+    # Generate random individual
+    ind = handler.random_population(1)[0]
+
+    # STEP 1: Check if it can hover (strict, no spinning)
+    can_hover, _ = stage2_hover_check(
+        ind,
+        verbose=False,
+        allow_spinning=False  # Strict hover check
+    )
+
+    if not can_hover:
+        status['failed_hover'] = 1
+        return None, status
+
+    # STEP 2: Apply optimization repair to fix collisions
+    repair_config = OptimizationRepairConfig(fixed_params=[3, 4])
+    repaired, _ = stage1_optimization_repair(
+        ind,
+        coordinate_system=coordinate_system,
+        config=repair_config,
+        verbose=False
+    )
+
+    if repaired is None:
+        status['failed_stage1'] = 1
+        return None, status
+
+    # STEP 3: Apply hover repair to align thrust vectors
+    final_ind, _ = stage3_hover_repair(
+        repaired,
+        coordinate_system=coordinate_system,
+        verbose=False
+    )
+
+    if final_ind is None:
+        status['failed_stage3'] = 1
+        return None, status
+
+    # Success!
+    status['success'] = 1
+    return final_ind, status
+
+
+def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spherical',
+                                  verbose=False, num_workers=None):
+    """
+    Generate initial population using parallel sampling.
+
+    Strategy:
+    1. Sample many individuals in parallel
+    2. Keep only those that pass full repair pipeline
+    3. Expected success rate: ~0.2% (1/500)
+
+    Args:
+        genotype: Genome handler instance
+        pop_size: Size of population to generate
+        coordinate_system: 'spherical' or 'cartesian'
+        verbose: Print detailed messages
+        num_workers: Number of parallel workers (defaults to CPU count)
+
+    Returns:
+        Array of repaired individuals
+    """
+    if num_workers is None:
+        num_workers = cpu_count()
+
+    print(f"Generating initial population of size {pop_size} using {num_workers} parallel workers...")
+    print("Strategy: Parallel sampling → Strict hover check → Fix collisions → Align thrust")
+    print("Expected success rate: ~0.2% (need ~{:,} samples for {} individuals)\n".format(pop_size * 500, pop_size))
+    sys.stdout.flush()
+
+    start_time = time.time()
+
+    # Generate random base seed for this run
+    base_seed = np.random.randint(0, 2**31)
+    print(f"Base seed for this run: {base_seed}\n")
+
+    # Sample in batches until we have enough
+    batch_size = pop_size * 1000
+    max_batches = 100
+
+    successful_individuals = []
+    total_stats = {
+        'failed_hover': 0,
+        'failed_stage1': 0,
+        'failed_stage3': 0,
+        'success': 0,
+        'total_attempts': 0
+    }
+
+    for batch_idx in range(max_batches):
+        if len(successful_individuals) >= pop_size:
+            break
+
+        print(f"\nBatch {batch_idx + 1}: Sampling {batch_size} individuals...")
+
+        # Prepare args for this batch
+        handler_config = {
+            'min_max_narms': (genotype.min_narms, genotype.max_narms),
+            'append_arm_chance': genotype.append_arm_chance,
+            'parameter_limits': genotype.parameter_limits,
+            'bilateral_plane_for_symmetry': genotype.bilateral_plane_for_symmetry,
+            'repair': genotype.repair_enabled,
+        }
+
+        args_list = [
+            (
+                batch_idx * batch_size + i,
+                base_seed,
+                handler_config,
+                genotype.parameter_limits,
+                coordinate_system
+            )
+            for i in range(batch_size)
+        ]
+
+        # Process in parallel with progress bar
+        with Pool(processes=num_workers) as pool:
+            with tqdm(total=batch_size, desc=f"Batch {batch_idx + 1}", unit="ind") as pbar:
+                for result, status in pool.imap_unordered(_try_generate_individual, args_list, chunksize=10):
+                    total_stats['total_attempts'] += 1
+                    total_stats['failed_hover'] += status['failed_hover']
+                    total_stats['failed_stage1'] += status['failed_stage1']
+                    total_stats['failed_stage3'] += status['failed_stage3']
+                    total_stats['success'] += status['success']
+
+                    if result is not None:
+                        successful_individuals.append(result)
+
+                    pbar.update(1)
+                    pbar.set_postfix({
+                        'found': len(successful_individuals),
+                        'rate': f"{total_stats['success']/total_stats['total_attempts']*100:.2f}%"
+                    })
+
+                    # Stop early if we have enough
+                    if len(successful_individuals) >= pop_size:
+                        break
+
+        print(f"  Found {len(successful_individuals)}/{pop_size} so far...")
+
+        if len(successful_individuals) >= pop_size:
+            print(f"✓ Target reached!")
+            break
+
+    end_time = time.time()
+
+    # Report results
+    print(f"\n{'='*80}")
+    print("Initial Population Generation Results")
+    print(f"{'='*80}")
+    print(f"Successfully generated: {len(successful_individuals)}/{pop_size}")
+    print(f"Total attempts: {total_stats['total_attempts']:,}")
+    print(f"Success rate: {total_stats['success']/total_stats['total_attempts']*100:.3f}%")
+    print(f"\nFailure breakdown:")
+    print(f"  Failed hover check: {total_stats['failed_hover']:,} ({total_stats['failed_hover']/total_stats['total_attempts']*100:.1f}%)")
+    print(f"  Failed Stage 1 (optimization): {total_stats['failed_stage1']:,} ({total_stats['failed_stage1']/total_stats['total_attempts']*100:.1f}%)")
+    print(f"  Failed Stage 3 (hover repair): {total_stats['failed_stage3']:,} ({total_stats['failed_stage3']/total_stats['total_attempts']*100:.1f}%)")
+    print(f"\nTime taken: {end_time - start_time:.1f}s")
+    print(f"{'='*80}\n")
+
+    if len(successful_individuals) < pop_size:
+        print(f"⚠ Warning: Could only generate {len(successful_individuals)}/{pop_size} individuals")
+        print(f"Consider increasing max_batches or using a different approach.\n")
+
+    return np.array(successful_individuals[:pop_size]) if len(successful_individuals) > 0 else None
+
+
+def get_genome_handler_config(handler_type, min_narms=6, max_narms=6):
+    """
+    Get genome handler class and configuration based on type.
+
+    Note: Symmetry is NOT supported (always None).
+    Note: Built-in repair is DISABLED (repair=False) - we use external repair workflow.
+    """
+    # Spherical parameter limits: [r, theta, phi, pitch, yaw, direction]
+    spherical_params = np.array([
+        [0.055, 0.105],
+        [-np.pi, np.pi],
+        [0, np.pi],
+        [-np.pi, np.pi],
+        [-np.pi, np.pi],
+        [0, 1]
+    ])
+
+    append_arm_chance = 0.0 if min_narms == max_narms else 0.5
+
+    if handler_type == 'spherical':
+        return {
+            'handler_class': SphericalAngularDroneGenomeHandler,
+            'handler_kwargs': {
+                'min_max_narms': (min_narms, max_narms),
+                'append_arm_chance': append_arm_chance,
+                'parameter_limits': spherical_params,
+                'bilateral_plane_for_symmetry': None,
+                'repair': False
+            },
+            'param_limits': spherical_params,
+            'coordinate_system': 'spherical'
+        }
+    elif handler_type == 'cartesian':
+        return {
+            'handler_class': CartesianEulerDroneGenomeHandler,
+            'handler_kwargs': {
+                'min_max_narms': (min_narms, max_narms),
+                'append_arm_chance': append_arm_chance,
+                'bilateral_plane_for_symmetry': None,
+                'repair': False
+            },
+            'param_limits': spherical_params,
+            'coordinate_system': 'cartesian'
+        }
+    else:
+        raise ValueError(f"Unknown genome handler type: {handler_type}")
+
+
+def create_fitness_function(args):
+    """Create fitness function for Lee controller tuning evaluation."""
+    return functools.partial(
+        evaluate_individual_with_tuning,
+        gate_cfg=args.gate_cfg,
+        max_evals=args.max_evals,
+        num_workers=args.cma_workers,
+        sim_time=args.sim_time,
+        dt=args.dt,
+        n_startup_points=args.n_startup_points,
+        timeout=args.timeout,
+        num=None
+    )
+
+
+def create_genome_handler_wrapper(handler_class, handler_kwargs):
+    """Create a wrapper class that provides the correct constructor interface."""
+    class GenomeHandlerWrapper(handler_class):
+        def __init__(self, *_args, genome=None, **_kwargs):
+            super().__init__(genome=genome, **handler_kwargs)
+
+    return GenomeHandlerWrapper
+
+
+def main():
+    """Main evolution function with Lee controller tuning."""
+    args = parse_arguments()
+
+    # Generate automatic experiment name with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    narms_str = f"{args.min_narms}arms" if args.min_narms == args.max_narms else f"{args.min_narms}-{args.max_narms}arms"
+    exp_name = f"lee_tuning_{args.gate_cfg}_{narms_str}_{timestamp}"
+
+    # Create full log directory path
+    full_log_dir = os.path.join(args.log_dir, exp_name)
+    os.makedirs(full_log_dir, exist_ok=True)
+
+    print("=" * 80)
+    print("Evolution with Lee Controller Tuning (CMA-ES Stage 1)")
+    print("=" * 80)
+    sys.stdout.flush()
+    print(f"Experiment name: {exp_name}")
+    print(f"Log directory: {full_log_dir}")
+    print(f"Genome handler: {args.genome_handler.upper()}")
+    print(f"Population size: {args.population_size}")
+    print(f"Generations: {args.generations}")
+    print(f"Mutations per generation: {args.num_mutate}")
+    print(f"Crossovers per generation: {args.num_crossover}")
+    print(f"Strategy type: {args.strategy_type}")
+    print(f"Gate configuration: {args.gate_cfg}")
+    print(f"Number of arms: {args.min_narms}-{args.max_narms}")
+    print()
+    print("LEE CONTROLLER TUNING PARAMETERS (CMA-ES STAGE 1):")
+    print(f"  Max evaluations per individual: {args.max_evals}")
+    print(f"  CMA-ES parallel workers: {args.cma_workers}")
+    print(f"  Simulation time: {args.sim_time}s")
+    print(f"  Time step: {args.dt}s")
+    print(f"  Timeout per evaluation: {args.timeout}s")
+    print(f"  Number of startup points: {args.n_startup_points}")
+    print()
+    print(f"Evolution parallel workers: {args.num_workers}")
+    print(f"Repair workflow: ENABLED (3-stage: Optimization → Hover Check → Hover Repair)")
+    print(f"Symmetry: DISABLED (not supported)")
+    print(f"CRITICAL: Each individual's controller is tuned via CMA-ES Stage 1")
+    print(f"CRITICAL: Fitness = max gates passed during tuning (0 if failed)")
+    print("=" * 80)
+    print()
+
+    # Get genome handler configuration
+    config = get_genome_handler_config(args.genome_handler, args.min_narms, args.max_narms)
+
+    # Create fitness function
+    fitness_function = create_fitness_function(args)
+
+    # Create a wrapper class for the genome handler
+    WrappedHandler = create_genome_handler_wrapper(config['handler_class'], config['handler_kwargs'])
+
+    # Generate initial population with parallel repair workflow
+    print("=" * 80)
+    print("Phase 1: Initial Population Generation (Parallel)")
+    print("=" * 80)
+    initial_population = generate_initial_pop_parallel(
+        WrappedHandler(),
+        args.population_size,
+        coordinate_system=config['coordinate_system'],
+        verbose=False,
+        num_workers=32  # Use all CPUs for initial generation
+    )
+
+    if initial_population is None or len(initial_population) == 0:
+        print("\n✗ Failed to generate initial population. Exiting.")
+        return
+
+    # Run evolution
+    print("=" * 80)
+    print("Phase 2: Evolution with Lee Controller Tuning")
+    print("=" * 80)
+    all_individuals = evolve(
+        fitness_function=fitness_function,
+        population_size=args.population_size,
+        num_generations=args.generations,
+        num_mutate=args.num_mutate,
+        num_crossover=args.num_crossover,
+        mutate_after_crossover=True,
+        strategy_type=args.strategy_type,
+        parent_selection=tournament_selection,
+        genome_handler=WrappedHandler,
+        log_dir=full_log_dir,
+        initial_population=initial_population,
+        num_workers=args.num_workers,
+    )
+
+    # Save complete evolution data as CSV
+    evolution_csv_path = f"{full_log_dir}/evolution_data.csv"
+    all_individuals_copy = all_individuals.copy()
+    all_individuals_copy['id'] = all_individuals_copy['id'].astype(str)
+    all_individuals_copy.to_csv(evolution_csv_path, index=False)
+    print(f"Evolution data saved to: {evolution_csv_path}")
+
+    # Get the best individual from the last generation
+    last_gen = args.generations - 1
+    best_individual = all_individuals.loc[all_individuals['generation'] == last_gen].sort_values(
+        by='fitness', ascending=False
+    ).iloc[0]
+    print(f"\nBest individual in generation {last_gen}: {best_individual['id']}, "
+          f"Fitness: {best_individual['fitness']} gates passed")
+
+    print(f"Genome: \n{best_individual['genome']}")
+
+    # Plot fitness evolution
+    print("\nGenerating fitness evolution plot...")
+    fitness_array = evolution_dataframe_to_fitness_array(all_individuals, population_size=args.population_size)
+
+    _fig, ax = plt.subplots(figsize=(12, 8))
+    plot_fitness(ax, fitness_array)
+    ax.set_title(f"Lee Tuning Evolution ({args.genome_handler.upper()} Handler, {args.gate_cfg})")
+    ax.set_xlabel("Generation")
+    ax.set_ylabel("Number of Gates Passed (via CMA-ES Tuning)")
+    plt.tight_layout()
+
+    # Save plot
+    fitness_plot_path = f"{full_log_dir}/fitness_evolution_{args.genome_handler}_{args.gate_cfg}.png"
+    plt.savefig(fitness_plot_path, dpi=300, bbox_inches='tight')
+    print(f"Fitness plot saved to: {fitness_plot_path}")
+
+    if args.show_plot:
+        plt.show()
+
+    print(f"\nEvolution completed! Best fitness: {best_individual['fitness']} gates passed")
+
+
+if __name__ == "__main__":
+    main()
