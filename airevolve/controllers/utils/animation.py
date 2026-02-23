@@ -16,7 +16,7 @@ from . import rotation_conversion, quaternion_functions
 
 numFrames = 8
 
-def sameAxisAnimation(t_all, waypoints, pos_all, quat_all, sDes_tr_all, Ts, params, xyzType, yawType, ifsave, orient="NED"):
+def sameAxisAnimation(t_all, waypoints, pos_all, quat_all, sDes_tr_all, Ts, params, xyzType, yawType, ifsave, orient="NED", gate_pos=None, gate_yaw=None, gate_size=2.0, bspline_traj=None):
 
     x = pos_all[:,0]
     y = pos_all[:,1]
@@ -64,34 +64,122 @@ def sameAxisAnimation(t_all, waypoints, pos_all, quat_all, sDes_tr_all, Ts, para
     trajType = ''
     yawTrajType = ''
 
-    if (xyzType == 0):
-        trajType = 'Hover'
+    # Only B-spline gate trajectories are supported (xyzType == 15)
+    if (xyzType == 15):
+        trajType = 'B-spline Gate Trajectory'
+        # Plot desired trajectory path
+        ax.plot(xDes, yDes, zDes, ':', lw=1.3, color='green')
     else:
-        ax.scatter(x_wp, y_wp, z_wp, color='green', alpha=1, marker = 'o', s = 25)
-        if (xyzType == 1 or xyzType == 12):
-            trajType = 'Simple Waypoints'
-        else:
-            ax.plot(xDes, yDes, zDes, ':', lw=1.3, color='green')
-            if (xyzType == 2):
-                trajType = 'Simple Waypoint Interpolation'
-            elif (xyzType == 3):
-                trajType = 'Minimum Velocity Trajectory'
-            elif (xyzType == 4):
-                trajType = 'Minimum Acceleration Trajectory'
-            elif (xyzType == 5):
-                trajType = 'Minimum Jerk Trajectory'
-            elif (xyzType == 6):
-                trajType = 'Minimum Snap Trajectory'
-            elif (xyzType == 7):
-                trajType = 'Minimum Acceleration Trajectory - Stop'
-            elif (xyzType == 8):
-                trajType = 'Minimum Jerk Trajectory - Stop'
-            elif (xyzType == 9):
-                trajType = 'Minimum Snap Trajectory - Stop'
-            elif (xyzType == 10):
-                trajType = 'Minimum Jerk Trajectory - Fast Stop'
-            elif (xyzType == 1):
-                trajType = 'Minimum Snap Trajectory - Fast Stop'
+        # Legacy trajectory types are no longer supported
+        trajType = f'Unsupported (xyzType={xyzType})'
+
+    # Draw gates if provided
+    if gate_pos is not None and gate_yaw is not None:
+        from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+        for gate_idx, (gpos, gyaw) in enumerate(zip(gate_pos, gate_yaw)):
+            # Create gate corners as a vertical square (standing up)
+            # In the gate's local frame, the gate is perpendicular to the forward direction
+            half_size = gate_size / 2.0
+
+            # Gate corners in local frame: gate is vertical, perpendicular to X-axis
+            # Y-axis goes left-right, Z-axis goes up-down
+            local_corners = np.array([
+                [0, -half_size, -half_size],  # Bottom left
+                [0,  half_size, -half_size],  # Bottom right
+                [0,  half_size,  half_size],  # Top right
+                [0, -half_size,  half_size]   # Top left
+            ])
+
+            # Rotation matrix for yaw (rotation around Z-axis in NED)
+            cos_yaw = np.cos(gyaw)
+            sin_yaw = np.sin(gyaw)
+
+            # Rotation matrix (Z-axis rotation)
+            R = np.array([
+                [cos_yaw, -sin_yaw, 0],
+                [sin_yaw,  cos_yaw, 0],
+                [0,        0,       1]
+            ])
+
+            # Transform corners to world frame
+            gate_corners_3d = []
+            for corner in local_corners:
+                # Rotate corner
+                rotated = R @ corner
+
+                # Translate to gate position
+                world_pos = rotated + gpos
+
+                # Adjust for NED orientation if needed (flip Z)
+                if orient == "NED":
+                    gate_corners_3d.append([world_pos[0], world_pos[1], -world_pos[2]])
+                else:
+                    gate_corners_3d.append([world_pos[0], world_pos[1], world_pos[2]])
+
+            # Draw gate as a polygon
+            gate_poly = Poly3DCollection([gate_corners_3d], alpha=0.3, facecolor='orange', edgecolor='darkorange', linewidths=2)
+            ax.add_collection3d(gate_poly)
+
+            # Draw gate center marker with order number
+            if orient == "NED":
+                gate_z_pos = -gpos[2]
+            else:
+                gate_z_pos = gpos[2]
+
+            ax.scatter([gpos[0]], [gpos[1]], [gate_z_pos], color='darkorange', marker='o', s=100, edgecolors='black', linewidths=1.5, zorder=6)
+
+            # Add order number on the gate (1-indexed)
+            gate_num = gate_idx + 1
+            ax.text(gpos[0], gpos[1], gate_z_pos, f'{gate_num}', fontsize=12,
+                   color='white', weight='bold', ha='center', va='center', zorder=7,
+                   bbox=dict(boxstyle='circle,pad=0.3', facecolor='darkorange',
+                            edgecolor='black', linewidth=2))
+
+    # Draw B-spline control points if provided
+    if bspline_traj is not None:
+        # Get control points from two-spline trajectory structure
+        startup_cps = bspline_traj.get_startup_control_points()
+        loop_cps = bspline_traj.get_loop_control_points()
+
+        # Visualize startup control points (run-up phase)
+        startup_x = startup_cps[:, 0]
+        startup_y = startup_cps[:, 1]
+        startup_z = startup_cps[:, 2]
+
+        if orient == "NED":
+            startup_z = -startup_z
+
+        # Draw startup control points
+        ax.scatter(startup_x, startup_y, startup_z, color='limegreen', marker='s', s=100,
+                   alpha=0.7, label='Run-up Control Points', edgecolors='darkgreen', linewidths=1.5, zorder=5)
+
+        # Draw lines connecting startup control points
+        ax.plot(startup_x, startup_y, startup_z, color='limegreen', linestyle='--',
+                linewidth=1.5, alpha=0.4, zorder=4)
+
+        # Visualize loop control points (periodic racing loop)
+        loop_x = loop_cps[:, 0]
+        loop_y = loop_cps[:, 1]
+        loop_z = loop_cps[:, 2]
+
+        if orient == "NED":
+            loop_z = -loop_z
+
+        # Draw loop control points
+        ax.scatter(loop_x, loop_y, loop_z, color='purple', marker='o', s=100,
+                   alpha=0.7, label='Loop Control Points', edgecolors='black', linewidths=1.5, zorder=5)
+
+        # Draw lines connecting loop control points (periodic - close the loop)
+        loop_x_closed = np.append(loop_x, loop_x[0])
+        loop_y_closed = np.append(loop_y, loop_y[0])
+        loop_z_closed = np.append(loop_z, loop_z[0])
+        ax.plot(loop_x_closed, loop_y_closed, loop_z_closed, color='purple', linestyle='--',
+                linewidth=1.5, alpha=0.4, zorder=4)
+
+        # Add legend with better positioning to avoid overlap
+        ax.legend(loc='upper left', bbox_to_anchor=(0.0, 0.95), fontsize=8,
+                  framealpha=0.95, edgecolor='black', fancybox=True, shadow=True)
 
     if (yawType == 0):
         yawTrajType = 'None'
