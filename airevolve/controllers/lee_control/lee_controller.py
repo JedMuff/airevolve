@@ -39,40 +39,27 @@ class LeeGeometricControl:
                  vel_P_gain=np.array([3.0, 3.0, 4.0]),      # Velocity gains [kvx, kvy, kvz]
                  att_P_gain=np.array([0.3, 0.3, 0.1]),      # Attitude gains [kR_roll, kR_pitch, kR_yaw] - scaled for direct control
                  rate_P_gain=np.array([0.05, 0.05, 0.03]),  # Angular rate gains
-                 # Safety limits (actually used)
-                 vel_max=np.array([5.0, 5.0, 5.0]),         # Maximum velocities [m/s]
-                 vel_max_all=5.0,                           # Maximum total velocity magnitude [m/s]
-                 saturate_vel_separately=False,             # Saturate each axis independently
-                 aggressiveness=1.0,                       # Scaling factor (0.5=conservative, 2.0=aggressive)
                  # Interface compatibility (unused parameters for compatibility with PID controllers)
-                 **kwargs):                                 # Catches vel_D_gain, vel_I_gain, rate_D_gain, tilt_max, rate_max, etc.
+                 **kwargs):                                 # Catches vel_D_gain, vel_I_gain, rate_D_gain, tilt_max, rate_max, vel_max, etc.
         """
         Initialize Lee geometric controller.
-        
+
         The Lee controller uses a fundamentally different approach than PID cascade controllers.
         It directly computes forces and torques from geometric tracking errors.
-        
+
         Args:
             quad: ConfigurableQuadcopter instance
             yawType: Yaw control type (0=disabled, 1=enabled)
             orient: Coordinate frame ("NED" or "ENU")
-            
+
             # Lee Control Gains (the core parameters)
-            pos_P_gain: Position control gains [kx, ky, kz] 
+            pos_P_gain: Position control gains [kx, ky, kz]
             vel_P_gain: Velocity control gains [kvx, kvy, kvz]
             att_P_gain: Attitude control gains [kR_roll, kR_pitch, kR_yaw]
             rate_P_gain: Angular rate gains [komega_roll, komega_pitch, komega_yaw]
-            
-            # Safety Limits (actually enforced)
-            vel_max: Maximum velocities per axis [m/s]
-            vel_max_all: Maximum total velocity magnitude [m/s] 
-            saturate_vel_separately: Saturate each axis independently
-            
-            # Auto-scaling
-            aggressiveness: Scaling factor (0.5=conservative, 2.0=aggressive)
-            
-            **kwargs: Unused PID parameters (vel_D_gain, vel_I_gain, rate_D_gain, 
-                     tilt_max, rate_max, etc.) kept for interface compatibility
+
+            **kwargs: Unused PID parameters (vel_D_gain, vel_I_gain, rate_D_gain,
+                     tilt_max, rate_max, vel_max, aggressiveness, etc.) kept for interface compatibility
         """
         # Store drone reference and configuration
         self.quad = quad
@@ -82,21 +69,16 @@ class LeeGeometricControl:
         
         # Store control gains (Lee control uses different structure than PID)
         self.pos_P_gain = pos_P_gain.copy()
-        self.vel_P_gain = vel_P_gain.copy()  
+        self.vel_P_gain = vel_P_gain.copy()
         self.att_P_gain = att_P_gain.copy()
         self.rate_P_gain = rate_P_gain.copy()
-        
-        # Store safety limits (actually used)
-        self.vel_max = vel_max.copy()
-        self.vel_max_all = vel_max_all
-        self.saturate_vel_separately = saturate_vel_separately
-        
-        # Extract unused parameters from kwargs for interface compatibility
+
+        # Extract unused parameters from kwargs for interface compatibility (not enforced)
         self.tilt_max = kwargs.get('tilt_max', 50.0*deg2rad)  # Only used for reporting
         self.rate_max = kwargs.get('rate_max', np.array([200.0*deg2rad, 200.0*deg2rad, 150.0*deg2rad]))  # Only used for reporting
-        
-        # Store auto-scaling parameters
-        self.aggressiveness = aggressiveness
+        self.vel_max = kwargs.get('vel_max', np.array([5.0, 5.0, 5.0]))  # Only used for reporting
+        self.vel_max_all = kwargs.get('vel_max_all', 5.0)  # Only used for reporting
+        self.aggressiveness = kwargs.get('aggressiveness', 1.0)  # Only used for reporting
         
         # Initialize Lee controller components
         self._init_lee_controllers(quad)
