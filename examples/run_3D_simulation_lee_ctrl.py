@@ -156,6 +156,7 @@ def main():
     bspline_params = None
     lee_gains = {}
     use_auto_scaling = True
+    gate_only_mode = False
 
     # Load configuration if provided
     if args.bspline_config:
@@ -167,6 +168,11 @@ def main():
         if 'n_startup_points' in config:
             n_startup_points = config['n_startup_points']
             print(f"  Using n_startup_points={n_startup_points} from config")
+
+        # Detect Stage 3 (gate-only mode)
+        if 'stage' in config and config['stage'] == 3:
+            gate_only_mode = True
+            print(f"  Stage 3 detected: using gate-only mode (pure periodic loop)")
 
         # Extract B-spline parameters
         if 'bspline_params' in config:
@@ -198,7 +204,8 @@ def main():
     # Create B-spline trajectory
     traj = Trajectory(quad, "xyz_pos", np.array([15, 3, 1]),
                      gate_config=gate_config,
-                     bspline_params={'n_startup_points': n_startup_points})
+                     bspline_params={'n_startup_points': n_startup_points,
+                                   'gate_only_mode': gate_only_mode})
 
     # Set B-spline parameters if loaded from config
     if bspline_params is not None:
@@ -211,11 +218,31 @@ def main():
     else:
         print("\n  Using default B-spline trajectory")
 
-    # Set drone initial position to start behind gate 0
-    start_pos = traj.bspline_trajectory.get_start_position()
-    quad.drone_sim.set_state(position=start_pos)
+    # CRITICAL: Get start position AFTER setting parameters (parameters may override default start position)
+    # Use evaluate(0.0) to get the actual trajectory position at t=0, not get_start_position()
+    # which returns the control point that may differ slightly from the spline evaluation
+    start_pos, start_vel, _ = traj.bspline_trajectory.evaluate(0.0)
+
+    # Compute initial yaw from trajectory's initial heading direction
+    # Use velocity at t=0.05s to get stable heading direction (startup phase uses quintic ramp)
+    _, vel_050, _ = traj.bspline_trajectory.evaluate(0.05)
+    if np.linalg.norm(vel_050[:2]) > 0.001:  # If horizontal velocity > 0.001 m/s
+        initial_yaw = np.arctan2(vel_050[1], vel_050[0])
+    else:
+        # Fallback to first gate direction if velocity is too small
+        initial_yaw = gate_config.gate_yaw[0]
+
+    initial_euler = np.array([0.0, 0.0, initial_yaw])  # Start level, facing initial heading
+
+    # Set drone state (attitude parameter uses euler angles, not quaternion)
+    # Start from rest (zero velocity) as trajectory expects
+    quad.drone_sim.set_state(position=start_pos, velocity=np.zeros(3),
+                            attitude=initial_euler, angular_velocity=np.zeros(3))
     quad._update_state_variables()
-    print(f"  Drone initial position: [{start_pos[0]:.2f}, {start_pos[1]:.2f}, {start_pos[2]:.2f}]\n")
+
+    print(f"  Drone initial position: [{start_pos[0]:.2f}, {start_pos[1]:.2f}, {start_pos[2]:.2f}]")
+    print(f"  Drone initial velocity: [0.00, 0.00, 0.00] m/s")
+    print(f"  Drone initial yaw: {initial_yaw*180/np.pi:.2f}° (trajectory heading)\n")
 
     # Create Lee Geometric Controller
     ctrl = LeeGeometricControl(quad, yawType=1, orient='NED',
