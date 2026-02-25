@@ -112,92 +112,41 @@ class DroneConfiguration:
             self.cg += (beam_mass / self.mass) * beam_midpoint
     
     def _compute_inertia(self):
-        """Compute inertia matrix components using parallel axis theorem."""
-        # Battery inertia (approximated as rectangular block)
-        # Typical battery dimensions: 60mm x 16mm x 18mm
-        battery_Ix = (1/12) * BATTERY_MASS * (0.016**2 + 0.018**2)
-        battery_Iy = (1/12) * BATTERY_MASS * (0.060**2 + 0.018**2)
-        battery_Iz = (1/12) * BATTERY_MASS * (0.060**2 + 0.016**2)
+        """
+        Compute inertia matrix components using drone-hover's Custombody.
 
-        # Controller inertia (approximated as rectangular block)
-        # Speedybee F405 dimensions: ~33mm x 8mm x 8mm
-        controller_Ix = (1/12) * CONTROLLER_MASS * (0.008**2 + 0.033**2)
-        controller_Iy = (1/12) * CONTROLLER_MASS * (0.008**2 + 0.033**2)
-        controller_Iz = (1/12) * CONTROLLER_MASS * (0.033**2 + 0.033**2)
+        Uses the proven physics-based inertia calculation from the drone-hover package,
+        which accounts for battery, controller, propellers, and beams with mounting points.
+        """
+        from dronehover.bodies.custom_bodies import Custombody
 
-        # Translate to center of gravity using parallel axis theorem
-        self.Ix = battery_Ix + BATTERY_MASS * (self.cg[1]**2 + self.cg[2]**2)
-        self.Ix += controller_Ix + CONTROLLER_MASS * (self.cg[1]**2 + self.cg[2]**2)
+        # Use drone-hover's Custombody to compute inertia
+        # It uses the same physics we had but is battle-tested and doesn't clamp values
+        drone = Custombody(self.propellers, mountpoints=self.mountpoints)
 
-        self.Iy = battery_Iy + BATTERY_MASS * (self.cg[0]**2 + self.cg[2]**2)
-        self.Iy += controller_Iy + CONTROLLER_MASS * (self.cg[0]**2 + self.cg[2]**2)
+        # Extract computed inertia values
+        self.Ix = drone.Ix
+        self.Iy = drone.Iy
+        self.Iz = drone.Iz
+        self.Ixy = drone.Ixy
+        self.Ixz = drone.Ixz
+        self.Iyz = drone.Iyz
 
-        self.Iz = battery_Iz + BATTERY_MASS * (self.cg[0]**2 + self.cg[1]**2)
-        self.Iz += controller_Iz + CONTROLLER_MASS * (self.cg[0]**2 + self.cg[1]**2)
-
-        # Initialize products of inertia
-        self.Ixy = -BATTERY_MASS * self.cg[0] * self.cg[1] - CONTROLLER_MASS * self.cg[0] * self.cg[1]
-        self.Ixz = -BATTERY_MASS * self.cg[0] * self.cg[2] - CONTROLLER_MASS * self.cg[0] * self.cg[2]
-        self.Iyz = -BATTERY_MASS * self.cg[1] * self.cg[2] - CONTROLLER_MASS * self.cg[1] * self.cg[2]
-        
-        # Add contributions from propellers and beams (using mounting points)
-        for prop, mountpoint in zip(self.propellers, self.mountpoints):
-            prop_mass = prop["mass"]
-            pos = np.array(prop["loc"])
-            arm_length = norm(pos - mountpoint)
-            arm_midpoint = (pos + mountpoint) / 2
-            beam_mass = BEAM_DENSITY * arm_length
-
-            # Propeller position relative to CG
-            r_prop = pos - self.cg
-
-            # Propeller contributions (treated as point mass)
-            self.Ix += prop_mass * (r_prop[1]**2 + r_prop[2]**2)
-            self.Iy += prop_mass * (r_prop[0]**2 + r_prop[2]**2)
-            self.Iz += prop_mass * (r_prop[0]**2 + r_prop[1]**2)
-            self.Ixy -= prop_mass * r_prop[0] * r_prop[1]
-            self.Ixz -= prop_mass * r_prop[0] * r_prop[2]
-            self.Iyz -= prop_mass * r_prop[1] * r_prop[2]
-
-            # Beam contributions (rod from mounting point to propeller)
-            r_beam = arm_midpoint - self.cg
-
-            # Use cross product method for inertia (drone-hover approach)
-            # For moments of inertia (Ix, Iy, Iz)
-            self.Ix += (1/12) * norm(np.cross(np.array([1, 0, 0]), pos))**2 * beam_mass
-            self.Ix += beam_mass * norm(np.cross(np.array([1, 0, 0]), r_beam))**2
-
-            self.Iy += (1/12) * norm(np.cross(np.array([0, 1, 0]), pos))**2 * beam_mass
-            self.Iy += beam_mass * norm(np.cross(np.array([0, 1, 0]), r_beam))**2
-
-            self.Iz += (1/12) * norm(np.cross(np.array([0, 0, 1]), pos))**2 * beam_mass
-            self.Iz += beam_mass * norm(np.cross(np.array([0, 0, 1]), r_beam))**2
-
-            # Products of inertia
-            self.Ixy -= (1/12) * pos[0] * pos[1] * beam_mass
-            self.Ixy -= beam_mass * (arm_midpoint[0] - self.cg[0]) * (arm_midpoint[1] - self.cg[1])
-
-            self.Ixz -= (1/12) * pos[0] * pos[2] * beam_mass
-            self.Ixz -= beam_mass * (arm_midpoint[0] - self.cg[0]) * (arm_midpoint[2] - self.cg[2])
-
-            self.Iyz -= (1/12) * pos[1] * pos[2] * beam_mass
-            self.Iyz -= beam_mass * (arm_midpoint[1] - self.cg[1]) * (arm_midpoint[2] - self.cg[2])
-        
-        # Create inertia matrix with numerical stability improvements
+        # Create inertia matrix
         self.inertia_matrix = np.array([
             [self.Ix, self.Ixy, self.Ixz],
             [self.Ixy, self.Iy, self.Iyz],
             [self.Ixz, self.Iyz, self.Iz]
         ])
-        
+
         # Clean up extremely small values that cause numerical instability
         # Values smaller than 1e-12 are likely numerical noise
         tolerance = 1e-12
         self.inertia_matrix[np.abs(self.inertia_matrix) < tolerance] = 0.0
-        
+
         # Ensure matrix is symmetric (fix any tiny asymmetries from numerical errors)
         self.inertia_matrix = 0.5 * (self.inertia_matrix + self.inertia_matrix.T)
-        
+
         # Ensure positive definite by checking eigenvalues
         eigenvals = np.linalg.eigvals(self.inertia_matrix)
         if np.any(eigenvals <= 0):
@@ -206,11 +155,7 @@ class DroneConfiguration:
             min_eigenval = max(1e-6, -np.min(eigenvals) + 1e-6)
             self.inertia_matrix += min_eigenval * np.eye(3)
 
-        # Add minimum inertia values to prevent numerical instability in dynamics
-        min_inertia = 0.01  # kg*m^2 - reasonable minimum for small drones
-        self.inertia_matrix[0,0] = max(self.inertia_matrix[0,0], min_inertia)
-        self.inertia_matrix[1,1] = max(self.inertia_matrix[1,1], min_inertia)
-        self.inertia_matrix[2,2] = max(self.inertia_matrix[2,2], min_inertia)
+        # NO min_inertia clamp - drone-hover computes realistic values for all drone sizes
 
     def _compute_allocation_matrices(self):
         """Compute force and moment allocation matrices."""

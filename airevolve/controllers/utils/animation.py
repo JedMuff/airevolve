@@ -138,43 +138,68 @@ def sameAxisAnimation(t_all, waypoints, pos_all, quat_all, sDes_tr_all, Ts, para
 
     # Draw B-spline control points if provided
     if bspline_traj is not None:
-        # Get control points from two-spline trajectory structure
-        startup_cps = bspline_traj.get_startup_control_points()
-        loop_cps = bspline_traj.get_loop_control_points()
+        # Get all control points from the single periodic spline
+        all_cps = bspline_traj.get_all_control_points()
 
-        # Visualize startup control points (run-up phase)
-        startup_x = startup_cps[:, 0]
-        startup_y = startup_cps[:, 1]
-        startup_z = startup_cps[:, 2]
+        # Split control points: start + startup points + gate points
+        n_startup = bspline_traj.n_startup_points
+
+        # Starting point (index 0)
+        start_point = all_cps[0:1]
+
+        # Startup intermediate points (if any)
+        if n_startup > 0:
+            startup_cps = all_cps[1:1+n_startup]
+        else:
+            startup_cps = np.zeros((0, 3))
+
+        # Gate control points (remaining points)
+        gate_cps = all_cps[1+n_startup:]
+
+        # Visualize starting point
+        start_x, start_y, start_z = start_point[0]
+        if orient == "NED":
+            start_z = -start_z
+        ax.scatter([start_x], [start_y], [start_z], color='cyan', marker='*', s=200,
+                   alpha=0.9, label='Start Point', edgecolors='black', linewidths=2, zorder=6)
+
+        # Visualize startup intermediate control points if present
+        if len(startup_cps) > 0:
+            startup_x = startup_cps[:, 0]
+            startup_y = startup_cps[:, 1]
+            startup_z = startup_cps[:, 2]
+
+            if orient == "NED":
+                startup_z = -startup_z
+
+            # Draw startup control points
+            ax.scatter(startup_x, startup_y, startup_z, color='limegreen', marker='s', s=100,
+                       alpha=0.7, label='Startup Control Points', edgecolors='darkgreen', linewidths=1.5, zorder=5)
+
+            # Draw lines connecting start → startup points
+            all_startup_x = np.concatenate([[start_x], startup_x])
+            all_startup_y = np.concatenate([[start_y], startup_y])
+            all_startup_z = np.concatenate([[start_z], startup_z])
+            ax.plot(all_startup_x, all_startup_y, all_startup_z, color='limegreen', linestyle='--',
+                    linewidth=1.5, alpha=0.4, zorder=4)
+
+        # Visualize gate control points
+        gate_x = gate_cps[:, 0]
+        gate_y = gate_cps[:, 1]
+        gate_z = gate_cps[:, 2]
 
         if orient == "NED":
-            startup_z = -startup_z
+            gate_z = -gate_z
 
-        # Draw startup control points
-        ax.scatter(startup_x, startup_y, startup_z, color='limegreen', marker='s', s=100,
-                   alpha=0.7, label='Run-up Control Points', edgecolors='darkgreen', linewidths=1.5, zorder=5)
+        # Draw gate control points
+        ax.scatter(gate_x, gate_y, gate_z, color='purple', marker='o', s=100,
+                   alpha=0.7, label='Gate Control Points', edgecolors='black', linewidths=1.5, zorder=5)
 
-        # Draw lines connecting startup control points
-        ax.plot(startup_x, startup_y, startup_z, color='limegreen', linestyle='--',
-                linewidth=1.5, alpha=0.4, zorder=4)
-
-        # Visualize loop control points (periodic racing loop)
-        loop_x = loop_cps[:, 0]
-        loop_y = loop_cps[:, 1]
-        loop_z = loop_cps[:, 2]
-
-        if orient == "NED":
-            loop_z = -loop_z
-
-        # Draw loop control points
-        ax.scatter(loop_x, loop_y, loop_z, color='purple', marker='o', s=100,
-                   alpha=0.7, label='Loop Control Points', edgecolors='black', linewidths=1.5, zorder=5)
-
-        # Draw lines connecting loop control points (periodic - close the loop)
-        loop_x_closed = np.append(loop_x, loop_x[0])
-        loop_y_closed = np.append(loop_y, loop_y[0])
-        loop_z_closed = np.append(loop_z, loop_z[0])
-        ax.plot(loop_x_closed, loop_y_closed, loop_z_closed, color='purple', linestyle='--',
+        # Draw lines connecting gate control points (periodic - close the loop back to first gate)
+        gate_x_closed = np.append(gate_x, gate_x[0])
+        gate_y_closed = np.append(gate_y, gate_y[0])
+        gate_z_closed = np.append(gate_z, gate_z[0])
+        ax.plot(gate_x_closed, gate_y_closed, gate_z_closed, color='purple', linestyle='--',
                 linewidth=1.5, alpha=0.4, zorder=4)
 
         # Add legend with better positioning to avoid overlap
