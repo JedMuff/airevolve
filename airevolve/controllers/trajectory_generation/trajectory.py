@@ -58,7 +58,9 @@ class Trajectory:
             bspline_params = {}
 
         n_startup_points = bspline_params.get('n_startup_points', 2)
-        self.bspline_trajectory = BSplineGateTrajectory(gate_config, n_startup_points=n_startup_points)
+        gate_only_mode = bspline_params.get('gate_only_mode', False)
+        self.bspline_trajectory = BSplineGateTrajectory(gate_config, n_startup_points=n_startup_points,
+                                                       gate_only_mode=gate_only_mode)
 
         # Initialize placeholder waypoint arrays for compatibility
         # (some visualization code may still reference these)
