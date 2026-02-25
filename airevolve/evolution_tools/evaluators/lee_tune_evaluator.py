@@ -186,7 +186,7 @@ class GateChecker:
 
 def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
                         gate_config, sim_time=20.0, dt=0.005, n_startup_points=1,
-                        verbose=False):
+                        gate_only_mode=False, verbose=False):
     """
     Run simulation with Lee controller for a given morphology and gains
 
@@ -197,6 +197,7 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
         sim_time: Simulation time in seconds
         dt: Time step in seconds
         n_startup_points: Number of startup control points
+        gate_only_mode: If True, use gate-only mode (pure racing loop)
         verbose: If True, show debug output
 
     Returns:
@@ -240,7 +241,7 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
 
         # Create B-spline trajectory
         bspline_traj = BSplineGateTrajectory(gate_config, n_startup_points=n_startup_points,
-                                            gate_offset_scale=0.5)
+                                            gate_offset_scale=0.5, gate_only_mode=gate_only_mode)
         bspline_params = bspline_traj.get_default_parameters()
         bspline_traj.set_parameters(bspline_params)
 
@@ -252,7 +253,8 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
         from airevolve.controllers.trajectory_generation.trajectory import Trajectory
         traj = Trajectory(quad, "xyz_pos", np.array([15, 3, 1]),
                          gate_config=gate_config,
-                         bspline_params={'n_startup_points': n_startup_points})
+                         bspline_params={'n_startup_points': n_startup_points,
+                                       'gate_only_mode': gate_only_mode})
         traj.bspline_trajectory = bspline_traj
 
         # Create wind model (no wind)
@@ -333,7 +335,7 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
 
 def _evaluate_solution_wrapper(args):
     """Wrapper function for parallel evaluation"""
-    (params, individual, gate_config, sim_time, dt, n_startup_points) = args
+    (params, individual, gate_config, sim_time, dt, n_startup_points, gate_only_mode) = args
 
     pos_g, vel_g, att_g, rate_g = params[0:4]
 
@@ -342,6 +344,7 @@ def _evaluate_solution_wrapper(args):
         individual, pos_g, vel_g, att_g, rate_g,
         gate_config, sim_time, dt,
         n_startup_points=n_startup_points,
+        gate_only_mode=gate_only_mode,
         verbose=False
     )
 
@@ -374,8 +377,8 @@ def _evaluate_solution_wrapper(args):
 
 def optimize_controller_for_morphology(individual, gate_config, max_evaluations=100,
                                       num_workers=None, sim_time=20.0, dt=0.005,
-                                      n_startup_points=1, timeout_per_eval=30.0,
-                                      save_dir=None):
+                                      n_startup_points=1, gate_only_mode=False,
+                                      timeout_per_eval=30.0, save_dir=None):
     """
     Run Stage 1 CMA-ES optimization to tune controller gains for a morphology.
 
@@ -387,6 +390,7 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
         sim_time: Simulation time in seconds
         dt: Time step in seconds
         n_startup_points: Number of startup control points
+        gate_only_mode: If True, use gate-only mode (pure racing loop)
         timeout_per_eval: Timeout per evaluation in seconds
         save_dir: Directory to save results (optional)
 
@@ -442,7 +446,7 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
                 # Parallel evaluation
                 if num_workers > 1:
                     eval_args = [
-                        (sol, individual, gate_config, sim_time, dt, n_startup_points)
+                        (sol, individual, gate_config, sim_time, dt, n_startup_points, gate_only_mode)
                         for sol in solutions
                     ]
 
@@ -476,7 +480,7 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
                     fitness_values = []
                     for sol in solutions:
                         score, result = _evaluate_solution_wrapper(
-                            (sol, individual, gate_config, sim_time, dt, n_startup_points)
+                            (sol, individual, gate_config, sim_time, dt, n_startup_points, gate_only_mode)
                         )
                         fitness_values.append(score)
 
@@ -535,8 +539,8 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
 
 def evaluate_individual_with_tuning(individual, ind_save_dir, gate_cfg='circle',
                                     max_evals=100, num_workers=4, sim_time=20.0,
-                                    dt=0.005, n_startup_points=1, timeout=30.0,
-                                    num=None):
+                                    dt=0.005, n_startup_points=1, gate_only_mode=False,
+                                    timeout=30.0, num=None):
     """
     Evaluate individual by tuning its controller gains via CMA-ES Stage 1.
 
@@ -551,6 +555,7 @@ def evaluate_individual_with_tuning(individual, ind_save_dir, gate_cfg='circle',
         sim_time: Simulation time in seconds
         dt: Time step in seconds
         n_startup_points: Number of startup control points
+        gate_only_mode: If True, use gate-only mode (pure racing loop)
         timeout: Timeout per evaluation in seconds
         num: Individual number (for logging)
 
@@ -569,6 +574,7 @@ def evaluate_individual_with_tuning(individual, ind_save_dir, gate_cfg='circle',
         sim_time=sim_time,
         dt=dt,
         n_startup_points=n_startup_points,
+        gate_only_mode=gate_only_mode,
         timeout_per_eval=timeout,
         save_dir=ind_save_dir
     )

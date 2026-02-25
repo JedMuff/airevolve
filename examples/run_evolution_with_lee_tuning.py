@@ -106,6 +106,8 @@ def parse_arguments():
                        help='Timeout per evaluation in seconds (default: 30.0)')
     parser.add_argument('--n-startup-points', type=int, default=1,
                        help='Number of startup control points (default: 1)')
+    parser.add_argument('--gate-only-mode', action='store_true',
+                       help='Use gate-only mode (pure racing loop without startup phase)')
 
     # Gate configuration
     parser.add_argument('--gate-cfg', choices=['backandforth', 'figure8', 'circle', 'slalom'],
@@ -373,6 +375,7 @@ def create_fitness_function(args):
         sim_time=args.sim_time,
         dt=args.dt,
         n_startup_points=args.n_startup_points,
+        gate_only_mode=args.gate_only_mode,
         timeout=args.timeout,
         num=None
     )
@@ -422,6 +425,7 @@ def main():
     print(f"  Time step: {args.dt}s")
     print(f"  Timeout per evaluation: {args.timeout}s")
     print(f"  Number of startup points: {args.n_startup_points}")
+    print(f"  Gate-only mode: {args.gate_only_mode}")
     print()
     print(f"Evolution parallel workers: {args.num_workers}")
     print(f"Repair workflow: ENABLED (3-stage: Optimization → Hover Check → Hover Repair)")
