@@ -7,7 +7,7 @@
 ## --- Resources Requested ---
 #SBATCH --time=100:00:00
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=64G
+#SBATCH --mem=31G
 
 ## --- Job Array: 10 repetitions ---
 #SBATCH --array=0-9
@@ -23,8 +23,8 @@ echo "Running on node: $(hostname)"
 echo "Job started at: $(date)"
 
 # --- Environment Setup ---
-VENV_PATH=/home/jed/workspaces/airevolve/.venv
-PROJECT_DIR=/home/jed/workspaces/airevolve
+VENV_PATH=/home/jed/workspace/airevolve/.venv
+PROJECT_DIR=/home/jed/workspace/airevolve
 
 source "$VENV_PATH/bin/activate"
 

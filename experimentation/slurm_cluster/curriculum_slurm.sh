@@ -7,7 +7,7 @@
 ## --- Resources Requested ---
 #SBATCH --time=100:00:00
 #SBATCH --cpus-per-task=14
-#SBATCH --mem=64G
+#SBATCH --mem=31G
 
 ## --- Job Array: 8 repetitions x 2 arm configs = 16 tasks ---
 ## Even tasks (0,2,4,...18): 4 arms, Odd tasks (1,3,5,...19): 6 arms
@@ -24,8 +24,8 @@ echo "Running on node: $(hostname)"
 echo "Job started at: $(date)"
 
 # --- Environment Setup ---
-VENV_PATH=/home/jed/workspaces/airevolve/.venv
-PROJECT_DIR=/home/jed/workspaces/airevolve
+VENV_PATH=/home/jed/workspace/airevolve/.venv
+PROJECT_DIR=/home/jed/workspace/airevolve
 
 source "$VENV_PATH/bin/activate"
 
