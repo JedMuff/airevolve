@@ -1,14 +1,15 @@
 """
-Evolution with Lee Controller Tuning
+Evolution with Lee Controller Tuning (2-Stage CMA-ES)
 
 This script runs evolutionary optimization where each morphology is evaluated by
-tuning its Lee controller gains via CMA-ES (Stage 1 optimization).
+tuning its Lee controller via a 2-stage CMA-ES pipeline.
 
 Key Features:
 - Initial population generated with parallel repair workflow
 - Each individual's fitness = max gates passed during controller tuning
 - Individuals that fail tuning (0 gates) receive fitness of 0
-- Controller gains optimized per morphology using CMA-ES
+- Stage 1: Optimise controller gains + trajectory timing (7 params)
+- Stage 2: Optimise gains + timing + gate offset control points (7 + n_gates*3 params)
 
 Usage:
     # Basic evolution with Lee tuning
@@ -37,6 +38,13 @@ Usage:
 
 import sys
 import os
+
+# Limit BLAS/OpenMP threads to 1 per process — must be set before numpy import.
+# Parallelism is handled by multiprocessing Pool, not BLAS threads.
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+
 import argparse
 import time
 import numpy as np
@@ -50,7 +58,11 @@ from tqdm import tqdm
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from airevolve.evolution_tools.evaluators.lee_tune_evaluator import evaluate_individual_with_tuning
+from airevolve.evolution_tools.evaluators.lee_tune_evaluator import (
+    evaluate_individual_with_tuning,
+    optimize_controller_with_early_stop,
+)
+from airevolve.controllers.utils.gate_configs import GATE_CONFIGS
 from airevolve.evolution_tools.strategies.mu_lambda import evolve
 from airevolve.evolution_tools.selectors.tournament import tournament_selection
 from airevolve.evolution_tools.genome_handlers.spherical_angular_genome_handler import SphericalAngularDroneGenomeHandler
@@ -70,17 +82,17 @@ from airevolve.evolution_tools.genome_handlers.operators.optimization_repair_ope
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description='Run evolution with Lee controller tuning (CMA-ES Stage 1)'
+        description='Run evolution with Lee controller tuning (2-Stage CMA-ES)'
     )
 
     # Genome and evolution parameters
     parser.add_argument('--genome-handler', choices=['spherical', 'cartesian'],
                        default='spherical', help='Genome handler to use (default: spherical)')
-    parser.add_argument('--population-size', type=int, default=20,
+    parser.add_argument('--population-size', type=int, default=16,
                        help='Population size (default: 20)')
-    parser.add_argument('--generations', type=int, default=10,
-                       help='Number of generations (default: 10)')
-    parser.add_argument('--num-mutate', type=int, default=20,
+    parser.add_argument('--generations', type=int, default=50,
+                       help='Number of generations (default: 50)')
+    parser.add_argument('--num-mutate', type=int, default=16,
                        help='Number of individuals to mutate per generation (default: 20)')
     parser.add_argument('--num-crossover', type=int, default=0,
                        help='Number of crossover operations per generation (default: 0)')
@@ -93,11 +105,11 @@ def parse_arguments():
     parser.add_argument('--strategy-type', choices=['plus', 'comma'],
                        default='plus', help='Evolution strategy type (default: plus)')
 
-    # Lee controller tuning parameters (CMA-ES Stage 1)
-    parser.add_argument('--max-evals', type=int, default=100,
-                       help='Maximum CMA-ES evaluations per individual (default: 100)')
-    parser.add_argument('--cma-workers', type=int, default=4,
-                       help='Number of parallel workers for CMA-ES (default: 4)')
+    # Lee controller tuning parameters (2-Stage CMA-ES)
+    parser.add_argument('--max-evals', type=int, default=500,
+                       help='Maximum CMA-ES evaluations per individual (default: 500)')
+    parser.add_argument('--cma-workers', type=int, default=1,
+                       help='Number of parallel workers for CMA-ES (default: 1)')
     parser.add_argument('--sim-time', type=float, default=20.0,
                        help='Simulation time in seconds (default: 20.0)')
     parser.add_argument('--dt', type=float, default=0.005,
@@ -106,22 +118,34 @@ def parse_arguments():
                        help='Timeout per evaluation in seconds (default: 30.0)')
     parser.add_argument('--n-startup-points', type=int, default=1,
                        help='Number of startup control points (default: 1)')
-    parser.add_argument('--gate-only-mode', action='store_true',
-                       help='Use gate-only mode (pure racing loop without startup phase)')
+    parser.add_argument('--gate-only-mode', action='store_true', default=True,
+                       help='Use gate-only mode (pure racing loop without startup phase, default: True)')
+    parser.add_argument('--no-gate-only-mode', dest='gate_only_mode', action='store_false',
+                       help='Disable gate-only mode (include startup phase)')
 
     # Gate configuration
     parser.add_argument('--gate-cfg', choices=['backandforth', 'figure8', 'circle', 'slalom'],
-                       default='circle', help='Gate configuration (default: circle)')
+                       default='figure8', help='Gate configuration (default: figure8)')
 
     # Evolution workers (for parallel evaluation of individuals)
-    parser.add_argument('--num-workers', type=int, default=1,
-                       help='Number of parallel workers for evolution (default: 1)')
+    parser.add_argument('--num-workers', type=int, default=32,
+                       help='Number of parallel workers for evolution (default: 32)')
 
     # Morphology parameters
     parser.add_argument('--min-narms', type=int, default=6,
                        help='Minimum number of arms (default: 6)')
     parser.add_argument('--max-narms', type=int, default=6,
                        help='Maximum number of arms (default: 6)')
+
+    # Initial population CMA-ES tuning parameters
+    parser.add_argument('--init-pop-max-evals', type=int, default=500,
+                       help='CMA-ES budget per drone for initial pop tuning (default: 500)')
+    parser.add_argument('--init-pop-gates-threshold', type=int, default=8,
+                       help='Min gates to pass for acceptance into initial pop (default: 1)')
+    parser.add_argument('--init-pop-tuning-workers', type=int, default=32,
+                       help='Workers for Phase 2 tuning pool (default: 32)')
+    parser.add_argument('--skip-init-tuning', action='store_true',
+                       help='Skip CMA-ES tuning in initial pop (revert to original behavior)')
 
     return parser.parse_args()
 
@@ -192,32 +216,89 @@ def _try_generate_individual(args):
     return final_ind, status
 
 
-def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spherical',
-                                  verbose=False, num_workers=None):
+def _tune_single_individual(args):
     """
-    Generate initial population using parallel sampling.
+    Worker function to CMA-ES tune a single hover+repair-validated individual.
 
-    Strategy:
-    1. Sample many individuals in parallel
-    2. Keep only those that pass full repair pipeline
-    3. Expected success rate: ~0.2% (1/500)
+    Top-level function (picklable for multiprocessing). Each worker runs
+    CMA-ES single-threaded (num_workers=1) — the outer Pool provides
+    parallelism across drones.
+
+    Returns:
+        Tuple of (individual_or_None, tuning_result_dict)
+        individual is returned only if gates_passed >= gates_threshold.
+    """
+    (individual_list, gate_config_name, max_evals, gates_threshold,
+     sim_time, dt, n_startup_points, gate_only_mode, timeout) = args
+
+    individual = np.array(individual_list)
+    gate_config = GATE_CONFIGS[gate_config_name]
+
+    tuning = optimize_controller_with_early_stop(
+        individual, gate_config,
+        max_evaluations=max_evals,
+        num_workers=1,
+        sim_time=sim_time,
+        dt=dt,
+        timeout_per_eval=timeout,
+        gates_threshold=gates_threshold,
+        n_startup_points=n_startup_points,
+        gate_only_mode=gate_only_mode,
+    )
+
+    if tuning["gates_passed"] >= gates_threshold:
+        return individual, tuning
+    else:
+        return None, tuning
+
+
+def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spherical',
+                                  verbose=False, num_workers=None,
+                                  gate_cfg='circle', init_pop_max_evals=200,
+                                  init_pop_gates_threshold=1,
+                                  init_pop_tuning_workers=None,
+                                  sim_time=20.0, dt=0.005,
+                                  n_startup_points=1, gate_only_mode=False,
+                                  timeout=30.0, skip_init_tuning=False):
+    """
+    Generate initial population using parallel sampling + optional CMA-ES tuning.
+
+    Two-phase strategy:
+      Phase 1 (fast): Sample many individuals, keep hover+repair survivors (~0.2%)
+      Phase 2 (slow): CMA-ES tune each survivor, keep those that pass gates threshold
 
     Args:
         genotype: Genome handler instance
         pop_size: Size of population to generate
         coordinate_system: 'spherical' or 'cartesian'
         verbose: Print detailed messages
-        num_workers: Number of parallel workers (defaults to CPU count)
+        num_workers: Number of parallel workers for Phase 1 (defaults to CPU count)
+        gate_cfg: Gate configuration name for CMA-ES tuning
+        init_pop_max_evals: CMA-ES budget per drone for Phase 2
+        init_pop_gates_threshold: Min gates to pass for acceptance
+        init_pop_tuning_workers: Workers for Phase 2 tuning pool (defaults to CPU count)
+        sim_time: Simulation time in seconds
+        dt: Time step in seconds
+        n_startup_points: Number of startup control points
+        gate_only_mode: If True, use gate-only mode
+        timeout: Timeout per evaluation in seconds
+        skip_init_tuning: If True, skip Phase 2 (revert to original behavior)
 
     Returns:
-        Array of repaired individuals
+        Array of repaired (and optionally tuned) individuals
     """
     if num_workers is None:
         num_workers = cpu_count()
+    if init_pop_tuning_workers is None:
+        init_pop_tuning_workers = cpu_count()
 
+    tuning_label = "DISABLED (--skip-init-tuning)" if skip_init_tuning else "ENABLED"
     print(f"Generating initial population of size {pop_size} using {num_workers} parallel workers...")
-    print("Strategy: Parallel sampling → Strict hover check → Fix collisions → Align thrust")
-    print("Expected success rate: ~0.2% (need ~{:,} samples for {} individuals)\n".format(pop_size * 500, pop_size))
+    print("Strategy: Parallel sampling -> Strict hover check -> Fix collisions -> Align thrust")
+    if not skip_init_tuning:
+        print(f"       -> CMA-ES tuning (budget={init_pop_max_evals}, threshold={init_pop_gates_threshold} gates)")
+    print(f"CMA-ES init-pop tuning: {tuning_label}")
+    print("Expected Phase 1 success rate: ~0.2% (need ~{:,} samples for {} individuals)\n".format(pop_size * 500, pop_size))
     sys.stdout.flush()
 
     start_time = time.time()
@@ -226,26 +307,31 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
     base_seed = np.random.randint(0, 2**31)
     print(f"Base seed for this run: {base_seed}\n")
 
-    # Sample in batches until we have enough
     batch_size = pop_size * 1000
-    max_batches = 100
+    max_iterations = 100
 
-    successful_individuals = []
+    accepted_individuals = []
     total_stats = {
         'failed_hover': 0,
         'failed_stage1': 0,
         'failed_stage3': 0,
-        'success': 0,
+        'phase1_success': 0,
+        'phase2_attempted': 0,
+        'phase2_accepted': 0,
         'total_attempts': 0
     }
 
-    for batch_idx in range(max_batches):
-        if len(successful_individuals) >= pop_size:
+    for batch_idx in range(max_iterations):
+        if len(accepted_individuals) >= pop_size:
             break
 
-        print(f"\nBatch {batch_idx + 1}: Sampling {batch_size} individuals...")
+        remaining = pop_size - len(accepted_individuals)
 
-        # Prepare args for this batch
+        print(f"\n--- Iteration {batch_idx + 1}: Sampling {batch_size} individuals (need {remaining} more) ---")
+
+        # ==============================================================
+        # PHASE 1: Fast parallel hover check + repair
+        # ==============================================================
         handler_config = {
             'min_max_narms': (genotype.min_narms, genotype.max_narms),
             'append_arm_chance': genotype.append_arm_chance,
@@ -265,33 +351,94 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
             for i in range(batch_size)
         ]
 
-        # Process in parallel with progress bar
+        phase1_survivors = []
+
         with Pool(processes=num_workers) as pool:
-            with tqdm(total=batch_size, desc=f"Batch {batch_idx + 1}", unit="ind") as pbar:
+            with tqdm(total=batch_size, desc=f"Phase 1 (batch {batch_idx + 1})", unit="ind") as pbar:
                 for result, status in pool.imap_unordered(_try_generate_individual, args_list, chunksize=10):
                     total_stats['total_attempts'] += 1
                     total_stats['failed_hover'] += status['failed_hover']
                     total_stats['failed_stage1'] += status['failed_stage1']
                     total_stats['failed_stage3'] += status['failed_stage3']
-                    total_stats['success'] += status['success']
+                    total_stats['phase1_success'] += status['success']
 
                     if result is not None:
-                        successful_individuals.append(result)
+                        phase1_survivors.append(result)
 
                     pbar.update(1)
                     pbar.set_postfix({
-                        'found': len(successful_individuals),
-                        'rate': f"{total_stats['success']/total_stats['total_attempts']*100:.2f}%"
+                        'survivors': len(phase1_survivors),
+                        'rate': f"{total_stats['phase1_success']/max(1,total_stats['total_attempts'])*100:.2f}%"
                     })
 
-                    # Stop early if we have enough
-                    if len(successful_individuals) >= pop_size:
+        print(f"  Phase 1 survivors: {len(phase1_survivors)}")
+
+        if len(phase1_survivors) == 0:
+            print("  No survivors in this batch, continuing...")
+            continue
+
+        # ==============================================================
+        # PHASE 2: CMA-ES tuning (skip if --skip-init-tuning)
+        # ==============================================================
+        if skip_init_tuning:
+            accepted_individuals.extend(phase1_survivors)
+            print(f"  (tuning skipped) Accepted: {len(accepted_individuals)}/{pop_size}")
+            if len(accepted_individuals) >= pop_size:
+                print(f"  Target reached!")
+                break
+            continue
+
+        print(f"  Phase 2: CMA-ES tuning {len(phase1_survivors)} survivors "
+              f"(budget={init_pop_max_evals}, threshold={init_pop_gates_threshold} gates, "
+              f"workers={init_pop_tuning_workers})...")
+
+        tuning_args = [
+            (
+                ind.tolist(),
+                gate_cfg,
+                init_pop_max_evals,
+                init_pop_gates_threshold,
+                sim_time, dt,
+                n_startup_points,
+                gate_only_mode,
+                timeout,
+            )
+            for ind in phase1_survivors
+        ]
+
+        batch_accepted = 0
+        batch_attempted = 0
+
+        with Pool(processes=init_pop_tuning_workers) as pool:
+            with tqdm(total=len(phase1_survivors), desc=f"Phase 2 (batch {batch_idx + 1})", unit="drone") as pbar2:
+                for tuned_ind, tuning_result in pool.imap_unordered(_tune_single_individual, tuning_args):
+                    batch_attempted += 1
+                    total_stats['phase2_attempted'] += 1
+
+                    if tuned_ind is not None:
+                        accepted_individuals.append(tuned_ind)
+                        batch_accepted += 1
+                        total_stats['phase2_accepted'] += 1
+
+                    gates = tuning_result.get('gates_passed', 0)
+                    evals = tuning_result.get('n_evaluations', 0)
+                    pbar2.update(1)
+                    pbar2.set_postfix({
+                        'accepted': f"{len(accepted_individuals)}/{pop_size}",
+                        'gates': gates,
+                        'evals': evals,
+                    })
+
+                    # Break early if we have enough
+                    if len(accepted_individuals) >= pop_size:
                         break
 
-        print(f"  Found {len(successful_individuals)}/{pop_size} so far...")
+        print(f"  Phase 2: {batch_accepted}/{batch_attempted} passed "
+              f"(total accepted: {len(accepted_individuals)}/{pop_size})")
 
-        if len(successful_individuals) >= pop_size:
-            print(f"✓ Target reached!")
+        # Update Phase 2 success rate estimate for adaptive batch sizing
+        if len(accepted_individuals) >= pop_size:
+            print(f"  Target reached!")
             break
 
     end_time = time.time()
@@ -300,21 +447,27 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
     print(f"\n{'='*80}")
     print("Initial Population Generation Results")
     print(f"{'='*80}")
-    print(f"Successfully generated: {len(successful_individuals)}/{pop_size}")
-    print(f"Total attempts: {total_stats['total_attempts']:,}")
-    print(f"Success rate: {total_stats['success']/total_stats['total_attempts']*100:.3f}%")
-    print(f"\nFailure breakdown:")
-    print(f"  Failed hover check: {total_stats['failed_hover']:,} ({total_stats['failed_hover']/total_stats['total_attempts']*100:.1f}%)")
-    print(f"  Failed Stage 1 (optimization): {total_stats['failed_stage1']:,} ({total_stats['failed_stage1']/total_stats['total_attempts']*100:.1f}%)")
-    print(f"  Failed Stage 3 (hover repair): {total_stats['failed_stage3']:,} ({total_stats['failed_stage3']/total_stats['total_attempts']*100:.1f}%)")
+    print(f"Successfully generated: {len(accepted_individuals)}/{pop_size}")
+    print(f"Total Phase 1 attempts: {total_stats['total_attempts']:,}")
+    print(f"Phase 1 success rate: {total_stats['phase1_success']/max(1,total_stats['total_attempts'])*100:.3f}%")
+    print(f"\nPhase 1 failure breakdown:")
+    print(f"  Failed hover check: {total_stats['failed_hover']:,} ({total_stats['failed_hover']/max(1,total_stats['total_attempts'])*100:.1f}%)")
+    print(f"  Failed optimization repair: {total_stats['failed_stage1']:,} ({total_stats['failed_stage1']/max(1,total_stats['total_attempts'])*100:.1f}%)")
+    print(f"  Failed hover repair: {total_stats['failed_stage3']:,} ({total_stats['failed_stage3']/max(1,total_stats['total_attempts'])*100:.1f}%)")
+    if not skip_init_tuning:
+        print(f"\nPhase 2 (CMA-ES tuning):")
+        print(f"  Attempted: {total_stats['phase2_attempted']}")
+        print(f"  Accepted:  {total_stats['phase2_accepted']}")
+        if total_stats['phase2_attempted'] > 0:
+            print(f"  Success rate: {total_stats['phase2_accepted']/total_stats['phase2_attempted']*100:.1f}%")
     print(f"\nTime taken: {end_time - start_time:.1f}s")
     print(f"{'='*80}\n")
 
-    if len(successful_individuals) < pop_size:
-        print(f"⚠ Warning: Could only generate {len(successful_individuals)}/{pop_size} individuals")
-        print(f"Consider increasing max_batches or using a different approach.\n")
+    if len(accepted_individuals) < pop_size:
+        print(f"Warning: Could only generate {len(accepted_individuals)}/{pop_size} individuals")
+        print(f"Consider increasing max_iterations or adjusting parameters.\n")
 
-    return np.array(successful_individuals[:pop_size]) if len(successful_individuals) > 0 else None
+    return np.array(accepted_individuals[:pop_size]) if len(accepted_individuals) > 0 else None
 
 
 def get_genome_handler_config(handler_type, min_narms=6, max_narms=6):
@@ -404,7 +557,7 @@ def main():
     os.makedirs(full_log_dir, exist_ok=True)
 
     print("=" * 80)
-    print("Evolution with Lee Controller Tuning (CMA-ES Stage 1)")
+    print("Evolution with Lee Controller Tuning (2-Stage CMA-ES)")
     print("=" * 80)
     sys.stdout.flush()
     print(f"Experiment name: {exp_name}")
@@ -418,7 +571,9 @@ def main():
     print(f"Gate configuration: {args.gate_cfg}")
     print(f"Number of arms: {args.min_narms}-{args.max_narms}")
     print()
-    print("LEE CONTROLLER TUNING PARAMETERS (CMA-ES STAGE 1):")
+    print("2-STAGE CMA-ES TUNING PARAMETERS:")
+    print(f"  Stage 1: gains + timing (7 params, 40% budget)")
+    print(f"  Stage 2: gains + timing + gate offsets (7 + n_gates*3 params, 60% budget)")
     print(f"  Max evaluations per individual: {args.max_evals}")
     print(f"  CMA-ES parallel workers: {args.cma_workers}")
     print(f"  Simulation time: {args.sim_time}s")
@@ -428,9 +583,19 @@ def main():
     print(f"  Gate-only mode: {args.gate_only_mode}")
     print()
     print(f"Evolution parallel workers: {args.num_workers}")
-    print(f"Repair workflow: ENABLED (3-stage: Optimization → Hover Check → Hover Repair)")
+    print(f"Repair workflow: ENABLED (3-stage: Optimization -> Hover Check -> Hover Repair)")
     print(f"Symmetry: DISABLED (not supported)")
-    print(f"CRITICAL: Each individual's controller is tuned via CMA-ES Stage 1")
+    print()
+    print("INITIAL POPULATION CMA-ES TUNING:")
+    if args.skip_init_tuning:
+        print(f"  Status: DISABLED (--skip-init-tuning)")
+    else:
+        print(f"  Status: ENABLED")
+        print(f"  Max evals per drone: {args.init_pop_max_evals}")
+        print(f"  Gates threshold: {args.init_pop_gates_threshold}")
+        print(f"  Tuning workers: {args.init_pop_tuning_workers or 'cpu_count'}")
+    print()
+    print(f"CRITICAL: Each individual's controller is tuned via 2-Stage CMA-ES")
     print(f"CRITICAL: Fitness = max gates passed during tuning (0 if failed)")
     print("=" * 80)
     print()
@@ -444,7 +609,7 @@ def main():
     # Create a wrapper class for the genome handler
     WrappedHandler = create_genome_handler_wrapper(config['handler_class'], config['handler_kwargs'])
 
-    # Generate initial population with parallel repair workflow
+    # Generate initial population with parallel repair workflow + optional CMA-ES tuning
     print("=" * 80)
     print("Phase 1: Initial Population Generation (Parallel)")
     print("=" * 80)
@@ -453,7 +618,17 @@ def main():
         args.population_size,
         coordinate_system=config['coordinate_system'],
         verbose=False,
-        num_workers=32  # Use all CPUs for initial generation
+        num_workers=args.init_pop_tuning_workers,
+        gate_cfg=args.gate_cfg,
+        init_pop_max_evals=args.init_pop_max_evals,
+        init_pop_gates_threshold=args.init_pop_gates_threshold,
+        init_pop_tuning_workers=args.init_pop_tuning_workers,
+        sim_time=args.sim_time,
+        dt=args.dt,
+        n_startup_points=args.n_startup_points,
+        gate_only_mode=args.gate_only_mode,
+        timeout=args.timeout,
+        skip_init_tuning=args.skip_init_tuning,
     )
 
     if initial_population is None or len(initial_population) == 0:

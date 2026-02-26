@@ -1,16 +1,19 @@
 """
 Lee Controller Tuning Evaluator for Evolutionary Algorithm
 
-This evaluator uses CMA-ES to optimize controller gains for each evolved morphology.
-Each individual's fitness is determined by the maximum number of gates passed during
-controller tuning (Stage 1 optimization: gains only).
+This evaluator uses a 2-stage CMA-ES pipeline to optimize controller parameters
+for each evolved morphology. Each individual's fitness is determined by the maximum
+number of gates passed during controller tuning.
 
 If controller tuning fails to pass any gates, the individual receives fitness of 0.
 
 Design:
 - Takes an evolved drone morphology
 - Converts it to DroneInterface
-- Runs Stage 1 CMA-ES optimization (4 parameters: pos_P, vel_P, att_P, rate_P)
+- Stage 1: Optimise gains + timing (7 params: pos_P, vel_P, att_P, rate_P,
+  total_time, velocity_scale, startup_time) with fixed default trajectory
+- Stage 2: Optimise gains + timing + gate offset control points
+  (7 + n_gates*3 params) to refine the trajectory shape
 - Returns max gates passed as fitness
 
 This integrates the tune_lee_controller_gates.py pipeline into the evolutionary loop.
@@ -32,6 +35,8 @@ from airevolve.controllers.trajectory_generation.bspline_gate_trajectory import 
 from airevolve.controllers.lee_control.lee_controller import LeeGeometricControl
 from airevolve.controllers.utils.wind_model import Wind
 from airevolve.controllers.utils.gate_configs import GATE_CONFIGS
+from airevolve.evolution_tools.inspection_tools.utils import convert_to_cartesian, ENU_to_NED
+from airevolve.evolution_tools.inspection_tools.morphological_descriptors.hovering_info import orientation_to_unit_vector
 
 # Try to import CMA-ES
 try:
@@ -186,7 +191,8 @@ class GateChecker:
 
 def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
                         gate_config, sim_time=20.0, dt=0.005, n_startup_points=1,
-                        gate_only_mode=False, verbose=False):
+                        gate_only_mode=False, bspline_timing=None, gate_offsets=None,
+                        verbose=False):
     """
     Run simulation with Lee controller for a given morphology and gains
 
@@ -198,6 +204,10 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
         dt: Time step in seconds
         n_startup_points: Number of startup control points
         gate_only_mode: If True, use gate-only mode (pure racing loop)
+        bspline_timing: Optional array of [total_time, velocity_scale, startup_time].
+                        If None, uses BSplineGateTrajectory defaults (20.0, 1.0, 3.0).
+        gate_offsets: Optional flat array of gate offset parameters (n_gates * 3 elements).
+                      If None, uses default zero offsets.
         verbose: If True, show debug output
 
     Returns:
@@ -210,21 +220,22 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
         for arm in individual:
             r, theta, phi, motor_pitch, motor_yaw, direction = arm
 
-            # Convert spherical to Cartesian
-            x = r * np.sin(phi) * np.cos(theta)
-            y = r * np.sin(phi) * np.sin(theta)
-            z = r * np.cos(phi)
+            # Position: genome spherical (elevation convention, ENU) -> Cartesian NED
+            ex, ey, ez = convert_to_cartesian(r, theta, phi)
+            x, y, z = ENU_to_NED(ex, ey, ez)
 
-            # Motor orientation
+            # Motor rotation direction
             rot = "ccw" if direction < 0.5 else "cw"
 
-            # Estimate prop size from arm length (rough heuristic)
-            prop_size = max(1, min(5, int(r * 20)))  # Scale to 1-5 inch props
+            # Thrust direction: orientation_to_unit_vector returns motor axis (NED),
+            # negate to get thrust direction (DroneInterface convention, see create_2inch_quad)
+            motor_axis = orientation_to_unit_vector(0.0, motor_pitch, motor_yaw)
+            thrust_dir = -motor_axis
 
             propellers.append({
-                "loc": [x, y, z],
-                "dir": [motor_pitch, motor_yaw, 0, rot],
-                "propsize": prop_size
+                "loc": [float(x), float(y), float(z)],
+                "dir": [float(thrust_dir[0]), float(thrust_dir[1]), float(thrust_dir[2]), rot],
+                "propsize": 2
             })
 
         quad = DroneInterface(0, propellers=propellers)
@@ -245,9 +256,33 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
         bspline_params = bspline_traj.get_default_parameters()
         bspline_traj.set_parameters(bspline_params)
 
-        # Set drone initial position
-        start_pos = bspline_traj.get_start_position()
-        quad.drone_sim.set_state(position=start_pos)
+        # Override timing if provided
+        if bspline_timing is not None:
+            bspline_traj.set_timing_parameters(np.asarray(bspline_timing))
+
+        # Override gate offsets if provided
+        if gate_offsets is not None:
+            bspline_traj.set_gate_offset_parameters(np.asarray(gate_offsets))
+
+        # CRITICAL: Set drone initial state to match trajectory at t=0
+        # This eliminates startup transients from position/velocity/yaw errors
+        start_pos, _, _ = bspline_traj.evaluate(0.0)
+
+        # Compute initial yaw from trajectory's heading direction at t=0.05s
+        # (t=0 has zero velocity due to quintic startup ramp)
+        _, vel_050, _ = bspline_traj.evaluate(0.05)
+        if np.linalg.norm(vel_050[:2]) > 0.001:  # If horizontal velocity > 0.001 m/s
+            initial_yaw = np.arctan2(vel_050[1], vel_050[0])
+        else:
+            # Fallback to first gate direction if velocity is too small
+            initial_yaw = gate_config.gate_yaw[0]
+
+        initial_euler = np.array([0.0, 0.0, initial_yaw])
+
+        # Set drone state: position from t=0, zero velocity (trajectory starts from rest),
+        # yaw from trajectory heading to prevent yaw error torque spike
+        quad.drone_sim.set_state(position=start_pos, velocity=np.zeros(3),
+                                attitude=initial_euler, angular_velocity=np.zeros(3))
 
         # Create Trajectory wrapper (xyzType=15 for B-spline)
         from airevolve.controllers.trajectory_generation.trajectory import Trajectory
@@ -334,10 +369,26 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
 # ============================================================================
 
 def _evaluate_solution_wrapper(args):
-    """Wrapper function for parallel evaluation"""
-    (params, individual, gate_config, sim_time, dt, n_startup_points, gate_only_mode) = args
+    """Wrapper function for parallel evaluation.
+
+    Supports variable-length solution vectors:
+    - 4 params: gains only (pos_P, vel_P, att_P, rate_P)
+    - 7 params: gains + timing (+ total_time, velocity_scale, startup_time)
+    - 7+N params: gains + timing + gate offsets (N = n_gates * 3)
+    """
+    (params, individual, gate_config, sim_time, dt, n_startup_points,
+     gate_only_mode, bspline_timing) = args
 
     pos_g, vel_g, att_g, rate_g = params[0:4]
+
+    # If solution vector includes timing params, use them
+    if len(params) >= 7:
+        bspline_timing = params[4:7]
+
+    # If solution vector includes gate offsets, extract them
+    gate_offsets = None
+    if len(params) > 7:
+        gate_offsets = params[7:]
 
     # Run simulation
     result = simulate_with_gains(
@@ -345,6 +396,8 @@ def _evaluate_solution_wrapper(args):
         gate_config, sim_time, dt,
         n_startup_points=n_startup_points,
         gate_only_mode=gate_only_mode,
+        bspline_timing=bspline_timing,
+        gate_offsets=gate_offsets,
         verbose=False
     )
 
@@ -365,6 +418,10 @@ def _evaluate_solution_wrapper(args):
             'att_P': att_g,
             'rate_P': rate_g
         }
+        if len(params) >= 7:
+            result['bspline_timing'] = list(params[4:7])
+        if gate_offsets is not None:
+            result['gate_offsets'] = list(gate_offsets)
 
         return (score, result)
     else:
@@ -372,20 +429,249 @@ def _evaluate_solution_wrapper(args):
 
 
 # ============================================================================
-# STAGE 1 TUNER FOR SINGLE MORPHOLOGY
+# TWO-STAGE CMA-ES WITH EARLY STOPPING (shared utility functions)
+# ============================================================================
+
+def _run_cma_stage(
+    individual, gate_config, initial_guess, bounds, initial_std,
+    max_evaluations, num_workers, sim_time, dt, timeout_per_eval,
+    gates_threshold, n_startup_points, gate_only_mode, bspline_timing,
+):
+    """Run a single CMA-ES optimisation stage with early stopping.
+
+    The wrapper auto-detects whether the solution vector contains timing
+    params (len >= 7) so this works for both Stage 1 (4 params) and
+    Stage 2 (7 params).
+
+    Returns:
+        Tuple of (best_result, total_evals, early_stopped, elapsed_seconds, iteration_fitnesses)
+    """
+    if not CMA_AVAILABLE:
+        return None, 0, False, 0.0, []
+
+    best_fitness = -float("inf")
+    best_result = None
+    total_evals = 0
+    early_stopped = False
+    iteration_fitnesses = []
+    start_time = time.time()
+
+    options = {
+        "bounds": [list(b) for b in zip(*bounds)],
+        "maxfevals": max_evaluations,
+        "verb_disp": 0,
+        "verb_log": 0,
+        "tolx": 1e-11,
+        "tolfun": 0,
+        "tolfunhist": 0,
+        "tolflatfitness": max_evaluations,
+        "tolstagnation": max_evaluations,
+    }
+
+    try:
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            es = cma.CMAEvolutionStrategy(initial_guess, initial_std, options)
+
+        executor = ProcessPoolExecutor(max_workers=num_workers) if num_workers > 1 else None
+        try:
+            while not es.stop():
+                solutions = es.ask()
+
+                if executor is not None:
+                    eval_args = [
+                        (sol, individual, gate_config, sim_time, dt, n_startup_points,
+                         gate_only_mode, bspline_timing)
+                        for sol in solutions
+                    ]
+                    future_to_sol = {
+                        executor.submit(_evaluate_solution_wrapper, a): a[0]
+                        for a in eval_args
+                    }
+                    results_dict = {}
+                    for future in as_completed(future_to_sol):
+                        sol = future_to_sol[future]
+                        try:
+                            score, result = future.result(timeout=timeout_per_eval)
+                            results_dict[tuple(sol)] = score
+                            if result is not None and result["fitness"] > best_fitness and not result["crashed"]:
+                                best_fitness = result["fitness"]
+                                best_result = result
+                        except (TimeoutError, Exception):
+                            results_dict[tuple(sol)] = 1000.0
+
+                    fitness_values = [results_dict[tuple(sol)] for sol in solutions]
+                else:
+                    fitness_values = []
+                    for sol in solutions:
+                        score, result = _evaluate_solution_wrapper(
+                            (sol, individual, gate_config, sim_time, dt, n_startup_points,
+                             gate_only_mode, bspline_timing)
+                        )
+                        fitness_values.append(score)
+                        if result is not None and result["fitness"] > best_fitness and not result["crashed"]:
+                            best_fitness = result["fitness"]
+                            best_result = result
+
+                total_evals += len(solutions)
+                es.tell(solutions, fitness_values)
+                iteration_fitnesses.append(best_fitness if best_fitness > -float("inf") else 0.0)
+
+                if best_result is not None and best_result["gates_passed"] >= gates_threshold:
+                    early_stopped = True
+                    break
+        finally:
+            if executor is not None:
+                executor.shutdown(wait=False)
+
+    except Exception as e:
+        print(f"  CMA-ES error: {e}")
+
+    elapsed = time.time() - start_time
+    return best_result, total_evals, early_stopped, elapsed, iteration_fitnesses
+
+
+def optimize_controller_with_early_stop(
+    individual, gate_config, max_evaluations=200, num_workers=4,
+    sim_time=20.0, dt=0.005, timeout_per_eval=30.0, gates_threshold=9,
+    n_startup_points=1, gate_only_mode=True, bspline_timing=None,
+):
+    """
+    Two-stage CMA-ES optimisation with early stopping.
+
+    Stage 1: Optimise gains + timing (7 params) with zero gate offsets.
+    Stage 2: Optimise gains + timing + gate offsets (7 + n_gates*3 params),
+             seeded from Stage 1 best.
+
+    Returns dict with tuning results including eval count, timing, best gains,
+    and best gate offsets.
+    """
+    _empty = {
+        "gates_passed": 0, "n_evaluations": 0, "tuning_time_seconds": 0.0,
+        "best_gains": None, "early_stopped": False, "distance_bonus": 0.0,
+        "crashed": True, "best_bspline_timing": None, "best_gate_offsets": None,
+    }
+    if not CMA_AVAILABLE:
+        return _empty
+
+    if bspline_timing is None:
+        bspline_timing = np.array([12.7, 4.6, 1.9])
+
+    # Get gate offset bounds from BSplineGateTrajectory
+    bspline_traj = BSplineGateTrajectory(gate_config, n_startup_points=n_startup_points,
+                                         gate_offset_scale=0.5, gate_only_mode=gate_only_mode)
+    n_gates = bspline_traj.n_gates
+    offset_bounds = bspline_traj.get_parameter_bounds_by_group()['gate_offsets']
+    n_offset_params = n_gates * 3
+
+    # Split budget: 40% Stage 1, 60% Stage 2
+    stage1_evals = max(20, int(max_evaluations * 0.4))
+    stage2_evals = max(20, max_evaluations - stage1_evals)
+
+    # ------------------------------------------------------------------
+    # Stage 1: Optimise gains + timing (7 params), zero gate offsets
+    # ------------------------------------------------------------------
+    stage1_guess = [14.3, 9.0, 2.9, -0.02, 12.7, 4.6, 1.9]
+    stage1_bounds = [
+        [10.0, 25.0],    # pos_P
+        [0.1, 15.0],     # vel_P
+        [0.1, 10.0],     # att_P
+        [-1.0, -0.01],   # rate_P
+        [5.0, 30.0],     # total_time
+        [0.5, 10.0],     # velocity_scale
+        [0.1, 5.0],      # startup_time
+    ]
+
+    best_result, evals1, early1, time1, _ = _run_cma_stage(
+        individual, gate_config, stage1_guess, stage1_bounds, 1.5,
+        stage1_evals, num_workers, sim_time, dt, timeout_per_eval,
+        gates_threshold, n_startup_points, gate_only_mode, bspline_timing,
+    )
+
+    if early1 and best_result is not None:
+        # Already hit the gates threshold — skip Stage 2
+        return {
+            "gates_passed": best_result["gates_passed"],
+            "n_evaluations": evals1,
+            "tuning_time_seconds": round(time1, 2),
+            "best_gains": best_result["gains"],
+            "early_stopped": True,
+            "distance_bonus": best_result.get("distance_bonus", 0.0),
+            "crashed": best_result["crashed"],
+            "best_bspline_timing": best_result.get("bspline_timing", list(bspline_timing)),
+            "best_gate_offsets": [0.0] * n_offset_params,
+        }
+
+    # ------------------------------------------------------------------
+    # Stage 2: Optimise gains + timing + gate offsets (7 + n_gates*3 params)
+    # ------------------------------------------------------------------
+    if best_result is not None:
+        g = best_result["gains"]
+        stage2_gains_timing = [g["pos_P"], g["vel_P"], g["att_P"], g["rate_P"]]
+        stage2_gains_timing += list(best_result.get("bspline_timing", bspline_timing))
+    else:
+        stage2_gains_timing = list(stage1_guess)
+
+    stage2_guess = stage2_gains_timing + [0.0] * n_offset_params
+    stage2_bounds = list(stage1_bounds) + [
+        [float(lo), float(hi)]
+        for lo, hi in zip(offset_bounds[0], offset_bounds[1])
+    ]
+
+    best2, evals2, early2, time2, _ = _run_cma_stage(
+        individual, gate_config, stage2_guess, stage2_bounds, 0.3,
+        stage2_evals, num_workers, sim_time, dt, timeout_per_eval,
+        gates_threshold, n_startup_points, gate_only_mode, bspline_timing,
+    )
+
+    # Pick best across both stages
+    total_evals = evals1 + evals2
+    total_time = time1 + time2
+
+    if best2 is not None and (best_result is None or best2["fitness"] > best_result["fitness"]):
+        best_result = best2
+
+    if best_result is not None:
+        return {
+            "gates_passed": best_result["gates_passed"],
+            "n_evaluations": total_evals,
+            "tuning_time_seconds": round(total_time, 2),
+            "best_gains": best_result["gains"],
+            "early_stopped": early2,
+            "distance_bonus": best_result.get("distance_bonus", 0.0),
+            "crashed": best_result["crashed"],
+            "best_bspline_timing": best_result.get("bspline_timing", list(bspline_timing)),
+            "best_gate_offsets": best_result.get("gate_offsets", [0.0] * n_offset_params),
+        }
+    else:
+        _empty["n_evaluations"] = total_evals
+        _empty["tuning_time_seconds"] = round(total_time, 2)
+        return _empty
+
+
+# ============================================================================
+# TWO-STAGE TUNER FOR SINGLE MORPHOLOGY (used by evolutionary loop)
 # ============================================================================
 
 def optimize_controller_for_morphology(individual, gate_config, max_evaluations=100,
                                       num_workers=None, sim_time=20.0, dt=0.005,
-                                      n_startup_points=1, gate_only_mode=False,
-                                      timeout_per_eval=30.0, save_dir=None):
+                                      n_startup_points=1, gate_only_mode=True,
+                                      timeout_per_eval=30.0, save_dir=None,
+                                      bspline_timing=None):
     """
-    Run Stage 1 CMA-ES optimization to tune controller gains for a morphology.
+    Run 2-stage CMA-ES optimization to tune controller for a morphology.
+
+    Stage 1: Optimise gains + timing (7 params) with zero gate offsets.
+    Stage 2: Optimise gains + timing + gate offsets (7 + n_gates*3 params),
+             seeded from Stage 1 best.
+
+    Always runs both stages (no early stopping) for maximum quality.
 
     Args:
         individual: Evolved drone morphology (genome array)
         gate_config: Gate configuration class
-        max_evaluations: Maximum CMA-ES evaluations
+        max_evaluations: Maximum CMA-ES evaluations (split across stages)
         num_workers: Number of parallel workers
         sim_time: Simulation time in seconds
         dt: Time step in seconds
@@ -393,11 +679,14 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
         gate_only_mode: If True, use gate-only mode (pure racing loop)
         timeout_per_eval: Timeout per evaluation in seconds
         save_dir: Directory to save results (optional)
+        bspline_timing: Optional array of [total_time, velocity_scale, startup_time]
 
     Returns:
         dict with:
             - fitness: max gates passed (0 if failed)
             - best_gains: dict of best gains found
+            - best_bspline_timing: best timing parameters
+            - best_gate_offsets: best gate offset parameters
             - gates_passed: number of gates passed
             - success: True if optimization succeeded
     """
@@ -409,116 +698,189 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
     if num_workers is None:
         num_workers = max(1, multiprocessing.cpu_count() // 2)
 
-    # Stage 1: Optimize gains only (4 params)
-    # Bounds for gains (same as tune_lee_controller_gates.py)
-    initial_guess = [2.0, 1.5, 0.6, -0.3]  # pos_P, vel_P, att_P, rate_P
-    bounds = [
-        [0.01, 10.0],     # pos_P
-        [0.01, 10.0],     # vel_P
-        [0.01, 10.0],     # att_P
-        [-5.0, -0.01]     # rate_P
+    if bspline_timing is None:
+        bspline_timing = np.array([12.7, 4.6, 1.9])
+
+    # Get gate offset bounds from BSplineGateTrajectory
+    bspline_traj = BSplineGateTrajectory(gate_config, n_startup_points=n_startup_points,
+                                         gate_offset_scale=0.5, gate_only_mode=gate_only_mode)
+    n_gates = bspline_traj.n_gates
+    offset_bounds = bspline_traj.get_parameter_bounds_by_group()['gate_offsets']
+    n_offset_params = n_gates * 3
+
+    # Split budget: 40% Stage 1, 60% Stage 2
+    stage1_evals = max(20, int(max_evaluations * 0.4))
+    stage2_evals = max(20, max_evaluations - stage1_evals)
+
+    # No early stopping — always run both stages for max quality
+    no_early_stop = 999999
+
+    # ------------------------------------------------------------------
+    # Stage 1: Optimise gains + timing (7 params), zero gate offsets
+    # ------------------------------------------------------------------
+    stage1_guess = [14.3, 9.0, 2.9, -0.02, 12.7, 4.6, 1.9]
+    stage1_bounds = [
+        [10.0, 25.0],    # pos_P
+        [0.1, 15.0],     # vel_P
+        [0.1, 10.0],     # att_P
+        [-1.0, -0.01],   # rate_P
+        [5.0, 30.0],     # total_time
+        [0.5, 10.0],     # velocity_scale
+        [0.1, 5.0],      # startup_time
     ]
-    initial_std = 0.8
 
-    # CMA-ES options
-    options = {
-        'bounds': [list(b) for b in zip(*bounds)],
-        'maxfevals': max_evaluations,
-        'verb_disp': 0,  # Silent for evolution
-        'verb_log': 0,
-        'tolx': 1e-8,
-        'tolfun': 1e-6,
-        'tolfunhist': 1e-6,
-    }
+    best_result, evals1, _, time1, stage1_fitnesses = _run_cma_stage(
+        individual, gate_config, stage1_guess, stage1_bounds, 1.5,
+        stage1_evals, num_workers, sim_time, dt, timeout_per_eval,
+        no_early_stop, n_startup_points, gate_only_mode, bspline_timing,
+    )
 
-    # Track best result
+    # ------------------------------------------------------------------
+    # Stage 2: Optimise gains + timing + gate offsets (7 + n_gates*3 params)
+    # ------------------------------------------------------------------
+    if best_result is not None:
+        g = best_result["gains"]
+        stage2_gains_timing = [g["pos_P"], g["vel_P"], g["att_P"], g["rate_P"]]
+        stage2_gains_timing += list(best_result.get("bspline_timing", bspline_timing))
+    else:
+        stage2_gains_timing = list(stage1_guess)
+
+    stage2_guess = stage2_gains_timing + [0.0] * n_offset_params
+    stage2_bounds = list(stage1_bounds) + [
+        [float(lo), float(hi)]
+        for lo, hi in zip(offset_bounds[0], offset_bounds[1])
+    ]
+
+    best2, evals2, _, time2, stage2_fitnesses = _run_cma_stage(
+        individual, gate_config, stage2_guess, stage2_bounds, 0.3,
+        stage2_evals, num_workers, sim_time, dt, timeout_per_eval,
+        no_early_stop, n_startup_points, gate_only_mode, bspline_timing,
+    )
+
+    # Pick best across both stages
+    total_evals = evals1 + evals2
+    total_time = time1 + time2
     best_score = -float('inf')
-    best_result = None
-    all_results = []
 
-    try:
-        es = cma.CMAEvolutionStrategy(initial_guess, initial_std, options)
+    if best_result is not None:
+        best_score = best_result.get("fitness", 0)
 
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            while not es.stop():
-                solutions = es.ask()
+    if best2 is not None and (best_result is None or best2["fitness"] > best_result["fitness"]):
+        best_result = best2
+        best_score = best2["fitness"]
 
-                # Parallel evaluation
-                if num_workers > 1:
-                    eval_args = [
-                        (sol, individual, gate_config, sim_time, dt, n_startup_points, gate_only_mode)
-                        for sol in solutions
-                    ]
-
-                    future_to_sol = {
-                        executor.submit(_evaluate_solution_wrapper, args): args[0]
-                        for args in eval_args
-                    }
-
-                    results_dict = {}
-                    for future in as_completed(future_to_sol):
-                        sol = future_to_sol[future]
-                        try:
-                            score, result = future.result(timeout=timeout_per_eval)
-                            results_dict[tuple(sol)] = score
-
-                            if result is not None:
-                                all_results.append(result)
-
-                                if result['fitness'] > best_score and not result['crashed']:
-                                    best_score = result['fitness']
-                                    best_result = result
-
-                        except TimeoutError:
-                            results_dict[tuple(sol)] = 1000.0
-                        except Exception as e:
-                            results_dict[tuple(sol)] = 1000.0
-
-                    fitness_values = [results_dict[tuple(sol)] for sol in solutions]
-                else:
-                    # Serial execution
-                    fitness_values = []
-                    for sol in solutions:
-                        score, result = _evaluate_solution_wrapper(
-                            (sol, individual, gate_config, sim_time, dt, n_startup_points, gate_only_mode)
-                        )
-                        fitness_values.append(score)
-
-                        if result is not None:
-                            all_results.append(result)
-                            if result['fitness'] > best_score and not result['crashed']:
-                                best_score = result['fitness']
-                                best_result = result
-
-                es.tell(solutions, fitness_values)
-
-    except Exception as e:
-        print(f"CMA-ES optimization error: {e}")
-        return {'fitness': 0, 'best_gains': None, 'gates_passed': 0, 'success': False}
+    # Build combined learning curve (Stage 2 fitnesses carry forward Stage 1 best)
+    s1_best = stage1_fitnesses[-1] if stage1_fitnesses else 0.0
+    combined = list(stage1_fitnesses) + [max(s1_best, f) for f in stage2_fitnesses]
 
     # Save results if save_dir provided
-    if save_dir is not None and best_result is not None:
+    if save_dir is not None:
         Path(save_dir).mkdir(parents=True, exist_ok=True)
 
-        config = {
-            'timestamp': datetime.now().isoformat(),
-            'fitness': best_score,
-            'gates_passed': best_result.get('gates_passed', 0),
-            'distance_bonus': best_result.get('distance_bonus', 0.0),
-            'gains': best_result['gains'],
-            'flight_time': best_result['flight_time'],
-            'crashed': best_result['crashed']
-        }
+        # Always save genome
+        np.save(os.path.join(save_dir, "genome.npy"), individual)
 
-        config_file = os.path.join(save_dir, "tuning_results.json")
-        with open(config_file, 'w') as f:
+        # Save learning curve data with per-stage breakdown
+        learning_curve_data = {
+            "stage1": stage1_fitnesses,
+            "stage2": stage2_fitnesses,
+            "combined": combined,
+        }
+        with open(os.path.join(save_dir, "learning_curve.json"), 'w') as f:
+            json.dump(learning_curve_data, f, indent=2)
+
+        # Effective bspline_timing
+        effective_timing = list(bspline_timing)
+        effective_gate_offsets = [0.0] * n_offset_params
+
+        # Enhanced tuning_results.json
+        if best_result is not None:
+            effective_timing = best_result.get('bspline_timing', effective_timing)
+            if isinstance(effective_timing, np.ndarray):
+                effective_timing = effective_timing.tolist()
+            effective_gate_offsets = best_result.get('gate_offsets', effective_gate_offsets)
+            if isinstance(effective_gate_offsets, np.ndarray):
+                effective_gate_offsets = effective_gate_offsets.tolist()
+
+            config = {
+                'timestamp': datetime.now().isoformat(),
+                'fitness': best_score,
+                'gates_passed': best_result.get('gates_passed', 0),
+                'distance_bonus': best_result.get('distance_bonus', 0.0),
+                'gains': best_result['gains'],
+                'bspline_timing': effective_timing,
+                'gate_offsets': effective_gate_offsets,
+                'brain': {
+                    'gains': best_result['gains'],
+                    'bspline_timing': effective_timing,
+                    'gate_offsets': effective_gate_offsets,
+                },
+                'flight_time': best_result['flight_time'],
+                'crashed': best_result['crashed'],
+                'n_cma_iterations_stage1': len(stage1_fitnesses),
+                'n_cma_iterations_stage2': len(stage2_fitnesses),
+                'n_evaluations_stage1': evals1,
+                'n_evaluations_stage2': evals2,
+            }
+        else:
+            config = {
+                'timestamp': datetime.now().isoformat(),
+                'fitness': 0,
+                'gates_passed': 0,
+                'bspline_timing': list(bspline_timing),
+                'gate_offsets': [0.0] * n_offset_params,
+                'crashed': True,
+                'success': False,
+                'n_cma_iterations_stage1': len(stage1_fitnesses),
+                'n_cma_iterations_stage2': len(stage2_fitnesses),
+                'n_evaluations_stage1': evals1,
+                'n_evaluations_stage2': evals2,
+            }
+
+        with open(os.path.join(save_dir, "tuning_results.json"), 'w') as f:
             json.dump(config, f, indent=2)
+
+        # Save plots (blueprint + learning curve)
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+            from airevolve.evolution_tools.inspection_tools.drone_visualizer import DroneVisualizer
+
+            # Blueprint
+            viz = DroneVisualizer()
+            fig, _ = viz.plot_blueprint(individual, title="Morphology Blueprint")
+            fig.savefig(os.path.join(save_dir, "blueprint.png"), dpi=150, bbox_inches='tight')
+            plt.close(fig)
+
+            # Learning curve with stage boundary marker
+            if len(combined) > 0:
+                fig_lc, ax = plt.subplots(figsize=(8, 5))
+                ax.plot(range(1, len(combined) + 1), combined, 'b-o', markersize=3)
+
+                # Add vertical line at stage boundary
+                if len(stage1_fitnesses) > 0 and len(stage2_fitnesses) > 0:
+                    boundary = len(stage1_fitnesses) + 0.5
+                    ax.axvline(x=boundary, color='red', linestyle='--', linewidth=1.5,
+                               label='Stage 1 -> 2')
+                    ax.legend()
+
+                ax.set_xlabel('CMA-ES Iteration')
+                ax.set_ylabel('Best Fitness (gates + distance bonus)')
+                ax.set_title('Controller Tuning Learning Curve (2-Stage)')
+                ax.grid(True, alpha=0.3)
+                fig_lc.savefig(os.path.join(save_dir, "learning_curve.png"), dpi=150, bbox_inches='tight')
+                plt.close(fig_lc)
+        except Exception as e:
+            print(f"Warning: Could not save plots: {e}")
 
     # Return results
     if best_result is not None:
         return {
             'fitness': best_score,
             'best_gains': best_result['gains'],
+            'best_bspline_timing': best_result.get('bspline_timing', list(bspline_timing)),
+            'best_gate_offsets': best_result.get('gate_offsets', [0.0] * n_offset_params),
             'gates_passed': best_result['gates_passed'],
             'distance_bonus': best_result.get('distance_bonus', 0.0),
             'success': True
@@ -527,6 +889,8 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
         return {
             'fitness': 0,
             'best_gains': None,
+            'best_bspline_timing': None,
+            'best_gate_offsets': None,
             'gates_passed': 0,
             'distance_bonus': 0.0,
             'success': False
@@ -539,18 +903,20 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
 
 def evaluate_individual_with_tuning(individual, ind_save_dir, gate_cfg='circle',
                                     max_evals=100, num_workers=4, sim_time=20.0,
-                                    dt=0.005, n_startup_points=1, gate_only_mode=False,
+                                    dt=0.005, n_startup_points=1, gate_only_mode=True,
                                     timeout=30.0, num=None):
     """
-    Evaluate individual by tuning its controller gains via CMA-ES Stage 1.
+    Evaluate individual by tuning its controller via 2-stage CMA-ES.
 
     This is the main fitness function for evolution with Lee controller tuning.
+    Stage 1 optimises gains + timing (7 params), Stage 2 adds gate offset
+    control points (7 + n_gates*3 params) to refine the trajectory shape.
 
     Args:
         individual: Evolved drone morphology (genome array)
         ind_save_dir: Directory to save results for this individual
         gate_cfg: Gate configuration ('circle', 'figure8', 'slalom', 'backandforth')
-        max_evals: Maximum CMA-ES evaluations
+        max_evals: Maximum CMA-ES evaluations (split across both stages)
         num_workers: Number of parallel workers for CMA-ES
         sim_time: Simulation time in seconds
         dt: Time step in seconds
@@ -565,7 +931,7 @@ def evaluate_individual_with_tuning(individual, ind_save_dir, gate_cfg='circle',
     # Get gate configuration
     gate_config = GATE_CONFIGS[gate_cfg]
 
-    # Run Stage 1 optimization
+    # Run 2-stage CMA-ES optimization
     result = optimize_controller_for_morphology(
         individual=individual,
         gate_config=gate_config,
