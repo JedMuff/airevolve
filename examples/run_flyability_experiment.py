@@ -46,6 +46,8 @@ from airevolve.evolution_tools.genome_handlers.operators.optimization_repair_ope
 from airevolve.evolution_tools.evaluators.lee_tune_evaluator import (
     simulate_with_gains,
     _evaluate_solution_wrapper,
+    _run_cma_stage,
+    optimize_controller_with_early_stop,
 )
 from airevolve.controllers.utils.gate_configs import GATE_CONFIGS
 
@@ -68,7 +70,7 @@ def parse_arguments():
                         help="Total drones to sample (default: 10_000)")
     parser.add_argument("--max-evals", type=int, default=1000,
                         help="Max CMA-ES evaluations per drone (default: 1000)")
-    parser.add_argument("--gates-threshold", type=int, default=1,
+    parser.add_argument("--gates-threshold", type=int, default=8,
                         help="Gates-passed target for early stop (default: 1)")
     parser.add_argument("--gate-cfg", choices=["backandforth", "figure8", "circle", "slalom"],
                         default="figure8", help="Gate layout (default: figure8)")
@@ -92,6 +94,8 @@ def parse_arguments():
                         help="Number of startup control points (default: 1)")
     parser.add_argument("--gate-only-mode", action="store_true",
                         help="Use gate-only mode (pure racing loop without startup phase)")
+    parser.add_argument("--skip-repair", action="store_true",
+                        help="Skip repair stages; hover-checked genomes go straight to tuning")
     return parser.parse_args()
 
 
@@ -101,11 +105,11 @@ def parse_arguments():
 
 def _sample_and_check_single(args):
     """
-    Worker function: generate one random drone and run hover check + repair.
+    Worker function: generate one random drone and run hover check + optional repair.
 
     Returns dict with results for each pipeline stage.
     """
-    idx, base_seed, handler_kwargs, coordinate_system = args
+    idx, base_seed, handler_kwargs, coordinate_system, skip_repair = args
 
     seed = base_seed + idx
     handler = SphericalAngularDroneGenomeHandler(
@@ -122,14 +126,20 @@ def _sample_and_check_single(args):
         "n_arms": n_arms,
         "hover_check_passed": False,
         "repair_succeeded": False,
+        "repair_skipped": skip_repair,
     }
 
-    # Stage 2: hover check (strict, no spinning)
+    # Hover check (strict, no spinning)
     can_hover, _ = stage2_hover_check(genome, verbose=False, allow_spinning=False)
     if not can_hover:
         return result, None
 
     result["hover_check_passed"] = True
+
+    if skip_repair:
+        # Pass hover-checked genome straight through without repair
+        result["repair_succeeded"] = True
+        return result, genome
 
     # Stage 1: optimization repair (fix collisions)
     repair_config = OptimizationRepairConfig(fixed_params=[3, 4])
@@ -151,127 +161,55 @@ def _sample_and_check_single(args):
     return result, final_ind
 
 
-# ---------------------------------------------------------------------------
-# Phase 2: CMA-ES tuning with early stop
-# ---------------------------------------------------------------------------
+def _tune_single_drone(args):
+    """Worker function for Phase 2: run initial flight + CMA-ES tuning for one drone.
 
-def optimize_controller_with_early_stop(
-    individual, gate_config, max_evaluations=200, num_workers=4,
-    sim_time=20.0, dt=0.005, timeout_per_eval=30.0, gates_threshold=9,
-    n_startup_points=1, gate_only_mode=False,
-):
+    Designed to be called via multiprocessing.Pool (top-level, picklable).
+    Each worker runs CMA-ES single-threaded (num_workers=1).
     """
-    Stage 1 CMA-ES optimization (4 gains only) with early stopping.
+    (record, individual_list, gate_config, default_gains, bspline_timing,
+     max_evals, sim_time, dt, timeout, gates_threshold,
+     n_startup_points, gate_only_mode) = args
 
-    Returns dict with tuning results including eval count, timing, and best gains.
-    """
-    if cma is None:
-        return {
-            "gates_passed": 0, "n_evaluations": 0, "tuning_time_seconds": 0.0,
-            "best_gains": None, "early_stopped": False, "distance_bonus": 0.0,
-            "crashed": True,
-        }
+    individual = np.array(individual_list)
 
-    initial_guess = [2.0, 1.5, 0.6, -0.3]
-    bounds = [
-        [0.01, 10.0],   # pos_P
-        [0.01, 10.0],   # vel_P
-        [0.01, 10.0],   # att_P
-        [-5.0, -0.01],  # rate_P
-    ]
-    initial_std = 0.8
+    # --- Initial flight with default gains ---
+    init_result = simulate_with_gains(
+        individual,
+        default_gains["pos_P"], default_gains["vel_P"],
+        default_gains["att_P"], default_gains["rate_P"],
+        gate_config, sim_time=sim_time, dt=dt,
+        n_startup_points=n_startup_points,
+        gate_only_mode=gate_only_mode,
+        bspline_timing=bspline_timing,
+    )
 
-    options = {
-        "bounds": [list(b) for b in zip(*bounds)],
-        "maxfevals": max_evaluations,
-        "verb_disp": 0,
-        "verb_log": 0,
-        "tolx": 1e-11,
-        "tolfun": 0,
-        "tolfunhist": 0,
-        "tolflatfitness": max_evaluations,
-        "tolstagnation": max_evaluations,
+    record["initial_flight"] = {
+        "gates_passed": init_result["gates_passed"],
+        "crashed": init_result["crashed"],
+        "flight_time": round(init_result["flight_time"], 3),
     }
 
-    best_fitness = -float("inf")
-    best_result = None
-    total_evals = 0
-    early_stopped = False
-    start_time = time.time()
+    initial_fly = init_result["gates_passed"] >= gates_threshold
 
-    try:
-        es = cma.CMAEvolutionStrategy(initial_guess, initial_std, options)
+    # --- CMA-ES tuning (single-threaded inside worker) ---
+    tuning = optimize_controller_with_early_stop(
+        individual, gate_config,
+        max_evaluations=max_evals,
+        num_workers=1,
+        sim_time=sim_time,
+        dt=dt,
+        timeout_per_eval=timeout,
+        gates_threshold=gates_threshold,
+        n_startup_points=n_startup_points,
+        gate_only_mode=gate_only_mode,
+        bspline_timing=bspline_timing,
+    )
 
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            while not es.stop():
-                solutions = es.ask()
+    record["tuning"] = tuning
+    tuned_flyable = tuning["gates_passed"] >= gates_threshold
 
-                if num_workers > 1:
-                    eval_args = [
-                        (sol, individual, gate_config, sim_time, dt, n_startup_points, gate_only_mode)
-                        for sol in solutions
-                    ]
-                    future_to_sol = {
-                        executor.submit(_evaluate_solution_wrapper, a): a[0]
-                        for a in eval_args
-                    }
-                    results_dict = {}
-                    for future in as_completed(future_to_sol):
-                        sol = future_to_sol[future]
-                        try:
-                            score, result = future.result(timeout=timeout_per_eval)
-                            results_dict[tuple(sol)] = score
-                            if result is not None and result["fitness"] > best_fitness and not result["crashed"]:
-                                best_fitness = result["fitness"]
-                                best_result = result
-                        except (TimeoutError, Exception):
-                            results_dict[tuple(sol)] = 1000.0
-
-                    fitness_values = [results_dict[tuple(sol)] for sol in solutions]
-                else:
-                    fitness_values = []
-                    for sol in solutions:
-                        score, result = _evaluate_solution_wrapper(
-                            (sol, individual, gate_config, sim_time, dt, n_startup_points, gate_only_mode)
-                        )
-                        fitness_values.append(score)
-                        if result is not None and result["fitness"] > best_fitness and not result["crashed"]:
-                            best_fitness = result["fitness"]
-                            best_result = result
-
-                total_evals += len(solutions)
-                es.tell(solutions, fitness_values)
-
-                # Early stop check
-                if best_result is not None and best_result["gates_passed"] >= gates_threshold:
-                    early_stopped = True
-                    break
-
-    except Exception as e:
-        print(f"  CMA-ES error: {e}")
-
-    elapsed = time.time() - start_time
-
-    if best_result is not None:
-        return {
-            "gates_passed": best_result["gates_passed"],
-            "n_evaluations": total_evals,
-            "tuning_time_seconds": round(elapsed, 2),
-            "best_gains": best_result["gains"],
-            "early_stopped": early_stopped,
-            "distance_bonus": best_result.get("distance_bonus", 0.0),
-            "crashed": best_result["crashed"],
-        }
-    else:
-        return {
-            "gates_passed": 0,
-            "n_evaluations": total_evals,
-            "tuning_time_seconds": round(elapsed, 2),
-            "best_gains": None,
-            "early_stopped": False,
-            "distance_bonus": 0.0,
-            "crashed": True,
-        }
+    return record, initial_fly, tuned_flyable
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +248,7 @@ def run_experiment(args):
     print(f"Sim time         : {args.sim_time}s  dt={args.dt}s")
     print(f"N startup points : {args.n_startup_points}")
     print(f"Gate-only mode   : {args.gate_only_mode}")
+    print(f"Skip repair      : {args.skip_repair}")
     print(f"Seed             : {args.seed}")
     print("=" * 80)
     print()
@@ -333,6 +272,54 @@ def run_experiment(args):
     base_seed = args.seed if args.seed is not None else np.random.randint(0, 2**31)
 
     # ------------------------------------------------------------------
+    # Standard quad reference (pipeline sanity check)
+    # ------------------------------------------------------------------
+    # create_2inch_quad() morphology from tune_lee_controller_gates.py
+    # expressed as a genome in ENU spherical coordinates.
+    std_quad_arm = 0.06 * np.sqrt(2)
+    std_quad_genome = np.array([
+        [std_quad_arm,  np.pi / 4,      0, 0, 0, 0],   # NED: (+0.06, +0.06, 0), CCW
+        [std_quad_arm, -np.pi / 4,      0, 0, 0, 1],   # NED: (-0.06, +0.06, 0), CW
+        [std_quad_arm, -3 * np.pi / 4,  0, 0, 0, 0],   # NED: (-0.06, -0.06, 0), CCW
+        [std_quad_arm,  3 * np.pi / 4,  0, 0, 0, 1],   # NED: (+0.06, -0.06, 0), CW
+    ])
+
+    # Run through hover check + repair like any other drone
+    can_hover, _ = stage2_hover_check(std_quad_genome, verbose=False, allow_spinning=False)
+    std_quad_record = {
+        "drone_id": "drone_std_quad",
+        "genome": std_quad_genome.tolist(),
+        "n_arms": 4,
+        "hover_check_passed": can_hover,
+        "repair_succeeded": False,
+        "repair_skipped": args.skip_repair,
+    }
+
+    std_quad_individual = None
+    if can_hover:
+        if args.skip_repair:
+            std_quad_record["repair_succeeded"] = True
+            std_quad_individual = std_quad_genome
+        else:
+            repair_config = OptimizationRepairConfig(fixed_params=[3, 4])
+            repaired, _ = stage1_optimization_repair(
+                std_quad_genome, coordinate_system=coordinate_system,
+                config=repair_config, verbose=False,
+            )
+            if repaired is not None:
+                final_ind, _ = stage3_hover_repair(
+                    repaired, coordinate_system=coordinate_system, verbose=False,
+                )
+                if final_ind is not None:
+                    std_quad_record["repair_succeeded"] = True
+                    std_quad_record["genome"] = final_ind.tolist()
+                    std_quad_individual = final_ind
+
+    print(f"Standard quad (create_2inch_quad): hover={can_hover}, "
+          f"repair={std_quad_record['repair_succeeded']}")
+    sys.stdout.flush()
+
+    # ------------------------------------------------------------------
     # Phase 1: Parallel sampling + hover check + repair
     # ------------------------------------------------------------------
     print("Phase 1: Sampling + Hover Check + Repair")
@@ -343,14 +330,16 @@ def run_experiment(args):
     num_workers = cpu_count()
 
     pool_args = [
-        (i, base_seed, handler_kwargs, coordinate_system)
+        (i, base_seed, handler_kwargs, coordinate_system, args.skip_repair)
         for i in range(args.n_drones)
     ]
 
-    all_drone_records = []
+    all_drone_records = [std_quad_record]
     repaired_drones = []  # (record, individual_array)
-    n_hover = 0
-    n_repair = 0
+    if std_quad_individual is not None:
+        repaired_drones.append((std_quad_record, std_quad_individual))
+    n_hover = 1 if can_hover else 0
+    n_repair = 1 if std_quad_individual is not None else 0
 
     with Pool(processes=num_workers) as pool:
         with tqdm(total=args.n_drones, desc="Phase 1", unit="drone") as pbar:
@@ -377,66 +366,52 @@ def run_experiment(args):
     sys.stdout.flush()
 
     # ------------------------------------------------------------------
-    # Phase 2: Sequential initial flight check + CMA-ES tuning
+    # Phase 2: Parallel initial flight check + CMA-ES tuning (1 CPU per drone)
     # ------------------------------------------------------------------
     print("Phase 2: Initial Flight + CMA-ES Tuning")
     print("-" * 40)
     sys.stdout.flush()
 
-    default_gains = {"pos_P": 2.0, "vel_P": 1.5, "att_P": 0.6, "rate_P": -0.3}
+    # Gains and B-spline timing matched to tune_lee_controller_gates.py defaults
+    default_gains = {"pos_P": 14.3, "vel_P": 9.0, "att_P": 2.9, "rate_P": -0.02}
+    bspline_timing = np.array([12.7, 4.6, 1.9])  # total_time, velocity_scale, startup_time
     n_initial_fly = 0
     n_tuned_flyable = 0
 
-    pbar2 = tqdm(repaired_drones, desc="Phase 2", unit="drone")
-    for idx, (record, individual) in enumerate(pbar2):
-        drone_id = record["drone_id"]
-        pbar2.set_postfix(drone=drone_id, fly=n_initial_fly, tuned=n_tuned_flyable)
+    # Build args for parallel workers (convert numpy arrays to lists for pickling)
+    phase2_args = [
+        (record, individual.tolist(), gate_config, default_gains, bspline_timing,
+         args.max_evals, args.sim_time, args.dt, args.timeout, args.gates_threshold,
+         args.n_startup_points, args.gate_only_mode)
+        for record, individual in repaired_drones
+    ]
 
-        # --- Initial flight with default gains ---
-        init_result = simulate_with_gains(
-            individual,
-            default_gains["pos_P"], default_gains["vel_P"],
-            default_gains["att_P"], default_gains["rate_P"],
-            gate_config, sim_time=args.sim_time, dt=args.dt,
-            n_startup_points=args.n_startup_points,
-            gate_only_mode=args.gate_only_mode,
-        )
+    phase2_workers = cpu_count()
+    with Pool(processes=phase2_workers) as pool:
+        with tqdm(total=len(repaired_drones), desc="Phase 2", unit="drone") as pbar2:
+            for record, initial_fly, tuned_flyable in pool.imap_unordered(_tune_single_drone, phase2_args):
+                if initial_fly:
+                    n_initial_fly += 1
+                if tuned_flyable:
+                    n_tuned_flyable += 1
 
-        record["initial_flight"] = {
-            "gates_passed": init_result["gates_passed"],
-            "crashed": init_result["crashed"],
-            "flight_time": round(init_result["flight_time"], 3),
-        }
+                pbar2.update(1)
+                pbar2.set_postfix(
+                    drone=record["drone_id"], fly=n_initial_fly, tuned=n_tuned_flyable,
+                    gates=record["tuning"]["gates_passed"],
+                    evals=record["tuning"]["n_evaluations"],
+                )
 
-        if init_result["gates_passed"] >= args.gates_threshold:
-            n_initial_fly += 1
+                # Save per-drone JSON incrementally (in main process)
+                drone_path = os.path.join(drones_dir, f"{record['drone_id']}.json")
+                with open(drone_path, "w") as f:
+                    json.dump(record, f, indent=2, default=_json_default)
 
-        # --- CMA-ES tuning ---
-        tuning = optimize_controller_with_early_stop(
-            individual, gate_config,
-            max_evaluations=args.max_evals,
-            num_workers=args.cma_workers,
-            sim_time=args.sim_time,
-            dt=args.dt,
-            timeout_per_eval=args.timeout,
-            gates_threshold=args.gates_threshold,
-            n_startup_points=args.n_startup_points,
-            gate_only_mode=args.gate_only_mode,
-        )
-
-        record["tuning"] = tuning
-        if tuning["gates_passed"] >= args.gates_threshold:
-            n_tuned_flyable += 1
-
-        pbar2.set_postfix(
-            drone=drone_id, fly=n_initial_fly, tuned=n_tuned_flyable,
-            gates=tuning["gates_passed"], evals=tuning["n_evaluations"],
-        )
-
-        # Save per-drone JSON incrementally
-        drone_path = os.path.join(drones_dir, f"{drone_id}.json")
-        with open(drone_path, "w") as f:
-            json.dump(record, f, indent=2, default=_json_default)
+                # Update the record in all_drone_records for the final summary
+                for i, r in enumerate(all_drone_records):
+                    if r["drone_id"] == record["drone_id"]:
+                        all_drone_records[i] = record
+                        break
 
     print(f"\nPhase 2 complete")
     print(f"  Initial fly (>= {args.gates_threshold} gates): {n_initial_fly}")
@@ -462,6 +437,7 @@ def run_experiment(args):
             "max_narms": args.max_narms,
             "seed": args.seed,
             "timeout": args.timeout,
+            "skip_repair": args.skip_repair,
         },
         "timestamp": datetime.now().isoformat(),
         "n_sampled": args.n_drones,
