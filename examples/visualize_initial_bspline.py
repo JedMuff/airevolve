@@ -40,9 +40,15 @@ def visualize_bspline_trajectory(bspline_traj, gate_config, n_samples=200, orien
     velocities = trajectory_data['velocity']
     times = trajectory_data['time']
 
-    # Get control points from both splines
-    startup_cps = bspline_traj.get_startup_control_points()
-    loop_cps = bspline_traj.get_loop_control_points()
+    # Get control points and split into startup vs loop (gate) groups
+    all_cps = bspline_traj.get_all_control_points()
+    if bspline_traj.gate_only_mode:
+        startup_cps = np.empty((0, 3))
+        loop_cps = all_cps
+    else:
+        n_startup = 1 + bspline_traj.n_startup_points  # starting point + intermediates
+        startup_cps = all_cps[:n_startup]
+        loop_cps = all_cps[n_startup:]
 
     # Create figure
     fig = plt.figure(figsize=(14, 10))
@@ -227,8 +233,9 @@ def visualize_bspline_trajectory(bspline_traj, gate_config, n_samples=200, orien
 
     # Add info text box
     info_text = f"Trajectory Info:\n"
-    info_text += f"  Startup CPs: {bspline_traj.n_startup_control_points}\n"
-    info_text += f"  Loop CPs: {bspline_traj.n_loop_control_points}\n"
+    n_startup_cps = 0 if bspline_traj.gate_only_mode else 1 + bspline_traj.n_startup_points
+    info_text += f"  Startup CPs: {n_startup_cps}\n"
+    info_text += f"  Loop CPs: {bspline_traj.n_gates}\n"
     info_text += f"  Total Time: {bspline_traj.total_time:.1f}s\n"
     info_text += f"  Startup Time: {bspline_traj.startup_time:.1f}s\n"
     info_text += f"  Velocity Scale: {bspline_traj.velocity_scale:.2f}\n\n"
