@@ -586,6 +586,7 @@ def optimize_controller_with_early_stop(
     n_gates = bspline_traj.n_gates
     offset_bounds = bspline_traj.get_parameter_bounds_by_group()['gate_offsets']
     n_offset_params = n_gates * 3
+    default_offsets = bspline_traj.get_default_parameters()[:n_offset_params]
 
     # Split budget: 40% Stage 1, 60% Stage 2
     stage1_evals = max(20, int(max_evaluations * 0.4))
@@ -622,7 +623,7 @@ def optimize_controller_with_early_stop(
             "distance_bonus": best_result.get("distance_bonus", 0.0),
             "crashed": best_result["crashed"],
             "best_bspline_timing": best_result.get("bspline_timing", list(bspline_timing)),
-            "best_gate_offsets": [0.0] * n_offset_params,
+            "best_gate_offsets": list(default_offsets),
         }
 
     # ------------------------------------------------------------------
@@ -635,10 +636,10 @@ def optimize_controller_with_early_stop(
     else:
         stage2_gains_timing = list(stage1_guess)
 
-    stage2_guess = stage2_gains_timing + [0.0] * n_offset_params
+    stage2_guess = stage2_gains_timing + list(default_offsets)
     stage2_bounds = list(stage1_bounds) + [
-        [float(lo), float(hi)]
-        for lo, hi in zip(offset_bounds[0], offset_bounds[1])
+        [float(default_offsets[i] + lo), float(default_offsets[i] + hi)]
+        for i, (lo, hi) in enumerate(zip(offset_bounds[0], offset_bounds[1]))
     ]
 
     best2, evals2, early2, time2, _ = _run_cma_stage(
@@ -725,6 +726,7 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
     n_gates = bspline_traj.n_gates
     offset_bounds = bspline_traj.get_parameter_bounds_by_group()['gate_offsets']
     n_offset_params = n_gates * 3
+    default_offsets = bspline_traj.get_default_parameters()[:n_offset_params]
 
     # Split budget: 40% Stage 1, 60% Stage 2
     stage1_evals = max(20, int(max_evaluations * 0.4))
@@ -763,10 +765,10 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
     else:
         stage2_gains_timing = list(stage1_guess)
 
-    stage2_guess = stage2_gains_timing + [0.0] * n_offset_params
+    stage2_guess = stage2_gains_timing + list(default_offsets)
     stage2_bounds = list(stage1_bounds) + [
-        [float(lo), float(hi)]
-        for lo, hi in zip(offset_bounds[0], offset_bounds[1])
+        [float(default_offsets[i] + lo), float(default_offsets[i] + hi)]
+        for i, (lo, hi) in enumerate(zip(offset_bounds[0], offset_bounds[1]))
     ]
 
     best2, evals2, _, time2, stage2_fitnesses = _run_cma_stage(

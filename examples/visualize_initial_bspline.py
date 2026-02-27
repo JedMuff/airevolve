@@ -23,7 +23,56 @@ from airevolve.controllers.trajectory_generation.bspline_gate_trajectory import 
 from airevolve.controllers.utils.gate_configs import GATE_CONFIGS
 
 
-def visualize_bspline_trajectory(bspline_traj, gate_config, n_samples=200, orient="NED"):
+def _sample_limit_trajectories(gate_config, bspline_traj, n_random=30,
+                                gate_offset_scale=0.5, tension=1.0):
+    """
+    Generate trajectories at the extremes of the gate offset parameter space.
+
+    Creates trajectories where each gate's control point offset is randomly set to
+    its maximum or minimum bound (corners of the offset hypercube), matching the
+    bounds used by the 2-stage CMA-ES in run_evolution_with_lee_tuning.py.
+
+    Args:
+        gate_config: Gate configuration
+        bspline_traj: Reference BSplineGateTrajectory (used for timing params)
+        n_random: Number of random extreme trajectories to generate
+        gate_offset_scale: Scale factor for gate offset bounds (0.5 matches evolution)
+        tension: Tension parameter for the limit trajectories (default: 1.0)
+
+    Returns:
+        List of position arrays, one per limit trajectory
+    """
+    n_gates = bspline_traj.n_gates
+    max_offset = gate_config.gate_size * gate_offset_scale
+
+    # Get the tension-based default offsets and timing from the reference trajectory
+    default_params = bspline_traj.get_default_parameters()
+    default_offsets = default_params[:n_gates * 3]
+    timing_params = default_params[-3:]  # [total_time, velocity_scale, startup_time]
+
+    rng = np.random.default_rng(42)
+    limit_positions = []
+
+    for _ in range(n_random):
+        traj = BSplineGateTrajectory(gate_config, gate_offset_scale=gate_offset_scale,
+                                     tension=tension)
+
+        # Random signs for each offset component: either +max or -max
+        # Offsets are relative to the tension-based default control points
+        signs = rng.choice([-1.0, 1.0], size=n_gates * 3)
+        offsets = default_offsets + signs * max_offset
+
+        params = np.concatenate([offsets, timing_params])
+        traj.set_parameters(params)
+
+        data = traj.sample_trajectory(dt=traj.total_time / 200)
+        limit_positions.append(data['position'])
+
+    return limit_positions
+
+
+def visualize_bspline_trajectory(bspline_traj, gate_config, n_samples=200, orient="NED",
+                                 show_limits=False, gate_offset_scale=0.5):
     """
     Create 3D visualization of B-spline trajectory with gates, control points, and knots.
 
@@ -32,6 +81,8 @@ def visualize_bspline_trajectory(bspline_traj, gate_config, n_samples=200, orien
         gate_config: Gate configuration
         n_samples: Number of samples along trajectory
         orient: Coordinate frame ("NED" or "ENU")
+        show_limits: If True, show envelope of extreme offset trajectories
+        gate_offset_scale: Scale factor for gate offset bounds (0.5 matches evolution)
     """
     # Sample the trajectory
     trajectory_data = bspline_traj.sample_trajectory(dt=bspline_traj.total_time / n_samples)
@@ -62,6 +113,21 @@ def visualize_bspline_trajectory(bspline_traj, gate_config, n_samples=200, orien
     if orient == "NED":
         z = -z
         loop_z = -loop_z
+
+    # Plot limit trajectories (before main path so they appear behind)
+    if show_limits:
+        limit_positions = _sample_limit_trajectories(
+            gate_config, bspline_traj, n_random=30,
+            gate_offset_scale=gate_offset_scale,
+            tension=bspline_traj.tension,
+        )
+        for i, lpos in enumerate(limit_positions):
+            lx, ly, lz = lpos[:, 0], lpos[:, 1], lpos[:, 2]
+            if orient == "NED":
+                lz = -lz
+            label = 'Offset limits' if i == 0 else None
+            ax.plot(lx, ly, lz, color='red', linewidth=0.5, alpha=0.15,
+                    label=label, zorder=1)
 
     # Plot trajectory path
     ax.plot(x, y, z, 'b-', linewidth=2, label='Racing Loop', alpha=0.8, zorder=3)
@@ -159,17 +225,31 @@ def visualize_bspline_trajectory(bspline_traj, gate_config, n_samples=200, orien
     # Calculate and display gate proximity information
     min_distances = bspline_traj.check_gate_proximity(dt=bspline_traj.total_time / n_samples)
 
-    # Set axis properties
+    # Set axis properties — expand to include limit trajectories if shown
+    all_x, all_y, all_z = [x], [y], [z]
+    if show_limits:
+        for lpos in limit_positions:
+            lx, ly, lz = lpos[:, 0], lpos[:, 1], lpos[:, 2]
+            if orient == "NED":
+                lz = -lz
+            all_x.append(lx)
+            all_y.append(ly)
+            all_z.append(lz)
+
+    cat_x = np.concatenate(all_x)
+    cat_y = np.concatenate(all_y)
+    cat_z = np.concatenate(all_z)
+
     extraEachSide = 0.5
     maxRange = 0.5 * np.array([
-        x.max() - x.min(),
-        y.max() - y.min(),
-        z.max() - z.min()
+        cat_x.max() - cat_x.min(),
+        cat_y.max() - cat_y.min(),
+        cat_z.max() - cat_z.min()
     ]).max() + extraEachSide
 
-    mid_x = 0.5 * (x.max() + x.min())
-    mid_y = 0.5 * (y.max() + y.min())
-    mid_z = 0.5 * (z.max() + z.min())
+    mid_x = 0.5 * (cat_x.max() + cat_x.min())
+    mid_y = 0.5 * (cat_y.max() + cat_y.min())
+    mid_z = 0.5 * (cat_z.max() + cat_z.min())
 
     ax.set_xlim3d([mid_x - maxRange, mid_x + maxRange])
     ax.set_xlabel('X (m)', fontsize=10, weight='bold')
@@ -278,6 +358,13 @@ def main():
                        help='Save figure to file (e.g., "trajectory.png")')
     parser.add_argument('--show-velocity', action='store_true',
                        help='Also show velocity profile plot')
+    parser.add_argument('--show-limits', action='store_true',
+                       help='Show envelope of extreme gate-offset trajectories '
+                            '(offset bounds match the 2-stage CMA-ES in '
+                            'run_evolution_with_lee_tuning.py)')
+    parser.add_argument('--gate-offset-scale', type=float, default=0.5,
+                       help='Gate offset scale factor for limit trajectories '
+                            '(default: 0.5, matches evolution pipeline)')
 
     args = parser.parse_args()
 
@@ -331,7 +418,9 @@ def main():
     # Create visualizations
     print("Creating 3D visualization...")
     fig1, ax1 = visualize_bspline_trajectory(bspline_traj, gate_config,
-                                             n_samples=args.samples, orient=args.orient)
+                                             n_samples=args.samples, orient=args.orient,
+                                             show_limits=args.show_limits,
+                                             gate_offset_scale=args.gate_offset_scale)
 
     if args.show_velocity:
         print("Creating velocity profile plot...")
