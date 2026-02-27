@@ -21,7 +21,7 @@ class GateConfig:
     """Base class for gate configurations"""
     gate_pos = None
     gate_yaw = None
-    gate_size = 2.0  # Gate size in meters
+    gate_size = 1.0  # Gate size in meters
     x_bounds = [-10, 10]
     y_bounds = [-10, 10]
     z_bounds = [-2, 2]

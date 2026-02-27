@@ -65,7 +65,7 @@ def create_matched_quad():
 class GateChecker:
     """Handles gate passing detection"""
 
-    def __init__(self, gate_pos, gate_yaw, gate_size=2.0):
+    def __init__(self, gate_pos, gate_yaw, gate_size=1.0):
         """
         Initialize gate checker
 

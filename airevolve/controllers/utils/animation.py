@@ -16,7 +16,7 @@ from . import rotation_conversion, quaternion_functions
 
 numFrames = 8
 
-def sameAxisAnimation(t_all, waypoints, pos_all, quat_all, sDes_tr_all, Ts, params, xyzType, yawType, ifsave, orient="NED", gate_pos=None, gate_yaw=None, gate_size=2.0, bspline_traj=None):
+def sameAxisAnimation(t_all, waypoints, pos_all, quat_all, sDes_tr_all, Ts, params, xyzType, yawType, ifsave, orient="NED", gate_pos=None, gate_yaw=None, gate_size=1.0, bspline_traj=None):
 
     x = pos_all[:,0]
     y = pos_all[:,1]
