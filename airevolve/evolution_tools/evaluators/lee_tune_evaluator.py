@@ -192,7 +192,7 @@ class GateChecker:
 def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
                         gate_config, sim_time=20.0, dt=0.005, n_startup_points=1,
                         gate_only_mode=False, bspline_timing=None, gate_offsets=None,
-                        verbose=False):
+                        verbose=False, record_trajectory=False):
     """
     Run simulation with Lee controller for a given morphology and gains
 
@@ -209,9 +209,12 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
         gate_offsets: Optional flat array of gate offset parameters (n_gates * 3 elements).
                       If None, uses default zero offsets.
         verbose: If True, show debug output
+        record_trajectory: If True, record full trajectory data at each timestep
 
     Returns:
-        Dictionary with gates_passed, crashed, completed, flight_time
+        Dictionary with gates_passed, crashed, completed, flight_time.
+        If record_trajectory=True, also includes 'trajectory' dict with numpy arrays:
+            positions, velocities, euler_angles, angular_velocities, motor_commands, gate_passes
     """
     try:
         # Convert genome to DroneInterface
@@ -308,6 +311,15 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
         crashed = False
         num_steps = int(sim_time / dt)
 
+        # Trajectory recording
+        if record_trajectory:
+            traj_positions = []
+            traj_velocities = []
+            traj_euler = []
+            traj_omega = []
+            traj_w_cmd = []
+            traj_gate_passes = []
+
         for step in range(num_steps):
             # Update dynamics
             quad.update(t, dt, ctrl.w_cmd, wind)
@@ -320,7 +332,16 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
             ctrl.controller(sDes, quad, "xyz_pos", dt)
 
             # Check gate passing
-            gate_checker.check_gate_passing(quad.pos)
+            gate_passed = gate_checker.check_gate_passing(quad.pos)
+
+            # Record trajectory data
+            if record_trajectory:
+                traj_positions.append(quad.pos.copy())
+                traj_velocities.append(quad.vel.copy())
+                traj_euler.append(quad.euler.copy())
+                traj_omega.append(quad.omega.copy())
+                traj_w_cmd.append(ctrl.w_cmd.copy())
+                traj_gate_passes.append(gate_passed)
 
             # Check bounds
             if (quad.pos[0] < gate_config.x_bounds[0] or
@@ -341,7 +362,7 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
         # Calculate normalized distance to next gate at end of simulation
         distance_bonus = gate_checker.get_normalized_distance_to_next_gate(quad.pos)
 
-        return {
+        result = {
             'gates_passed': gate_checker.gates_passed,
             'distance_bonus': distance_bonus,
             'crashed': crashed,
@@ -349,6 +370,18 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
             'flight_time': t,
             'success': True
         }
+
+        if record_trajectory:
+            result['trajectory'] = {
+                'positions': np.array(traj_positions),
+                'velocities': np.array(traj_velocities),
+                'euler_angles': np.array(traj_euler),
+                'angular_velocities': np.array(traj_omega),
+                'motor_commands': np.array(traj_w_cmd),
+                'gate_passes': np.array(traj_gate_passes),
+            }
+
+        return result
 
     except Exception as e:
         if verbose:
