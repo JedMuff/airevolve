@@ -98,9 +98,9 @@ def evolve(
 
         # Possibly reevaluate old individuals
         if reevaluate_old and strategy_type == 'plus': # only for plus strategy
-            old_genomes = [population['genome'][i] for i in range(population_size)]
-            old_ids = [population['id'][i] for i in range(population_size)]
-            old_parent_ids = [population['parent_ids'][i] for i in range(population_size)]
+            old_genomes = [population['genome'].iloc[i] for i in range(population_size)]
+            old_ids = [population['id'].iloc[i] for i in range(population_size)]
+            old_parent_ids = [population['parent_ids'].iloc[i] for i in range(population_size)]
             new_old_pop = evaluate_population(fitness_function, old_genomes, old_ids, generation, old_parent_ids, log_dir_base=log_dir, num_workers=num_workers)
         else:
             new_old_pop = population.copy()
@@ -111,9 +111,9 @@ def evolve(
             combined = offspring
         combined['in_pop'] = False
         combined['generation'] = generation
-        
-        sorted_df = combined.sort_values(by="fitness", ascending=False)
-        sorted_df.loc[:population_size, 'in_pop'] = True
+
+        sorted_df = combined.sort_values(by="fitness", ascending=False).reset_index(drop=True)
+        sorted_df.loc[:population_size - 1, 'in_pop'] = True
         population = sorted_df.head(n=population_size)
 
         all_individuals = pd.concat([all_individuals, sorted_df], ignore_index=True)
@@ -251,13 +251,13 @@ def evolve_vectorized(
 
         # Possibly reevaluate old individuals
         if reevaluate_old and strategy_type == 'plus':
-            old_genomes = [population['genome'][i] for i in range(population_size)]
-            old_ids = [population['id'][i] for i in range(population_size)]
-            old_parent_ids = [population['parent_ids'][i] for i in range(population_size)]
+            old_genomes = [population['genome'].iloc[i] for i in range(population_size)]
+            old_ids = [population['id'].iloc[i] for i in range(population_size)]
+            old_parent_ids = [population['parent_ids'].iloc[i] for i in range(population_size)]
             new_old_pop = evaluate_population(fitness_function, old_genomes, old_ids, generation, old_parent_ids, log_dir_base=log_dir, num_workers=num_workers)
         else:
             new_old_pop = population.copy()
-            
+
         # Select next generation
         if strategy_type == 'plus':
             combined = pd.concat([new_old_pop, offspring], ignore_index=True)
@@ -265,9 +265,9 @@ def evolve_vectorized(
             combined = offspring
         combined['in_pop'] = False
         combined['generation'] = generation
-        
-        sorted_df = combined.sort_values(by="fitness", ascending=False)
-        sorted_df.loc[:population_size, 'in_pop'] = True
+
+        sorted_df = combined.sort_values(by="fitness", ascending=False).reset_index(drop=True)
+        sorted_df.loc[:population_size - 1, 'in_pop'] = True
         population = sorted_df.head(n=population_size)
 
         # Update gene_pool_array with new population for next iteration
