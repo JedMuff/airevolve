@@ -57,8 +57,6 @@ srun python3 examples/run_evolution_with_lee_tuning.py \
     --sim-time 20.0 \
     --dt 0.005 \
     --timeout 30.0 \
-    --n-startup-points 1 \
-    --gate-only-mode \
     --num-workers 32 \
     --min-narms 6 \
     --max-narms 6 \
