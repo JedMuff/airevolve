@@ -93,14 +93,17 @@ def create_camera(view_type='iso', width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT):
     
     return cam
 
-def create_gate_geometry():
+def create_gate_geometry(gate_size=None):
     """
     Create gate geometry objects for visualization.
-    
+
+    Args:
+        gate_size: Gate size in meters. If None, uses GATE_SIZE constant.
+
     Returns:
         tuple: (gate, gate_collision_box) path objects
     """
-    n = GATE_SIZE
+    n = gate_size if gate_size is not None else GATE_SIZE
     gate = create_path(np.array([
         [0, n/2, n/2],
         [0, n/2, -n/2],
@@ -114,7 +117,7 @@ def create_gate_geometry():
         [0, -1., -1.],
         [0, -1., 1.]
     ]), loop=True)
-    
+
     return gate, gate_collision_box
 
 def handle_keyboard_input_view(key, cam, auto_play, follow, draw_forces, draw_path, record, out, record_file):
@@ -209,6 +212,7 @@ def view(propellers,
          fps=100,
          gate_pos=[],
          gate_yaw=[],
+         gate_size=None,
          record_steps=0,
          record_file='output.mp4',
          show_window=True,
@@ -233,6 +237,7 @@ def view(propellers,
         fps: Target frames per second for display/recording
         gate_pos: List of gate positions for course visualization
         gate_yaw: List of gate orientations
+        gate_size: Gate size in meters. If None, uses GATE_SIZE constant.
         record_steps: Number of steps to record (0 = no recording)
         record_file: Output video filename
         show_window: Whether to display the window
@@ -272,7 +277,7 @@ def view(propellers,
     drone, forces = create_drone(propellers, box_size=DRONE_BOX_SIZE, prop_radius=PROP_RADIUS, scale=1, motor_colors=motor_colors_bgr)
 
     # Create gate geometry
-    gate, gate_collision_box = create_gate_geometry()
+    gate, gate_collision_box = create_gate_geometry(gate_size)
 
     # Visualization parameters
     scl = THRUST_SCALE  # Thrust vector scale
@@ -469,10 +474,10 @@ def animate(t, x, y, z, phi, theta, psi, u,
     drone, forces = create_drone(propellers, box_size=DRONE_BOX_SIZE, prop_radius=PROP_RADIUS, scale=1)
     
     # Gate setup
-    gate, gate_collision_box = create_gate_geometry()
-    
+    gate, gate_collision_box = create_gate_geometry(kwargs.get('gate_size'))
+
     scl = THRUST_SCALE  # Thrust scale
-    
+
     # Window setup
     cv2.namedWindow('animation')
     cv2.setMouseCallback('animation', cam.mouse_control)
