@@ -190,8 +190,8 @@ class GateChecker:
 # ============================================================================
 
 def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
-                        gate_config, sim_time=20.0, dt=0.005, n_startup_points=1,
-                        gate_only_mode=False, bspline_timing=None, gate_offsets=None,
+                        gate_config, sim_time=20.0, dt=0.005,
+                        bspline_timing=None, gate_offsets=None,
                         verbose=False, record_trajectory=False):
     """
     Run simulation with Lee controller for a given morphology and gains
@@ -202,8 +202,6 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
         gate_config: Gate configuration class
         sim_time: Simulation time in seconds
         dt: Time step in seconds
-        n_startup_points: Number of startup control points
-        gate_only_mode: If True, use gate-only mode (pure racing loop)
         bspline_timing: Optional array of [total_time, velocity_scale, startup_time].
                         If None, uses BSplineGateTrajectory defaults (20.0, 1.0, 3.0).
         gate_offsets: Optional flat array of gate offset parameters (n_gates * 3 elements).
@@ -254,8 +252,7 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
                                    auto_scale_gains=False, **lee_gains)
 
         # Create B-spline trajectory
-        bspline_traj = BSplineGateTrajectory(gate_config, n_startup_points=n_startup_points,
-                                            gate_offset_scale=0.5, gate_only_mode=gate_only_mode)
+        bspline_traj = BSplineGateTrajectory(gate_config, gate_offset_scale=0.5)
         bspline_params = bspline_traj.get_default_parameters()
         bspline_traj.set_parameters(bspline_params)
 
@@ -290,9 +287,7 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
         # Create Trajectory wrapper (xyzType=15 for B-spline)
         from airevolve.controllers.trajectory_generation.trajectory import Trajectory
         traj = Trajectory(quad, "xyz_pos", np.array([15, 3, 1]),
-                         gate_config=gate_config,
-                         bspline_params={'n_startup_points': n_startup_points,
-                                       'gate_only_mode': gate_only_mode})
+                         gate_config=gate_config)
         traj.bspline_trajectory = bspline_traj
 
         # Create wind model (no wind)
@@ -409,8 +404,7 @@ def _evaluate_solution_wrapper(args):
     - 7 params: gains + timing (+ total_time, velocity_scale, startup_time)
     - 7+N params: gains + timing + gate offsets (N = n_gates * 3)
     """
-    (params, individual, gate_config, sim_time, dt, n_startup_points,
-     gate_only_mode, bspline_timing) = args
+    (params, individual, gate_config, sim_time, dt, bspline_timing) = args
 
     pos_g, vel_g, att_g, rate_g = params[0:4]
 
@@ -427,8 +421,6 @@ def _evaluate_solution_wrapper(args):
     result = simulate_with_gains(
         individual, pos_g, vel_g, att_g, rate_g,
         gate_config, sim_time, dt,
-        n_startup_points=n_startup_points,
-        gate_only_mode=gate_only_mode,
         bspline_timing=bspline_timing,
         gate_offsets=gate_offsets,
         verbose=False
@@ -468,7 +460,7 @@ def _evaluate_solution_wrapper(args):
 def _run_cma_stage(
     individual, gate_config, initial_guess, bounds, initial_std,
     max_evaluations, num_workers, sim_time, dt, timeout_per_eval,
-    gates_threshold, n_startup_points, gate_only_mode, bspline_timing,
+    gates_threshold, bspline_timing,
 ):
     """Run a single CMA-ES optimisation stage with early stopping.
 
@@ -514,8 +506,7 @@ def _run_cma_stage(
 
                 if executor is not None:
                     eval_args = [
-                        (sol, individual, gate_config, sim_time, dt, n_startup_points,
-                         gate_only_mode, bspline_timing)
+                        (sol, individual, gate_config, sim_time, dt, bspline_timing)
                         for sol in solutions
                     ]
                     future_to_sol = {
@@ -539,8 +530,7 @@ def _run_cma_stage(
                     fitness_values = []
                     for sol in solutions:
                         score, result = _evaluate_solution_wrapper(
-                            (sol, individual, gate_config, sim_time, dt, n_startup_points,
-                             gate_only_mode, bspline_timing)
+                            (sol, individual, gate_config, sim_time, dt, bspline_timing)
                         )
                         fitness_values.append(score)
                         if result is not None and result["fitness"] > best_fitness and not result["crashed"]:
@@ -568,7 +558,7 @@ def _run_cma_stage(
 def optimize_controller_with_early_stop(
     individual, gate_config, max_evaluations=200, num_workers=4,
     sim_time=20.0, dt=0.005, timeout_per_eval=30.0, gates_threshold=9,
-    n_startup_points=1, gate_only_mode=True, bspline_timing=None,
+    bspline_timing=None,
 ):
     """
     Two-stage CMA-ES optimisation with early stopping.
@@ -592,8 +582,7 @@ def optimize_controller_with_early_stop(
         bspline_timing = np.array([12.7, 4.6, 1.9])
 
     # Get gate offset bounds from BSplineGateTrajectory
-    bspline_traj = BSplineGateTrajectory(gate_config, n_startup_points=n_startup_points,
-                                         gate_offset_scale=0.5, gate_only_mode=gate_only_mode)
+    bspline_traj = BSplineGateTrajectory(gate_config, gate_offset_scale=0.5)
     n_gates = bspline_traj.n_gates
     offset_bounds = bspline_traj.get_parameter_bounds_by_group()['gate_offsets']
     n_offset_params = n_gates * 3
@@ -619,7 +608,7 @@ def optimize_controller_with_early_stop(
     best_result, evals1, early1, time1, _ = _run_cma_stage(
         individual, gate_config, stage1_guess, stage1_bounds, 1.5,
         stage1_evals, num_workers, sim_time, dt, timeout_per_eval,
-        gates_threshold, n_startup_points, gate_only_mode, bspline_timing,
+        gates_threshold, bspline_timing,
     )
 
     if early1 and best_result is not None:
@@ -655,7 +644,7 @@ def optimize_controller_with_early_stop(
     best2, evals2, early2, time2, _ = _run_cma_stage(
         individual, gate_config, stage2_guess, stage2_bounds, 0.3,
         stage2_evals, num_workers, sim_time, dt, timeout_per_eval,
-        gates_threshold, n_startup_points, gate_only_mode, bspline_timing,
+        gates_threshold, bspline_timing,
     )
 
     # Pick best across both stages
@@ -689,7 +678,6 @@ def optimize_controller_with_early_stop(
 
 def optimize_controller_for_morphology(individual, gate_config, max_evaluations=100,
                                       num_workers=None, sim_time=20.0, dt=0.005,
-                                      n_startup_points=1, gate_only_mode=True,
                                       timeout_per_eval=30.0, save_dir=None,
                                       bspline_timing=None):
     """
@@ -708,8 +696,6 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
         num_workers: Number of parallel workers
         sim_time: Simulation time in seconds
         dt: Time step in seconds
-        n_startup_points: Number of startup control points
-        gate_only_mode: If True, use gate-only mode (pure racing loop)
         timeout_per_eval: Timeout per evaluation in seconds
         save_dir: Directory to save results (optional)
         bspline_timing: Optional array of [total_time, velocity_scale, startup_time]
@@ -735,8 +721,7 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
         bspline_timing = np.array([12.7, 4.6, 1.9])
 
     # Get gate offset bounds from BSplineGateTrajectory
-    bspline_traj = BSplineGateTrajectory(gate_config, n_startup_points=n_startup_points,
-                                         gate_offset_scale=0.5, gate_only_mode=gate_only_mode)
+    bspline_traj = BSplineGateTrajectory(gate_config, gate_offset_scale=0.5)
     n_gates = bspline_traj.n_gates
     offset_bounds = bspline_traj.get_parameter_bounds_by_group()['gate_offsets']
     n_offset_params = n_gates * 3
@@ -765,7 +750,7 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
     best_result, evals1, _, time1, stage1_fitnesses = _run_cma_stage(
         individual, gate_config, stage1_guess, stage1_bounds, 1.5,
         stage1_evals, num_workers, sim_time, dt, timeout_per_eval,
-        no_early_stop, n_startup_points, gate_only_mode, bspline_timing,
+        no_early_stop, bspline_timing,
     )
 
     # ------------------------------------------------------------------
@@ -787,7 +772,7 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
     best2, evals2, _, time2, stage2_fitnesses = _run_cma_stage(
         individual, gate_config, stage2_guess, stage2_bounds, 0.3,
         stage2_evals, num_workers, sim_time, dt, timeout_per_eval,
-        no_early_stop, n_startup_points, gate_only_mode, bspline_timing,
+        no_early_stop, bspline_timing,
     )
 
     # Pick best across both stages
@@ -936,8 +921,7 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
 
 def evaluate_individual_with_tuning(individual, ind_save_dir, gate_cfg='circle',
                                     max_evals=100, num_workers=4, sim_time=20.0,
-                                    dt=0.005, n_startup_points=1, gate_only_mode=True,
-                                    timeout=30.0, num=None):
+                                    dt=0.005, timeout=30.0, num=None):
     """
     Evaluate individual by tuning its controller via 2-stage CMA-ES.
 
@@ -953,8 +937,6 @@ def evaluate_individual_with_tuning(individual, ind_save_dir, gate_cfg='circle',
         num_workers: Number of parallel workers for CMA-ES
         sim_time: Simulation time in seconds
         dt: Time step in seconds
-        n_startup_points: Number of startup control points
-        gate_only_mode: If True, use gate-only mode (pure racing loop)
         timeout: Timeout per evaluation in seconds
         num: Individual number (for logging)
 
@@ -972,8 +954,6 @@ def evaluate_individual_with_tuning(individual, ind_save_dir, gate_cfg='circle',
         num_workers=num_workers,
         sim_time=sim_time,
         dt=dt,
-        n_startup_points=n_startup_points,
-        gate_only_mode=gate_only_mode,
         timeout_per_eval=timeout,
         save_dir=ind_save_dir
     )

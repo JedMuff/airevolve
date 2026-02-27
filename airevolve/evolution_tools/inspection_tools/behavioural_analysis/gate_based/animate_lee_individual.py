@@ -30,7 +30,6 @@ def _genome_to_propellers(genome):
 def animate_lee_individual(genome, tuning_results_path, gate_cfg,
                            save_dir, file_name,
                            sim_time=20.0, dt=0.005,
-                           n_startup_points=1, gate_only_mode=True,
                            view_type='top', follow=True,
                            draw_forces=False, draw_path=True,
                            auto_play=True, record=True,
@@ -46,8 +45,6 @@ def animate_lee_individual(genome, tuning_results_path, gate_cfg,
         file_name: Video filename (e.g. '/top_view.mp4').
         sim_time: Simulation duration in seconds.
         dt: Simulation timestep (default 0.005 s = 200 Hz).
-        n_startup_points: Number of B-spline startup control points.
-        gate_only_mode: If True, use gate-only trajectory mode.
         view_type: Camera view ('top' or 'iso').
         follow: Whether camera follows the drone.
         draw_forces: Whether to draw thrust vectors.
@@ -82,8 +79,6 @@ def animate_lee_individual(genome, tuning_results_path, gate_cfg,
         gate_config=gate_config,
         sim_time=sim_time,
         dt=dt,
-        n_startup_points=n_startup_points,
-        gate_only_mode=gate_only_mode,
         bspline_timing=bspline_timing,
         gate_offsets=gate_offsets,
         record_trajectory=True,

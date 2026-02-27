@@ -90,10 +90,6 @@ def parse_arguments():
                         help="Random seed (default: None)")
     parser.add_argument("--timeout", type=float, default=30.0,
                         help="CMA-ES per-eval timeout in seconds (default: 30.0)")
-    parser.add_argument("--n-startup-points", type=int, default=1,
-                        help="Number of startup control points (default: 1)")
-    parser.add_argument("--gate-only-mode", action="store_true",
-                        help="Use gate-only mode (pure racing loop without startup phase)")
     parser.add_argument("--skip-repair", action="store_true",
                         help="Skip repair stages; hover-checked genomes go straight to tuning")
     return parser.parse_args()
@@ -168,8 +164,7 @@ def _tune_single_drone(args):
     Each worker runs CMA-ES single-threaded (num_workers=1).
     """
     (record, individual_list, gate_config, default_gains, bspline_timing,
-     max_evals, sim_time, dt, timeout, gates_threshold,
-     n_startup_points, gate_only_mode) = args
+     max_evals, sim_time, dt, timeout, gates_threshold) = args
 
     individual = np.array(individual_list)
 
@@ -179,8 +174,6 @@ def _tune_single_drone(args):
         default_gains["pos_P"], default_gains["vel_P"],
         default_gains["att_P"], default_gains["rate_P"],
         gate_config, sim_time=sim_time, dt=dt,
-        n_startup_points=n_startup_points,
-        gate_only_mode=gate_only_mode,
         bspline_timing=bspline_timing,
     )
 
@@ -201,8 +194,6 @@ def _tune_single_drone(args):
         dt=dt,
         timeout_per_eval=timeout,
         gates_threshold=gates_threshold,
-        n_startup_points=n_startup_points,
-        gate_only_mode=gate_only_mode,
         bspline_timing=bspline_timing,
     )
 
@@ -246,8 +237,6 @@ def run_experiment(args):
     print(f"Gates threshold  : {args.gates_threshold}")
     print(f"CMA workers      : {args.cma_workers}")
     print(f"Sim time         : {args.sim_time}s  dt={args.dt}s")
-    print(f"N startup points : {args.n_startup_points}")
-    print(f"Gate-only mode   : {args.gate_only_mode}")
     print(f"Skip repair      : {args.skip_repair}")
     print(f"Seed             : {args.seed}")
     print("=" * 80)
@@ -381,8 +370,7 @@ def run_experiment(args):
     # Build args for parallel workers (convert numpy arrays to lists for pickling)
     phase2_args = [
         (record, individual.tolist(), gate_config, default_gains, bspline_timing,
-         args.max_evals, args.sim_time, args.dt, args.timeout, args.gates_threshold,
-         args.n_startup_points, args.gate_only_mode)
+         args.max_evals, args.sim_time, args.dt, args.timeout, args.gates_threshold)
         for record, individual in repaired_drones
     ]
 

@@ -54,13 +54,7 @@ class Trajectory:
             raise ValueError("gate_config must be provided for B-spline trajectory (xyzType=15)")
 
         self.gate_config = gate_config
-        if bspline_params is None:
-            bspline_params = {}
-
-        n_startup_points = bspline_params.get('n_startup_points', 2)
-        gate_only_mode = bspline_params.get('gate_only_mode', False)
-        self.bspline_trajectory = BSplineGateTrajectory(gate_config, n_startup_points=n_startup_points,
-                                                       gate_only_mode=gate_only_mode)
+        self.bspline_trajectory = BSplineGateTrajectory(gate_config)
 
         # Initialize placeholder waypoint arrays for compatibility
         # (some visualization code may still reference these)

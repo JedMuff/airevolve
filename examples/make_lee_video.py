@@ -21,8 +21,7 @@ from airevolve.evolution_tools.inspection_tools.behavioural_analysis.gate_based.
 
 
 def process_lee_individual(individual_dir, gate_cfg="figure8", sim_time=20.0,
-                           dt=0.005, n_startup_points=1, gate_only_mode=True,
-                           fps=100, width=864, height=700, dpi=200,
+                           dt=0.005, fps=100, width=864, height=700, dpi=200,
                            gate_label_ylevel=11.0, fontsize=7, pad=0.05,
                            offset_val=0.5, gate_line_alpha=0.5, alpha=1.0,
                            motor_colors=None, color='blue'):
@@ -43,8 +42,6 @@ def process_lee_individual(individual_dir, gate_cfg="figure8", sim_time=20.0,
         gate_cfg: Gate configuration name.
         sim_time: Simulation duration (seconds).
         dt: Simulation timestep (seconds).
-        n_startup_points: B-spline startup control points.
-        gate_only_mode: Use gate-only trajectory mode.
         fps: Frames per second for videos.
         width: Video/plot width in pixels.
         height: Video/plot height in pixels.
@@ -92,8 +89,6 @@ def process_lee_individual(individual_dir, gate_cfg="figure8", sim_time=20.0,
     ind_data = extract_lee_simulation_data(
         genome, tuning_file, gate_cfg,
         sim_time=sim_time, dt=dt,
-        n_startup_points=n_startup_points,
-        gate_only_mode=gate_only_mode,
     )
 
     ind_speed = np.linalg.norm(ind_data["velocities"], axis=1)
@@ -167,8 +162,6 @@ def process_lee_individual(individual_dir, gate_cfg="figure8", sim_time=20.0,
             save_dir=vid_dir,
             file_name="/top_view.mp4",
             sim_time=sim_time, dt=dt,
-            n_startup_points=n_startup_points,
-            gate_only_mode=gate_only_mode,
             view_type='top', follow=True,
             draw_forces=False, draw_path=True,
             auto_play=True, record=True,
@@ -182,8 +175,6 @@ def process_lee_individual(individual_dir, gate_cfg="figure8", sim_time=20.0,
             save_dir=vid_dir,
             file_name="/iso_view.mp4",
             sim_time=sim_time, dt=dt,
-            n_startup_points=n_startup_points,
-            gate_only_mode=gate_only_mode,
             view_type='iso', follow=True,
             draw_forces=False, draw_path=True,
             auto_play=True, record=True,

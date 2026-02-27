@@ -201,8 +201,7 @@ class GateChecker:
 # ============================================================================
 
 def simulate_bspline(pos_gain, vel_gain, att_gain, rate_gain, bspline_params,
-                     gate_config, sim_time=20.0, dt=0.005, n_startup_points=1,
-                     verbose=False):
+                     gate_config, sim_time=20.0, dt=0.005, verbose=False):
     """
     Run simulation with Lee controller and B-spline gate trajectory
 
@@ -212,7 +211,6 @@ def simulate_bspline(pos_gain, vel_gain, att_gain, rate_gain, bspline_params,
         gate_config: Gate configuration class
         sim_time: Simulation time in seconds
         dt: Time step in seconds
-        n_startup_points: Number of startup control points
         verbose: If True, show debug output
 
     Returns:
@@ -232,7 +230,7 @@ def simulate_bspline(pos_gain, vel_gain, att_gain, rate_gain, bspline_params,
         ctrl = LeeGeometricControl(quad, yawType=1, orient='NED', **lee_gains)
 
         # Create B-spline trajectory
-        bspline_traj = BSplineGateTrajectory(gate_config, n_startup_points=n_startup_points, gate_offset_scale=0.5)
+        bspline_traj = BSplineGateTrajectory(gate_config, gate_offset_scale=0.5)
         bspline_traj.set_parameters(bspline_params)
 
         # Set drone initial position
@@ -242,8 +240,7 @@ def simulate_bspline(pos_gain, vel_gain, att_gain, rate_gain, bspline_params,
         # Create Trajectory wrapper (xyzType=15 for B-spline)
         from airevolve.controllers.trajectory_generation.trajectory import Trajectory
         traj = Trajectory(quad, "xyz_pos", np.array([15, 3, 1]),
-                         gate_config=gate_config,
-                         bspline_params={'n_startup_points': n_startup_points})
+                         gate_config=gate_config)
         traj.bspline_trajectory = bspline_traj
 
         # Create wind model (no wind)
@@ -326,7 +323,7 @@ class SimpleTuner:
     """Simple CMA-ES optimization for gain tuning (Stage 1 only)"""
 
     def __init__(self, gate_config, sim_time=20.0, dt=0.005,
-                 output_dir="tuning_results_gates_matched", n_startup_points=1):
+                 output_dir="tuning_results_gates_matched"):
         """
         Initialize simple tuner
 
@@ -335,19 +332,17 @@ class SimpleTuner:
             sim_time: Simulation time in seconds
             dt: Time step in seconds
             output_dir: Output directory for results
-            n_startup_points: Number of startup control points
         """
         self.gate_config = gate_config
         self.sim_time = sim_time
         self.dt = dt
         self.output_dir = output_dir
-        self.n_startup_points = n_startup_points
         self.results = []
         self.best_score = -float('inf')
         self.best_params = None
 
         # Create B-spline template
-        self.bspline_template = BSplineGateTrajectory(gate_config, n_startup_points=n_startup_points, gate_offset_scale=0.5)
+        self.bspline_template = BSplineGateTrajectory(gate_config, gate_offset_scale=0.5)
         self.fixed_bspline_params = self.bspline_template.get_default_parameters()
 
         # Create output directory
@@ -414,7 +409,6 @@ class SimpleTuner:
                         pos_g, vel_g, att_g, rate_g,
                         self.fixed_bspline_params,
                         self.gate_config, self.sim_time, self.dt,
-                        n_startup_points=self.n_startup_points,
                         verbose=False
                     )
 
@@ -522,7 +516,6 @@ class SimpleTuner:
                 'distance_bonus': self.best_params.get('distance_bonus', 0.0),
                 'gains': self.best_params['gains'],
                 'bspline_params': self.best_params['bspline_params'],
-                'n_startup_points': self.n_startup_points,
                 'flight_time': self.best_params['flight_time'],
                 'crashed': self.best_params['crashed']
             }

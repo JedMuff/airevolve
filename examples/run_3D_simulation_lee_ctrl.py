@@ -116,8 +116,6 @@ def main():
                        help='Simulation time in seconds (default: 20)')
     parser.add_argument('--dt', type=float, default=0.005,
                        help='Time step in seconds (default: 0.005)')
-    parser.add_argument('--n-startup-points', type=int, default=1,
-                       help='Number of startup control points (default: 1)')
     parser.add_argument('--no-viz', action='store_true',
                        help='Disable visualization (for debugging)')
     parser.add_argument('--save', action='store_true',
@@ -151,28 +149,15 @@ def main():
     # Get gate configuration
     gate_config = GATE_CONFIGS[args.gates]
 
-    # Determine n_startup_points (from config file if available, otherwise from args)
-    n_startup_points = args.n_startup_points
     bspline_params = None
     lee_gains = {}
     use_auto_scaling = True
-    gate_only_mode = False
 
     # Load configuration if provided
     if args.bspline_config:
         print(f"Loading configuration from: {args.bspline_config}")
         with open(args.bspline_config, 'r') as f:
             config = json.load(f)
-
-        # Extract n_startup_points if available
-        if 'n_startup_points' in config:
-            n_startup_points = config['n_startup_points']
-            print(f"  Using n_startup_points={n_startup_points} from config")
-
-        # Detect Stage 3 (gate-only mode)
-        if 'stage' in config and config['stage'] == 3:
-            gate_only_mode = True
-            print(f"  Stage 3 detected: using gate-only mode (pure periodic loop)")
 
         # Extract B-spline parameters
         if 'bspline_params' in config:
@@ -203,9 +188,7 @@ def main():
 
     # Create B-spline trajectory
     traj = Trajectory(quad, "xyz_pos", np.array([15, 3, 1]),
-                     gate_config=gate_config,
-                     bspline_params={'n_startup_points': n_startup_points,
-                                   'gate_only_mode': gate_only_mode})
+                     gate_config=gate_config)
 
     # Set B-spline parameters if loaded from config
     if bspline_params is not None:

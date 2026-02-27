@@ -222,8 +222,7 @@ class GateChecker:
 # ============================================================================
 
 def simulate_bspline(pos_gain, vel_gain, att_gain, rate_gain, bspline_params,
-                     gate_config, sim_time=20.0, dt=0.005, n_startup_points=1,
-                     verbose=False):
+                     gate_config, sim_time=20.0, dt=0.005, verbose=False):
     """
     Run simulation with Lee controller and B-spline gate trajectory
 
@@ -233,7 +232,6 @@ def simulate_bspline(pos_gain, vel_gain, att_gain, rate_gain, bspline_params,
         gate_config: Gate configuration class
         sim_time: Simulation time in seconds
         dt: Time step in seconds
-        n_startup_points: Number of startup control points
         verbose: If True, show debug output
 
     Returns:
@@ -254,19 +252,34 @@ def simulate_bspline(pos_gain, vel_gain, att_gain, rate_gain, bspline_params,
                                    auto_scale_gains=False, **lee_gains)
 
         # Create B-spline trajectory
-        # Use gate_offset_scale=0.5 to constrain offsets to ±half gate size (keeping control points within gates)
-        bspline_traj = BSplineGateTrajectory(gate_config, n_startup_points=n_startup_points, gate_offset_scale=0.5)
+        # Use gate_offset_scale=0.5 to constrain offsets to ±half gate size
+        bspline_traj = BSplineGateTrajectory(gate_config, gate_offset_scale=0.5)
         bspline_traj.set_parameters(bspline_params)
 
-        # Set drone initial position
-        start_pos = bspline_traj.get_start_position()
-        quad.drone_sim.set_state(position=start_pos)
+        # CRITICAL: Set drone initial state to match trajectory at t=0
+        # This eliminates startup transients from position/velocity/yaw errors
+        start_pos, _, _ = bspline_traj.evaluate(0.0)
+
+        # Compute initial yaw from trajectory's heading direction at t=0.05s
+        # (t=0 has zero velocity due to quintic startup ramp)
+        _, vel_050, _ = bspline_traj.evaluate(0.05)
+        if np.linalg.norm(vel_050[:2]) > 0.001:  # If horizontal velocity > 0.001 m/s
+            initial_yaw = np.arctan2(vel_050[1], vel_050[0])
+        else:
+            # Fallback to first gate direction if velocity is too small
+            initial_yaw = gate_config.gate_yaw[0]
+
+        initial_euler = np.array([0.0, 0.0, initial_yaw])
+
+        # Set drone state: position from t=0, zero velocity (trajectory starts from rest),
+        # yaw from trajectory heading to prevent yaw error torque spike
+        quad.drone_sim.set_state(position=start_pos, velocity=np.zeros(3),
+                                attitude=initial_euler, angular_velocity=np.zeros(3))
 
         # Create Trajectory wrapper (xyzType=15 for B-spline)
         from airevolve.controllers.trajectory_generation.trajectory import Trajectory
         traj = Trajectory(quad, "xyz_pos", np.array([15, 3, 1]),
-                         gate_config=gate_config,
-                         bspline_params={'n_startup_points': n_startup_points})
+                         gate_config=gate_config)
         traj.bspline_trajectory = bspline_traj
 
         # Create wind model (no wind)
@@ -347,7 +360,7 @@ def simulate_bspline(pos_gain, vel_gain, att_gain, rate_gain, bspline_params,
 
 def _evaluate_solution_wrapper(args):
     """Wrapper function for parallel evaluation"""
-    (params, stage, gate_config, sim_time, dt, n_startup_points,
+    (params, stage, gate_config, sim_time, dt,
      fixed_bspline_params, fixed_gains, fixed_timing, fixed_gate_offsets,
      n_gate_offset_params, n_timing_params) = args
 
@@ -363,12 +376,7 @@ def _evaluate_solution_wrapper(args):
         timing_params = params[4:7]
 
         # Reconstruct full B-spline params with new timing
-        start_pos = fixed_bspline_params[0:3]
-        n_startup_coords = n_startup_points * 3
-        startup_points = fixed_bspline_params[3:3+n_startup_coords]
-        gate_offsets = fixed_gate_offsets
-
-        bspline_params = np.concatenate([start_pos, startup_points, gate_offsets, timing_params])
+        bspline_params = np.concatenate([fixed_gate_offsets, timing_params])
 
     elif stage == 3:
         # Stage 3: Optimize gains + timing + gate offsets
@@ -376,12 +384,7 @@ def _evaluate_solution_wrapper(args):
         timing_params = params[4:7]
         gate_offsets = params[7:7+n_gate_offset_params]
 
-        # Reconstruct full B-spline params
-        start_pos = fixed_bspline_params[0:3]
-        n_startup_coords = n_startup_points * 3
-        startup_points = fixed_bspline_params[3:3+n_startup_coords]
-
-        bspline_params = np.concatenate([start_pos, startup_points, gate_offsets, timing_params])
+        bspline_params = np.concatenate([gate_offsets, timing_params])
 
     else:
         raise ValueError(f"Invalid stage: {stage}")
@@ -391,7 +394,6 @@ def _evaluate_solution_wrapper(args):
         pos_g, vel_g, att_g, rate_g,
         bspline_params,
         gate_config, sim_time, dt,
-        n_startup_points=n_startup_points,
         verbose=False
     )
 
@@ -427,7 +429,7 @@ class CurriculumTuner:
     """Curriculum-based CMA-ES optimization for Lee controller with B-spline trajectories"""
 
     def __init__(self, gate_config, stage, sim_time=20.0, dt=0.005,
-                 output_dir="tuning_results_gates", n_startup_points=1):
+                 output_dir="tuning_results_gates"):
         """
         Initialize curriculum tuner
 
@@ -437,21 +439,19 @@ class CurriculumTuner:
             sim_time: Simulation time in seconds
             dt: Time step in seconds
             output_dir: Output directory for results
-            n_startup_points: Number of startup control points
         """
         self.gate_config = gate_config
         self.stage = stage
         self.sim_time = sim_time
         self.dt = dt
         self.output_dir = output_dir
-        self.n_startup_points = n_startup_points
         self.results = []
         self.best_score = -float('inf')
         self.best_params = None
 
         # Create B-spline template
-        # Use gate_offset_scale=0.5 to constrain offsets to ±half gate size (keeping control points within gates)
-        self.bspline_template = BSplineGateTrajectory(gate_config, n_startup_points=n_startup_points, gate_offset_scale=0.5)
+        # Use gate_offset_scale=0.5 to constrain offsets to ±half gate size
+        self.bspline_template = BSplineGateTrajectory(gate_config, gate_offset_scale=0.5)
         self.n_bspline_params = self.bspline_template.get_parameter_count()
         self.bspline_bounds = self.bspline_template.get_parameter_bounds()
         self.fixed_bspline_params = self.bspline_template.get_default_parameters()
@@ -463,17 +463,14 @@ class CurriculumTuner:
         self.n_timing_params = self.bspline_template.get_timing_parameter_count()
 
         # Fixed parameters (will be overridden if loading from previous stage)
-        # Initial guess for 2-inch quad based on successful optimization runs
-        self.fixed_gains = [2.0, 1.5, 0.6, -0.3]  # pos_P, vel_P, att_P, rate_P
+        self.fixed_gains = [14.3, 9.0, 2.9, -0.02]  # pos_P, vel_P, att_P, rate_P
 
-        # Update default timing parameters to better values for 2-inch quads
-        # Based on successful runs: faster total time, lower velocity scale, shorter startup
-        self.fixed_timing = np.array([15.0, 0.85, 1.5])  # total_time, velocity_scale, startup_time
+        # Default timing parameters
+        self.fixed_timing = np.array([12.7, 4.6, 1.9])  # total_time, velocity_scale, startup_time
 
         # Update fixed_bspline_params to use the new timing defaults
-        # Replace the timing parameters (last 3 values) in the default bspline params
-        idx = 3 + self.n_startup_points * 3 + self.n_gate_offset_params  # Index where timing starts
-        self.fixed_bspline_params[idx:idx+3] = self.fixed_timing
+        # Params are always [gate_offsets, timing]
+        self.fixed_bspline_params[-3:] = self.fixed_timing
 
         # Create output directory
         Path(self.output_dir).mkdir(exist_ok=True)
@@ -497,14 +494,14 @@ class CurriculumTuner:
                   f"att={self.fixed_gains[2]:.3f}, rate={self.fixed_gains[3]:.4f}")
 
         # Load B-spline params if available
+        # Format is always [gate_offsets(n_gates*3), timing(3)]
         if 'bspline_params' in config:
             bspline_params = np.array(config['bspline_params'])
             self.fixed_bspline_params = bspline_params
 
-            # Extract timing and gate offsets for stages 2 and 3
-            idx = 3 + self.n_startup_points * 3  # After start_pos and startup_points
-            self.fixed_gate_offsets = bspline_params[idx:idx+self.n_gate_offset_params]
-            self.fixed_timing = bspline_params[idx+self.n_gate_offset_params:idx+self.n_gate_offset_params+3]
+            # Extract gate offsets and timing
+            self.fixed_gate_offsets = bspline_params[:self.n_gate_offset_params]
+            self.fixed_timing = bspline_params[self.n_gate_offset_params:self.n_gate_offset_params+3]
 
             print(f"Loaded B-spline parameters ({len(bspline_params)} params)")
             print(f"  Timing: total_time={self.fixed_timing[0]:.2f}s, "
@@ -514,59 +511,65 @@ class CurriculumTuner:
         """Get optimization configuration for current stage"""
         if self.stage == 1:
             # Stage 1: Optimize gains only (4 params)
-            # Bounds for 2-inch quads with varying arm lengths
-            # Based on optimization data: working region pos~1-4, vel~0.8-3, att~0.3-1.5, rate~-0.8 to -0.05
+            # Bounds centered around successful Stage 2 values
+            # pos=14.3, vel=9.0, att=2.9, rate=-0.02
             initial_guess = self.fixed_gains
             bounds = [
-                [0.01, 10.0],     # pos_P (relaxed for different arm lengths)
-                [0.01, 10.0],     # vel_P (relaxed for different arm lengths)
-                [0.01, 10.0],     # att_P (wider range for different inertias)
-                [-5.0, -0.01]   # rate_P (full range for different configurations)
+                [1.0, 20.0],     # pos_P (centered around 14.3)
+                [1.0, 20.0],     # vel_P (centered around 9.0)
+                [1.0, 20.0],      # att_P (centered around 2.9)
+                [-1.0, -0.001]      # rate_P (centered around -0.02)
             ]
-            initial_std = 0.8  # Moderate search width
+            initial_std = 1.5  # Moderate search around working values
             param_count = 4
             param_description = "Controller gains (4 params)"
 
         elif self.stage == 2:
             # Stage 2: Optimize gains + timing (7 params)
-            # Timing may need to be faster for more agile 2-inch quad
+            # Bounds centered around successful Stage 2 values
+            # gains: pos=14.3, vel=9.0, att=2.9, rate=-0.02
+            # timing: total_time=12.7, vel_scale=4.6, startup_time=1.9
             initial_guess = self.fixed_gains + self.fixed_timing.tolist()
             bounds = [
-                [0.01, 10.0],     # pos_P
-                [0.01, 10.0],     # vel_P
-                [0.01, 10.0],     # att_P
-                [-5.0, -0.01],  # rate_P
-                [3.0, 15.1],    # total_time (faster than matched quad)
-                [0.1, 10.0],     # velocity_scale (may need higher for agile quad)
-                [0.1, 2.0]      # startup_time (shorter for faster quad)
+                [1.0, 20.0],     # pos_P (centered around 14.3)
+                [1.0, 20.0],     # vel_P (centered around 9.0)
+                [1.0, 20.0],      # att_P (centered around 2.9)
+                [-1.0, -0.001],   # rate_P (allow closer to zero, down to -0.001)
+                [8.0, 18.0],     # total_time (centered around 12.7)
+                [1.0, 10.0],      # velocity_scale (centered around 4.6)
+                [0.1, 5.0]       # startup_time (centered around 1.9)
             ]
-            initial_std = 0.8
+            initial_std = 1.5
             param_count = 7
             param_description = "Gains (4) + Timing (3)"
 
         elif self.stage == 3:
-            # Stage 3: Optimize gains + timing + gate offsets (7 + n_gates×3 params)
+            # Stage 3: Optimize gains + timing + ALL gate control points (7 + n_gates×3 params)
+            # Uses gate-only mode: pure periodic loop with gates as control points
             initial_guess = self.fixed_gains + self.fixed_timing.tolist() + self.fixed_gate_offsets.tolist()
 
-            # Bounds for gains + timing (adjusted for 2-inch quad)
+            # Bounds for gains + timing (tighter around successful Stage 2 values)
+            # gains: pos=14.3, vel=9.0, att=2.9, rate=-0.02
+            # timing: total_time=12.7, vel_scale=4.6, startup_time=1.9
             bounds = [
-                [0.01, 10.0],     # pos_P
-                [0.01, 10.0],     # vel_P
-                [0.01, 10.0],     # att_P
-                [-5.0, -0.01],  # rate_P
-                [3.0, 15.1],    # total_time (relaxed for 2-inch quad)
-                [0.1, 10.0],     # velocity_scale (relaxed for 2-inch quad)
-                [0.1, 2.0]      # startup_time (relaxed for 2-inch quad)
+                [1.0, 20.0],     # pos_P (centered around 14.3)
+                [1.0, 20.0],     # vel_P (centered around 9.0)
+                [1.0, 20.0],      # att_P (centered around 2.9)
+                [-1.0, -0.001],     # rate_P (centered around -0.02)
+                [8.0, 18.0],     # total_time (centered around 12.7)
+                [1.0, 10.0],      # velocity_scale (centered around 4.6)
+                [0.1, 5.0]       # startup_time (centered around 1.9)
             ]
 
             # Add bounds for gate offsets
+            # In gate-only mode, these are the full control points (not offsets from fixed positions)
             gate_lower, gate_upper = self.bspline_bounds_by_group['gate_offsets']
             for i in range(len(gate_lower)):
                 bounds.append([gate_lower[i], gate_upper[i]])
 
-            initial_std = 0.3  # Smaller std to stay close to Stage 2's working solution
+            initial_std = 0.1  # Tighter search to stay close to Stage 2's working solution
             param_count = 7 + self.n_gate_offset_params
-            param_description = f"Gains (4) + Timing (3) + Gate Offsets ({self.n_gate_offset_params})"
+            param_description = f"Gains (4) + Timing (3) + Gate Control Points ({self.n_gate_offset_params})"
 
         else:
             raise ValueError(f"Invalid stage: {self.stage}. Must be 1, 2, or 3.")
@@ -589,32 +592,21 @@ class CurriculumTuner:
             pos_g, vel_g, att_g, rate_g = params[0:4]
             timing_params = params[4:7]
 
-            # Reconstruct B-spline params
-            start_pos = self.fixed_bspline_params[0:3]
-            n_startup_coords = self.n_startup_points * 3
-            startup_points = self.fixed_bspline_params[3:3+n_startup_coords]
-
-            bspline_params = np.concatenate([start_pos, startup_points,
-                                            self.fixed_gate_offsets, timing_params])
+            # Reconstruct B-spline params: [gate_offsets, timing]
+            bspline_params = np.concatenate([self.fixed_gate_offsets, timing_params])
 
         elif self.stage == 3:
             pos_g, vel_g, att_g, rate_g = params[0:4]
             timing_params = params[4:7]
             gate_offsets = params[7:7+self.n_gate_offset_params]
 
-            # Reconstruct B-spline params
-            start_pos = self.fixed_bspline_params[0:3]
-            n_startup_coords = self.n_startup_points * 3
-            startup_points = self.fixed_bspline_params[3:3+n_startup_coords]
-
-            bspline_params = np.concatenate([start_pos, startup_points,
-                                            gate_offsets, timing_params])
+            # [gate_offsets, timing]
+            bspline_params = np.concatenate([gate_offsets, timing_params])
 
         result = simulate_bspline(
             pos_g, vel_g, att_g, rate_g,
             bspline_params,
             self.gate_config, self.sim_time, self.dt,
-            n_startup_points=self.n_startup_points,
             verbose=False
         )
 
@@ -694,14 +686,19 @@ class CurriculumTuner:
 
             iteration = 0
 
-            # For Stages 2 and 3: Evaluate the exact initial guess (previous stage solution) first
-            # This ensures we don't regress from the previous stage's performance
-            if self.stage in [2, 3]:
-                print(f"Evaluating Stage {self.stage - 1} solution (initial guess) before optimization...")
-                initial_result = self.objective_function(config['initial_guess'])
-                if initial_result < 1000.0:
-                    print(f"Stage {self.stage - 1} solution baseline: {-initial_result:.2f} fitness")
-                print()
+            # Evaluate the previous stage's best parameters as the baseline
+            # For Stage 1: uses default parameters
+            # For Stages 2-3: uses loaded parameters from previous stage
+            if self.stage == 1:
+                print(f"Evaluating default parameters as baseline...")
+            else:
+                print(f"Evaluating Stage {self.stage-1} best parameters as baseline...")
+            initial_result = self.objective_function(config['initial_guess'])
+            if initial_result < 1000.0:
+                print(f"Baseline fitness (Stage {self.stage-1} best): {-initial_result:.2f}")
+            else:
+                print(f"WARNING: Baseline evaluation failed!")
+            print()
 
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
                 while not es.stop():
@@ -713,7 +710,7 @@ class CurriculumTuner:
                     if num_workers > 1:
                         eval_args = [
                             (sol, self.stage, self.gate_config, self.sim_time, self.dt,
-                             self.n_startup_points, self.fixed_bspline_params, self.fixed_gains,
+                             self.fixed_bspline_params, self.fixed_gains,
                              self.fixed_timing, self.fixed_gate_offsets, self.n_gate_offset_params,
                              self.n_timing_params)
                             for sol in solutions
@@ -854,7 +851,6 @@ class CurriculumTuner:
             'distance_bonus': self.best_params.get('distance_bonus', 0.0),
             'gains': self.best_params['gains'],
             'bspline_params': self.best_params['bspline_params'],
-            'n_startup_points': self.n_startup_points,
             'flight_time': self.best_params['flight_time'],
             'crashed': self.best_params['crashed']
         }
@@ -917,8 +913,6 @@ def main():
                        help='Time step in seconds (default: 0.005)')
     parser.add_argument('--output', type=str, default='tuning_results_gates',
                        help='Output directory (default: tuning_results_gates)')
-    parser.add_argument('--n-startup-points', type=int, default=1,
-                       help='Number of startup control points (default: 1)')
     parser.add_argument('--timeout', type=float, default=30.0,
                        help='Timeout per evaluation in seconds (default: 30.0)')
 
@@ -956,7 +950,6 @@ def main():
             sim_time=args.time,
             dt=args.dt,
             output_dir=args.output,
-            n_startup_points=args.n_startup_points
         )
         tuner1.run_optimization(
             max_evaluations=max_evals_1,
@@ -986,7 +979,6 @@ def main():
             sim_time=args.time,
             dt=args.dt,
             output_dir=args.output,
-            n_startup_points=args.n_startup_points
         )
         tuner2.load_previous_stage(stage1_config)
         tuner2.run_optimization(
@@ -1018,7 +1010,6 @@ def main():
             sim_time=args.time,
             dt=args.dt,
             output_dir=args.output,
-            n_startup_points=args.n_startup_points
         )
         tuner3.load_previous_stage(stage2_config)
         tuner3.run_optimization(
@@ -1055,7 +1046,6 @@ def main():
             sim_time=args.time,
             dt=args.dt,
             output_dir=args.output,
-            n_startup_points=args.n_startup_points
         )
 
         # Load previous stage if specified

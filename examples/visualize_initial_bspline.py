@@ -9,7 +9,7 @@ the trajectory setup makes sense.
 
 Usage:
     python visualize_initial_bspline.py --gate-cfg figure8
-    python visualize_initial_bspline.py --gate-cfg circle --n-startup-points 3
+    python visualize_initial_bspline.py --gate-cfg circle --tension 0.5
     python visualize_initial_bspline.py --gate-cfg slalom --samples 500
 """
 
@@ -40,15 +40,9 @@ def visualize_bspline_trajectory(bspline_traj, gate_config, n_samples=200, orien
     velocities = trajectory_data['velocity']
     times = trajectory_data['time']
 
-    # Get control points and split into startup vs loop (gate) groups
+    # Get control points (all are gate control points)
     all_cps = bspline_traj.get_all_control_points()
-    if bspline_traj.gate_only_mode:
-        startup_cps = np.empty((0, 3))
-        loop_cps = all_cps
-    else:
-        n_startup = 1 + bspline_traj.n_startup_points  # starting point + intermediates
-        startup_cps = all_cps[:n_startup]
-        loop_cps = all_cps[n_startup:]
+    loop_cps = all_cps
 
     # Create figure
     fig = plt.figure(figsize=(14, 10))
@@ -59,11 +53,6 @@ def visualize_bspline_trajectory(bspline_traj, gate_config, n_samples=200, orien
     y = positions[:, 1]
     z = positions[:, 2]
 
-    # Startup control points
-    startup_x = startup_cps[:, 0]
-    startup_y = startup_cps[:, 1]
-    startup_z = startup_cps[:, 2]
-
     # Loop control points
     loop_x = loop_cps[:, 0]
     loop_y = loop_cps[:, 1]
@@ -72,50 +61,27 @@ def visualize_bspline_trajectory(bspline_traj, gate_config, n_samples=200, orien
     # Apply NED orientation if needed
     if orient == "NED":
         z = -z
-        startup_z = -startup_z
         loop_z = -loop_z
 
-    # Plot trajectory path (split into startup and loop phases)
-    startup_end_idx = int(bspline_traj.startup_time / (bspline_traj.total_time / n_samples))
-    ax.plot(x[:startup_end_idx], y[:startup_end_idx], z[:startup_end_idx],
-            'g-', linewidth=2, label='Run-up Phase', alpha=0.8, zorder=3)
-    ax.plot(x[startup_end_idx:], y[startup_end_idx:], z[startup_end_idx:],
-            'b-', linewidth=2, label='Racing Loop', alpha=0.8, zorder=3)
-
-    # Draw startup control points
-    ax.scatter(startup_x, startup_y, startup_z, color='limegreen', marker='s', s=150,
-               alpha=0.7, label='Run-up Control Points', edgecolors='darkgreen', linewidths=1.5, zorder=5)
+    # Plot trajectory path
+    ax.plot(x, y, z, 'b-', linewidth=2, label='Racing Loop', alpha=0.8, zorder=3)
 
     # Draw loop control points
     ax.scatter(loop_x, loop_y, loop_z, color='purple', marker='o', s=150,
-               alpha=0.7, label='Loop Control Points', edgecolors='black', linewidths=1.5, zorder=5)
+               alpha=0.7, label='Gate Control Points', edgecolors='black', linewidths=1.5, zorder=5)
 
     # Mark start point
     ax.scatter([x[0]], [y[0]], [z[0]], color='green', marker='o', s=300,
                label='Start', edgecolors='darkgreen', linewidths=3, zorder=15)
-
-    # Draw lines connecting startup control points
-    ax.plot(startup_x, startup_y, startup_z, color='limegreen', linestyle='--',
-            linewidth=1.5, alpha=0.4, label='Run-up Polygon')
 
     # Draw lines connecting loop control points (periodic)
     loop_x_closed = np.append(loop_x, loop_x[0])
     loop_y_closed = np.append(loop_y, loop_y[0])
     loop_z_closed = np.append(loop_z, loop_z[0])
     ax.plot(loop_x_closed, loop_y_closed, loop_z_closed, color='purple', linestyle='--',
-            linewidth=1.5, alpha=0.4, label='Loop Polygon')
+            linewidth=1.5, alpha=0.4, label='Control Polygon')
 
-    # Add labels to startup control points
-    for i, (cpx, cpy, cpz) in enumerate(zip(startup_x, startup_y, startup_z)):
-        if i == 0:
-            label = 'START'
-        elif i < len(startup_cps) - 1:
-            label = f'RU{i}'  # Run-up intermediate
-        else:
-            label = 'G0'  # Gate 0
-        ax.text(cpx, cpy, cpz, f'  {label}', fontsize=8, color='darkgreen', weight='bold')
-
-    # Add labels to loop control points
+    # Add labels to control points
     for i, (cpx, cpy, cpz) in enumerate(zip(loop_x, loop_y, loop_z)):
         label = f'G{i}'  # Gate number
         ax.text(cpx, cpy, cpz, f'  {label}', fontsize=8, color='purple', weight='bold')
@@ -220,7 +186,7 @@ def visualize_bspline_trajectory(bspline_traj, gate_config, n_samples=200, orien
     # Title and legend
     ax.set_title(f'Initial B-Spline Trajectory\n'
                  f'Gate Config: {gate_config.__name__} | '
-                 f'Startup Points: {bspline_traj.n_startup_points} | '
+                 f'Tension: {bspline_traj.tension:.1f} | '
                  f'Degree: {bspline_traj.degree}',
                  fontsize=12, weight='bold', pad=20)
 
@@ -233,9 +199,8 @@ def visualize_bspline_trajectory(bspline_traj, gate_config, n_samples=200, orien
 
     # Add info text box
     info_text = f"Trajectory Info:\n"
-    n_startup_cps = 0 if bspline_traj.gate_only_mode else 1 + bspline_traj.n_startup_points
-    info_text += f"  Startup CPs: {n_startup_cps}\n"
-    info_text += f"  Loop CPs: {bspline_traj.n_gates}\n"
+    info_text += f"  Gate CPs: {bspline_traj.n_gates}\n"
+    info_text += f"  Tension: {bspline_traj.tension:.2f}\n"
     info_text += f"  Total Time: {bspline_traj.total_time:.1f}s\n"
     info_text += f"  Startup Time: {bspline_traj.startup_time:.1f}s\n"
     info_text += f"  Velocity Scale: {bspline_traj.velocity_scale:.2f}\n\n"
@@ -303,8 +268,8 @@ def main():
     parser.add_argument('--gate-cfg', type=str, default='figure8',
                        choices=['figure8', 'circle', 'slalom', 'backandforth'],
                        help='Gate configuration (default: figure8)')
-    parser.add_argument('--n-startup-points', type=int, default=2,
-                       help='Number of startup control points (default: 2)')
+    parser.add_argument('--tension', type=float, default=1.0,
+                       help='Tension parameter (0.0-1.0, default: 1.0)')
     parser.add_argument('--samples', type=int, default=300,
                        help='Number of trajectory samples (default: 300)')
     parser.add_argument('--orient', type=str, choices=['NED', 'ENU'], default='NED',
@@ -324,12 +289,12 @@ def main():
     print(f"{'='*70}")
     print(f"Gate configuration: {args.gate_cfg}")
     print(f"Number of gates: {len(gate_config.gate_pos)}")
-    print(f"Startup points: {args.n_startup_points}")
+    print(f"Tension: {args.tension}")
     print(f"Coordinate frame: {args.orient}")
     print(f"{'='*70}\n")
 
     # Create B-spline trajectory with default parameters
-    bspline_traj = BSplineGateTrajectory(gate_config, n_startup_points=args.n_startup_points)
+    bspline_traj = BSplineGateTrajectory(gate_config, tension=args.tension)
 
     # Print trajectory info
     info = bspline_traj.get_info()

@@ -3,8 +3,9 @@
 B-Spline Gate Trajectory Generator
 
 This module provides automatic trajectory generation for gate-based racing
-using B-spline curves. Control points are initialized at gate positions and
-can be optimized to find the fastest path through gates.
+using periodic B-spline curves. Control points are initialized at gate positions
+with tension-based offsets for exact interpolation, and can be further optimized
+to find the fastest path through gates.
 
 Author: Generated for AirEvolve project
 License: MIT
@@ -20,40 +21,39 @@ class BSplineGateTrajectory:
     """
     B-spline trajectory generator optimized for gate passing.
 
-    This class creates a smooth trajectory that passes through or near gates
-    in a racing configuration. The trajectory consists of:
-    - Startup control points: Independent points for smooth takeoff
-    - Gate control points: Points near gates (optimizable within gate bounds)
-    - Closure: Periodic B-spline to create a continuous racing loop
+    This class creates a smooth periodic trajectory that passes through gates
+    in a racing configuration. Gate control points are optimizable within gate
+    bounds. A tension parameter controls how tightly the curve follows gate
+    positions (default: exact interpolation through gates).
 
     Parameters can be optimized using CMA-ES or other optimization algorithms.
     """
 
-    def __init__(self, gate_config: GateConfig, n_startup_points: int = 1,
-                 degree: int = 3, gate_offset_scale: float = 1.0, gate_only_mode: bool = False):
+    def __init__(self, gate_config: GateConfig,
+                 degree: int = 3, gate_offset_scale: float = 1.0,
+                 tension: float = 1.0):
         """
         Initialize B-spline gate trajectory with SINGLE periodic spline for C2 continuity.
 
-        The trajectory uses ONE periodic B-spline that includes:
-        - If gate_only_mode=False: starting_point → startup_points → gate[0] → ... → gate[N-1] → back to starting_point
-        - If gate_only_mode=True: gate[0] → gate[1] → ... → gate[N-1] → wraps back to gate[0]
+        The trajectory uses ONE periodic B-spline through gate control points:
+        gate[0] → gate[1] → ... → gate[N-1] → wraps back to gate[0]
 
         This ensures C2 continuity (smooth position, velocity, AND acceleration) throughout.
 
         Args:
             gate_config: Gate configuration with positions and yaws
-            n_startup_points: Number of intermediate control points between start and gate 0 (default: 1)
-                             Ignored if gate_only_mode=True
             degree: B-spline degree (default: 3 for cubic)
             gate_offset_scale: Scale factor for gate offset bounds (default: 1.0)
                               Offsets are bounded by ±gate_size * gate_offset_scale
-            gate_only_mode: If True, use only gate control points (pure racing loop, default: False)
+            tension: How tightly the B-spline follows gate positions (0.0–1.0).
+                     At 0.0, control points equal gate positions (default B-spline approximation).
+                     At 1.0, control points are adjusted so the curve interpolates exactly
+                     through gate positions. Default: 1.0.
         """
         self.gate_config = gate_config
-        self.n_startup_points = n_startup_points if not gate_only_mode else 0
         self.degree = degree
         self.gate_offset_scale = gate_offset_scale
-        self.gate_only_mode = gate_only_mode
+        self.tension = tension
 
         # Extract gate information
         self.gate_positions = np.array(gate_config.gate_pos, dtype=np.float64)
@@ -61,21 +61,14 @@ class BSplineGateTrajectory:
         self.gate_size = gate_config.gate_size
         self.n_gates = len(self.gate_positions)
 
-        # Control point structure depends on mode
-        if self.gate_only_mode:
-            # GATE-ONLY MODE: gate[0], gate[1], ..., gate[N-1], (wraps back to gate[0])
-            self.n_total_control_points = self.n_gates
-        else:
-            # STARTUP MODE: starting_point, startup_points, gate[0], gate[1], ..., gate[N-1], (wraps back to start)
-            self.n_total_control_points = 1 + self.n_startup_points + self.n_gates
+        # Control points: gate[0], gate[1], ..., gate[N-1] (periodic)
+        self.n_total_control_points = self.n_gates
 
         # Default parameters (will be overridden by set_parameters)
-        self.starting_point = None
-        self.startup_points = None
         self.gate_offsets = None
         self.total_time = 20.0
         self.velocity_scale = 1.0
-        self.startup_time = 3.0  # Time to reach gate 0 (seconds)
+        self.startup_time = 3.0  # Time for quintic ramp from rest (seconds)
 
         # Initialize with default values
         self._initialize_default_parameters()
@@ -85,83 +78,32 @@ class BSplineGateTrajectory:
         self._rebuild_spline()
 
     def _initialize_default_parameters(self):
-        """Initialize control points with default values."""
-        if not self.gate_only_mode:
-            # Get starting position
-            if hasattr(self.gate_config, 'starting_pos') and self.gate_config.starting_pos is not None:
-                self.starting_point = np.array(self.gate_config.starting_pos, dtype=np.float64)
-            else:
-                # Fallback: calculate start position behind gate 0 by 2 meters
-                first_gate = self.gate_positions[0]
-                first_gate_yaw = self.gate_yaws[0]
-                distance_behind = 2.0  # meters
-                self.starting_point = first_gate - distance_behind * np.array([
-                    np.cos(first_gate_yaw),
-                    np.sin(first_gate_yaw),
-                    0.0
-                ])
-
-            first_gate = self.gate_positions[0]
-
-            # Startup points: intermediate points between start and gate 0
-            if self.n_startup_points > 0:
-                self.startup_points = np.zeros((self.n_startup_points, 3))
-                for i in range(self.n_startup_points):
-                    alpha = (i + 1) / (self.n_startup_points + 1)
-                    self.startup_points[i] = (1 - alpha) * self.starting_point + alpha * first_gate
-            else:
-                self.startup_points = np.zeros((0, 3))
-        else:
-            # Gate-only mode: no starting point or startup points needed
-            self.starting_point = None
-            self.startup_points = np.zeros((0, 3))
-
-        # Gate offsets: initialize at zero (control points at gate positions)
+        """Initialize control points with default values including tension-based offsets."""
+        # Gate offsets: initialize with tension-based correction
+        # The offset compensates for B-spline approximation error so the curve
+        # interpolates through gate positions when tension=1.0.
+        # Formula: offset_i = tension * (2*G_i - G_{i-1} - G_{i+1}) / 4
         self.gate_offsets = np.zeros((self.n_gates, 3))
+        for i in range(self.n_gates):
+            prev_gate = self.gate_positions[(i - 1) % self.n_gates]
+            next_gate = self.gate_positions[(i + 1) % self.n_gates]
+            self.gate_offsets[i] = self.tension * (2 * self.gate_positions[i] - prev_gate - next_gate) / 4
 
     def get_all_control_points(self) -> np.ndarray:
         """
         Get all control points for the single periodic spline.
 
         Returns:
-            Array of control points:
-            - Gate-only mode: [gate[0], gate[1], ..., gate[N-1]]
-            - Startup mode: [starting_point, startup_points..., gate[0], gate[1], ..., gate[N-1]]
+            Array of control points: [gate[0]+offset[0], ..., gate[N-1]+offset[N-1]]
         """
-        # Add all gates with offsets
-        gate_points = self.gate_positions + self.gate_offsets
-
-        if self.gate_only_mode:
-            # Gate-only mode: only gate control points
-            return gate_points
-        else:
-            # Startup mode: starting point + startup points + gates
-            control_points_list = [self.starting_point.reshape(1, 3)]
-
-            if self.n_startup_points > 0:
-                control_points_list.append(self.startup_points)
-
-            control_points_list.append(gate_points)
-
-            return np.vstack(control_points_list)
+        return self.gate_positions + self.gate_offsets
 
     def _rebuild_spline(self):
         """Rebuild the single periodic B-spline curve."""
-        # Get all control points (startup + all gates)
         all_cps = self.get_all_control_points()
 
         # Create single periodic spline
         self.spline = BSplineCurve(all_cps, degree=self.degree, boundary='periodic')
-
-        # Compute the parameter value at gate 0 (for determining startup phase)
-        # Control points: [start, startup_pts..., gate0, gate1, ..., gateN-1]
-        # Gate 0 is at index: 1 + n_startup_points
-        self._gate0_index = 1 + self.n_startup_points
-
-        # Since it's periodic, we need to compute what parameter value corresponds to gate 0
-        # For a periodic spline with n control points, parameter range is [u_min, u_min + n]
-        # Each control point roughly corresponds to one parameter unit
-        self._u_at_gate0 = self.spline.u_min + self._gate0_index
 
         # Find the best starting parameter u for the trajectory (closest to desired starting position)
         self._find_optimal_start_parameter()
@@ -232,22 +174,7 @@ class BSplineGateTrajectory:
         """
         Set trajectory parameters from optimization vector.
 
-        Parameter vector structure (gate_only_mode=False):
-        [
-            # Starting position (3)
-            start_x, start_y, start_z,
-
-            # Startup intermediate control points (n_startup × 3)
-            sx0, sy0, sz0, sx1, sy1, sz1, ...
-
-            # Gate position offsets (n_gates × 3)
-            g0_dx, g0_dy, g0_dz, g1_dx, g1_dy, g1_dz, ...
-
-            # Timing/velocity parameters (3)
-            total_time, velocity_scale, startup_time
-        ]
-
-        Parameter vector structure (gate_only_mode=True):
+        Parameter vector structure:
         [
             # Gate position offsets (n_gates × 3)
             g0_dx, g0_dy, g0_dz, g1_dx, g1_dy, g1_dz, ...
@@ -259,26 +186,12 @@ class BSplineGateTrajectory:
         Args:
             params: Parameter vector
         """
-        if self.gate_only_mode:
-            expected_length = self.n_gates * 3 + 3
-        else:
-            expected_length = 3 + self.n_startup_points * 3 + self.n_gates * 3 + 3
+        expected_length = self.n_gates * 3 + 3
 
         if len(params) != expected_length:
             raise ValueError(f"Expected {expected_length} parameters, got {len(params)}")
 
         idx = 0
-
-        if not self.gate_only_mode:
-            # Extract starting position
-            self.starting_point = params[idx:idx + 3]
-            idx += 3
-
-            # Extract startup intermediate points
-            if self.n_startup_points > 0:
-                startup_flat = params[idx:idx + self.n_startup_points * 3]
-                self.startup_points = startup_flat.reshape((self.n_startup_points, 3))
-                idx += self.n_startup_points * 3
 
         # Extract gate offsets
         gate_offsets_flat = params[idx:idx + self.n_gates * 3]
@@ -302,15 +215,7 @@ class BSplineGateTrajectory:
         """
         params = []
 
-        if not self.gate_only_mode:
-            # Starting position
-            params.extend(self.starting_point)
-
-            # Startup intermediate points
-            if self.n_startup_points > 0:
-                params.extend(self.startup_points.flatten())
-
-        # Gate offsets (zeros)
+        # Gate offsets
         params.extend(self.gate_offsets.flatten())
 
         # Timing parameters
@@ -327,29 +232,6 @@ class BSplineGateTrajectory:
         """
         lower = []
         upper = []
-
-        x_bounds = self.gate_config.x_bounds
-        y_bounds = self.gate_config.y_bounds
-        z_bounds = self.gate_config.z_bounds
-
-        if not self.gate_only_mode:
-            # Bounds for starting position (allow small movement around default start)
-            start_offset = 0.5  # meters
-            lower.extend([
-                max(x_bounds[0], self.starting_point[0] - start_offset),
-                max(y_bounds[0], self.starting_point[1] - start_offset),
-                max(z_bounds[0], self.starting_point[2] - start_offset)
-            ])
-            upper.extend([
-                min(x_bounds[1], self.starting_point[0] + start_offset),
-                min(x_bounds[1], self.starting_point[1] + start_offset),
-                min(z_bounds[1], self.starting_point[2] + start_offset)
-            ])
-
-            # Bounds for startup intermediate points (allow movement within workspace)
-            for _ in range(self.n_startup_points):
-                lower.extend([x_bounds[0], y_bounds[0], z_bounds[0]])
-                upper.extend([x_bounds[1], y_bounds[1], z_bounds[1]])
 
         # Bounds for gate offsets (limited by gate size)
         max_offset = self.gate_size * self.gate_offset_scale
@@ -545,10 +427,7 @@ class BSplineGateTrajectory:
 
     def get_parameter_count(self) -> int:
         """Get total number of parameters."""
-        if self.gate_only_mode:
-            return self.n_gates * 3 + 3  # gate offsets + timing
-        else:
-            return 3 + self.n_startup_points * 3 + self.n_gates * 3 + 3  # start + startup + gates + timing
+        return self.n_gates * 3 + 3  # gate offsets + timing
 
     def get_gate_offset_count(self) -> int:
         """Get number of gate offset parameters."""
@@ -666,9 +545,9 @@ class BSplineGateTrajectory:
         """
         return {
             'n_gates': self.n_gates,
-            'n_startup_points': self.n_startup_points,
             'n_total_control_points': self.n_total_control_points,
             'degree': self.degree,
+            'tension': self.tension,
             'total_time': self.total_time,
             'velocity_scale': self.velocity_scale,
             'startup_time': self.startup_time,
@@ -679,21 +558,19 @@ class BSplineGateTrajectory:
         }
 
 
-def create_gate_trajectory_from_config(gate_config_name: str,
-                                       n_startup_points: int = 1) -> BSplineGateTrajectory:
+def create_gate_trajectory_from_config(gate_config_name: str) -> BSplineGateTrajectory:
     """
     Convenience function to create trajectory from gate configuration name.
 
     Args:
         gate_config_name: Name of gate configuration ('figure8', 'circle', etc.)
-        n_startup_points: Number of intermediate control points between start and gate 0 (default: 1, minimum 1 for cubic splines)
 
     Returns:
         BSplineGateTrajectory instance
 
     Example:
         >>> from airevolve.controllers.utils.gate_configs import GATE_CONFIGS
-        >>> traj = create_gate_trajectory_from_config('figure8', n_startup_points=1)
+        >>> traj = create_gate_trajectory_from_config('figure8')
     """
     from ..utils.gate_configs import GATE_CONFIGS
 
@@ -701,4 +578,4 @@ def create_gate_trajectory_from_config(gate_config_name: str,
         raise ValueError(f"Unknown gate configuration: {gate_config_name}")
 
     gate_config = GATE_CONFIGS[gate_config_name]
-    return BSplineGateTrajectory(gate_config, n_startup_points=n_startup_points)
+    return BSplineGateTrajectory(gate_config)

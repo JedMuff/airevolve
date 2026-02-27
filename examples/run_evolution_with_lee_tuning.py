@@ -116,13 +116,6 @@ def parse_arguments():
                        help='Time step in seconds (default: 0.005)')
     parser.add_argument('--timeout', type=float, default=30.0,
                        help='Timeout per evaluation in seconds (default: 30.0)')
-    parser.add_argument('--n-startup-points', type=int, default=1,
-                       help='Number of startup control points (default: 1)')
-    parser.add_argument('--gate-only-mode', action='store_true', default=True,
-                       help='Use gate-only mode (pure racing loop without startup phase, default: True)')
-    parser.add_argument('--no-gate-only-mode', dest='gate_only_mode', action='store_false',
-                       help='Disable gate-only mode (include startup phase)')
-
     # Gate configuration
     parser.add_argument('--gate-cfg', choices=['backandforth', 'figure8', 'circle', 'slalom'],
                        default='figure8', help='Gate configuration (default: figure8)')
@@ -229,7 +222,7 @@ def _tune_single_individual(args):
         individual is returned only if gates_passed >= gates_threshold.
     """
     (individual_list, gate_config_name, max_evals, gates_threshold,
-     sim_time, dt, n_startup_points, gate_only_mode, timeout) = args
+     sim_time, dt, timeout) = args
 
     individual = np.array(individual_list)
     gate_config = GATE_CONFIGS[gate_config_name]
@@ -242,8 +235,6 @@ def _tune_single_individual(args):
         dt=dt,
         timeout_per_eval=timeout,
         gates_threshold=gates_threshold,
-        n_startup_points=n_startup_points,
-        gate_only_mode=gate_only_mode,
     )
 
     if tuning["gates_passed"] >= gates_threshold:
@@ -258,7 +249,6 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
                                   init_pop_gates_threshold=1,
                                   init_pop_tuning_workers=None,
                                   sim_time=20.0, dt=0.005,
-                                  n_startup_points=1, gate_only_mode=False,
                                   timeout=30.0, skip_init_tuning=False):
     """
     Generate initial population using parallel sampling + optional CMA-ES tuning.
@@ -279,8 +269,6 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
         init_pop_tuning_workers: Workers for Phase 2 tuning pool (defaults to CPU count)
         sim_time: Simulation time in seconds
         dt: Time step in seconds
-        n_startup_points: Number of startup control points
-        gate_only_mode: If True, use gate-only mode
         timeout: Timeout per evaluation in seconds
         skip_init_tuning: If True, skip Phase 2 (revert to original behavior)
 
@@ -399,8 +387,6 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
                 init_pop_max_evals,
                 init_pop_gates_threshold,
                 sim_time, dt,
-                n_startup_points,
-                gate_only_mode,
                 timeout,
             )
             for ind in phase1_survivors
@@ -527,8 +513,6 @@ def create_fitness_function(args):
         num_workers=args.cma_workers,
         sim_time=args.sim_time,
         dt=args.dt,
-        n_startup_points=args.n_startup_points,
-        gate_only_mode=args.gate_only_mode,
         timeout=args.timeout,
         num=None
     )
@@ -579,8 +563,6 @@ def main():
     print(f"  Simulation time: {args.sim_time}s")
     print(f"  Time step: {args.dt}s")
     print(f"  Timeout per evaluation: {args.timeout}s")
-    print(f"  Number of startup points: {args.n_startup_points}")
-    print(f"  Gate-only mode: {args.gate_only_mode}")
     print()
     print(f"Evolution parallel workers: {args.num_workers}")
     print(f"Repair workflow: ENABLED (3-stage: Optimization -> Hover Check -> Hover Repair)")
@@ -625,8 +607,6 @@ def main():
         init_pop_tuning_workers=args.init_pop_tuning_workers,
         sim_time=args.sim_time,
         dt=args.dt,
-        n_startup_points=args.n_startup_points,
-        gate_only_mode=args.gate_only_mode,
         timeout=args.timeout,
         skip_init_tuning=args.skip_init_tuning,
     )
