@@ -380,7 +380,7 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
 
     except Exception as e:
         if verbose:
-            print(f"Simulation error: {e}")
+            print(f"Simulation terminated early: {e}")
         return {
             'gates_passed': 0,
             'distance_bonus': 0.0,

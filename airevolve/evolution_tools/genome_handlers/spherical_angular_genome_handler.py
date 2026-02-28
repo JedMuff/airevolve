@@ -650,15 +650,17 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
             # Handle angular parameters (wrap around)
             if param_index in [1, 2, 3, 4]:  # Angular parameters
                 genome[selected_arm, param_index] = self._wrap_angle(
-                    genome[selected_arm, param_index]
+                    genome[selected_arm, param_index],
+                    self.parameter_limits[param_index, 0],
+                    self.parameter_limits[param_index, 1],
                 )
-            
-            # Clip to parameter limits
-            genome[selected_arm, param_index] = np.clip(
-                genome[selected_arm, param_index],
-                self.parameter_limits[param_index, 0],
-                self.parameter_limits[param_index, 1]
-            )
+            else:
+                # Clip non-angular parameters to limits
+                genome[selected_arm, param_index] = np.clip(
+                    genome[selected_arm, param_index],
+                    self.parameter_limits[param_index, 0],
+                    self.parameter_limits[param_index, 1]
+                )
         
         return genome
 
@@ -796,23 +798,22 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
                 # Handle angular parameters
                 if param_idx in [1, 2, 3, 4]:
                     population[drone_idx, motor_idx, param_idx] = self._wrap_angle(
-                        population[drone_idx, motor_idx, param_idx]
+                        population[drone_idx, motor_idx, param_idx],
+                        self.parameter_limits[param_idx, 0],
+                        self.parameter_limits[param_idx, 1],
                     )
-                
-                # Clip to limits
-                population[drone_idx, motor_idx, param_idx] = np.clip(
-                    population[drone_idx, motor_idx, param_idx],
-                    self.parameter_limits[param_idx, 0],
-                    self.parameter_limits[param_idx, 1]
-                )
+                else:
+                    # Clip non-angular parameters to limits
+                    population[drone_idx, motor_idx, param_idx] = np.clip(
+                        population[drone_idx, motor_idx, param_idx],
+                        self.parameter_limits[param_idx, 0],
+                        self.parameter_limits[param_idx, 1]
+                    )
 
-    def _wrap_angle(self, angle: float) -> float:
-        """Wrap angle to [0, 2π] range."""
-        while angle < 0:
-            angle += 2 * np.pi
-        while angle > 2 * np.pi:
-            angle -= 2 * np.pi
-        return angle
+    def _wrap_angle(self, angle: float, low: float, high: float) -> float:
+        """Wrap angle to [low, high) range."""
+        span = high - low
+        return low + (angle - low) % span
 
     def copy(self) -> SphericalAngularDroneGenomeHandler:
         """

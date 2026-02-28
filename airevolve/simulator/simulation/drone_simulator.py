@@ -5,6 +5,7 @@ This module provides the core drone simulation framework using propeller configu
 for automatic computation of physical properties and allocation matrices.
 """
 
+import warnings
 import numpy as np
 from sympy import *
 from .drone_configuration import DroneConfiguration
@@ -233,13 +234,16 @@ class DroneSimulator:
             self.set_motor_commands(motor_commands)
         
         # RK4 integration for better numerical stability
-        k1 = self.dt * self.dynamics_func(self.state, self.motor_commands)
-        k2 = self.dt * self.dynamics_func(self.state + 0.5 * k1, self.motor_commands)
-        k3 = self.dt * self.dynamics_func(self.state + 0.5 * k2, self.motor_commands)
-        k4 = self.dt * self.dynamics_func(self.state + k3, self.motor_commands)
-        
-        # Update state using RK4 formula
-        self.state = self.state + (k1 + 2*k2 + 2*k3 + k4) / 6.0
+        with np.errstate(all='ignore'):
+            k1 = self.dt * self.dynamics_func(self.state, self.motor_commands)
+            k2 = self.dt * self.dynamics_func(self.state + 0.5 * k1, self.motor_commands)
+            k3 = self.dt * self.dynamics_func(self.state + 0.5 * k2, self.motor_commands)
+            k4 = self.dt * self.dynamics_func(self.state + k3, self.motor_commands)
+            self.state = self.state + (k1 + 2*k2 + 2*k3 + k4) / 6.0
+
+        # Detect numerical divergence (e.g. Euler angle singularity at ±90° pitch)
+        if np.any(np.isnan(self.state)) or np.any(np.isinf(self.state)):
+            raise RuntimeError("Numerical divergence in drone state (likely Euler angle singularity)")
         
         # Store history
         self.time_history.append(len(self.time_history) * self.dt)
