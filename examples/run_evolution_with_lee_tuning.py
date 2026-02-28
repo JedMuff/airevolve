@@ -46,6 +46,8 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
 import argparse
+import json
+import pickle
 import time
 import numpy as np
 import pandas as pd
@@ -67,6 +69,8 @@ from airevolve.evolution_tools.strategies.mu_lambda import evolve
 from airevolve.evolution_tools.selectors.tournament import tournament_selection
 from airevolve.evolution_tools.genome_handlers.spherical_angular_genome_handler import SphericalAngularDroneGenomeHandler
 from airevolve.evolution_tools.genome_handlers.cartesian_euler_genome_handler import CartesianEulerDroneGenomeHandler
+from airevolve.evolution_tools.genome_handlers.cppn_neat_genome_handler import CPPNNeatDroneGenomeHandler
+from airevolve.evolution_tools.genome_handlers.hybrid_cppn_genome_handler import HybridCPPNDroneGenomeHandler
 from airevolve.evolution_tools.inspection_tools.utils import evolution_dataframe_to_fitness_array
 from airevolve.evolution_tools.inspection_tools.plot_fitness import plot_fitness
 from airevolve.evolution_tools.genome_handlers.repair_workflow import (
@@ -86,7 +90,7 @@ def parse_arguments():
     )
 
     # Genome and evolution parameters
-    parser.add_argument('--genome-handler', choices=['spherical', 'cartesian'],
+    parser.add_argument('--genome-handler', choices=['spherical', 'cartesian', 'cppn', 'hybrid-cppn'],
                        default='spherical', help='Genome handler to use (default: spherical)')
     parser.add_argument('--population-size', type=int, default=16,
                        help='Population size (default: 20)')
@@ -129,6 +133,12 @@ def parse_arguments():
                        help='Minimum number of arms (default: 6)')
     parser.add_argument('--max-narms', type=int, default=6,
                        help='Maximum number of arms (default: 6)')
+
+    # CPPN-specific parameters
+    parser.add_argument('--num-segments', type=int, default=8,
+                       help='Number of CPPN evaluation segments (default: 8, CPPN only)')
+    parser.add_argument('--initial-hidden-nodes', type=int, default=0,
+                       help='Initial hidden nodes in CPPN topology (default: 0, CPPN only)')
 
     # Initial population CMA-ES tuning parameters
     parser.add_argument('--init-pop-max-evals', type=int, default=500,
@@ -209,6 +219,106 @@ def _try_generate_individual(args):
     return final_ind, status
 
 
+def _try_generate_cppn_individual(args):
+    """
+    Worker function to try generating a single hoverable CPPN individual.
+
+    Generates a random CPPN, decodes to phenotype, and runs the full
+    3-stage repair pipeline (hover check → optimization repair → hover repair).
+    Returns the CPPN genome if the decoded phenotype survives all stages.
+
+    Returns:
+        Tuple of (cppn_genome_or_None, status_dict)
+    """
+    idx, base_seed, handler_kwargs, handler_class = args
+
+    seed = base_seed + idx
+    rng = np.random.default_rng(seed)
+    handler = handler_class(**handler_kwargs, rng=rng)
+
+    status = {
+        'failed_hover': 0,
+        'failed_stage1': 0,
+        'failed_stage3': 0,
+        'success': 0
+    }
+
+    # Decode CPPN to phenotype
+    phenotype = handler.get_phenotype()
+
+    # STEP 1: Check if the decoded phenotype can hover (strict, no spinning)
+    can_hover, _ = stage2_hover_check(
+        phenotype,
+        verbose=False,
+        allow_spinning=False
+    )
+
+    if not can_hover:
+        status['failed_hover'] = 1
+        return None, status
+
+    # STEP 2: Apply optimization repair to fix collisions
+    repair_config = OptimizationRepairConfig(fixed_params=[3, 4])
+    repaired, _ = stage1_optimization_repair(
+        phenotype,
+        coordinate_system='spherical',
+        config=repair_config,
+        verbose=False
+    )
+
+    if repaired is None:
+        status['failed_stage1'] = 1
+        return None, status
+
+    # STEP 3: Apply hover repair to align thrust vectors
+    final_ind, _ = stage3_hover_repair(
+        repaired,
+        coordinate_system='spherical',
+        verbose=False
+    )
+
+    if final_ind is None:
+        status['failed_stage3'] = 1
+        return None, status
+
+    # Success - return the CPPN genome (network object)
+    status['success'] = 1
+    return handler.genome, status
+
+
+def _tune_cppn_individual(args):
+    """
+    Worker function to CMA-ES tune a single CPPN individual.
+
+    Decodes the CPPN to phenotype, then tunes the controller.
+    Returns the CPPN genome if gates_passed >= threshold.
+
+    Returns:
+        Tuple of (cppn_genome_or_None, tuning_result_dict)
+    """
+    (cppn_genome, handler_kwargs, handler_class, gate_config_name, max_evals,
+     gates_threshold, sim_time, dt, timeout) = args
+
+    handler = handler_class(genome=cppn_genome, **handler_kwargs)
+    phenotype = handler.get_phenotype()
+    gate_config = GATE_CONFIGS[gate_config_name]
+
+    tuning = optimize_controller_with_early_stop(
+        phenotype, gate_config,
+        max_evaluations=max_evals,
+        num_workers=1,
+        sim_time=sim_time,
+        dt=dt,
+        timeout_per_eval=timeout,
+        gates_threshold=gates_threshold,
+    )
+
+    if tuning["gates_passed"] >= gates_threshold:
+        return cppn_genome, tuning
+    else:
+        return None, tuning
+
+
 def _tune_single_individual(args):
     """
     Worker function to CMA-ES tune a single hover+repair-validated individual.
@@ -249,7 +359,9 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
                                   init_pop_gates_threshold=1,
                                   init_pop_tuning_workers=None,
                                   sim_time=20.0, dt=0.005,
-                                  timeout=30.0, skip_init_tuning=False):
+                                  timeout=30.0, skip_init_tuning=False,
+                                  handler_type='spherical', handler_kwargs=None,
+                                  handler_class=None):
     """
     Generate initial population using parallel sampling + optional CMA-ES tuning.
 
@@ -257,10 +369,14 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
       Phase 1 (fast): Sample many individuals, keep hover+repair survivors (~0.2%)
       Phase 2 (slow): CMA-ES tune each survivor, keep those that pass gates threshold
 
+    For CPPN handler_type: Phase 1 generates random CPPNs and filters by hover
+    check on decoded phenotype (no repair stages). Phase 2 tunes controllers on
+    the decoded phenotypes.
+
     Args:
         genotype: Genome handler instance
         pop_size: Size of population to generate
-        coordinate_system: 'spherical' or 'cartesian'
+        coordinate_system: 'spherical', 'cartesian', or 'cppn'
         verbose: Print detailed messages
         num_workers: Number of parallel workers for Phase 1 (defaults to CPU count)
         gate_cfg: Gate configuration name for CMA-ES tuning
@@ -271,10 +387,14 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
         dt: Time step in seconds
         timeout: Timeout per evaluation in seconds
         skip_init_tuning: If True, skip Phase 2 (revert to original behavior)
+        handler_type: 'spherical', 'cartesian', or 'cppn'
+        handler_kwargs: Handler constructor kwargs (required for CPPN)
 
     Returns:
-        Array of repaired (and optionally tuned) individuals
+        Array/list of individuals (numpy arrays for direct encoding, CPPNNetwork
+        objects for CPPN)
     """
+    is_indirect = handler_type in ('cppn', 'hybrid-cppn')
     if num_workers is None:
         num_workers = cpu_count()
     if init_pop_tuning_workers is None:
@@ -282,7 +402,10 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
 
     tuning_label = "DISABLED (--skip-init-tuning)" if skip_init_tuning else "ENABLED"
     print(f"Generating initial population of size {pop_size} using {num_workers} parallel workers...")
-    print("Strategy: Parallel sampling -> Strict hover check -> Fix collisions -> Align thrust")
+    if is_indirect:
+        print("Strategy: Random CPPN generation -> Decode to phenotype -> Strict hover check -> Fix collisions -> Align thrust")
+    else:
+        print("Strategy: Parallel sampling -> Strict hover check -> Fix collisions -> Align thrust")
     if not skip_init_tuning:
         print(f"       -> CMA-ES tuning (budget={init_pop_max_evals}, threshold={init_pop_gates_threshold} gates)")
     print(f"CMA-ES init-pop tuning: {tuning_label}")
@@ -320,30 +443,42 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
         # ==============================================================
         # PHASE 1: Fast parallel hover check + repair
         # ==============================================================
-        handler_config = {
-            'min_max_narms': (genotype.min_narms, genotype.max_narms),
-            'append_arm_chance': genotype.append_arm_chance,
-            'parameter_limits': genotype.parameter_limits,
-            'bilateral_plane_for_symmetry': genotype.bilateral_plane_for_symmetry,
-            'repair': genotype.repair_enabled,
-        }
-
-        args_list = [
-            (
-                batch_idx * batch_size + i,
-                base_seed,
-                handler_config,
-                genotype.parameter_limits,
-                coordinate_system
-            )
-            for i in range(batch_size)
-        ]
+        if is_indirect:
+            args_list = [
+                (
+                    batch_idx * batch_size + i,
+                    base_seed,
+                    handler_kwargs,
+                    handler_class,
+                )
+                for i in range(batch_size)
+            ]
+            phase1_worker = _try_generate_cppn_individual
+        else:
+            handler_config = {
+                'min_max_narms': (genotype.min_narms, genotype.max_narms),
+                'append_arm_chance': genotype.append_arm_chance,
+                'parameter_limits': genotype.parameter_limits,
+                'bilateral_plane_for_symmetry': genotype.bilateral_plane_for_symmetry,
+                'repair': genotype.repair_enabled,
+            }
+            args_list = [
+                (
+                    batch_idx * batch_size + i,
+                    base_seed,
+                    handler_config,
+                    genotype.parameter_limits,
+                    coordinate_system
+                )
+                for i in range(batch_size)
+            ]
+            phase1_worker = _try_generate_individual
 
         phase1_survivors = []
 
         with Pool(processes=num_workers) as pool:
             with tqdm(total=batch_size, desc=f"Phase 1 (batch {batch_idx + 1})", unit="ind") as pbar:
-                for result, status in pool.imap_unordered(_try_generate_individual, args_list, chunksize=10):
+                for result, status in pool.imap_unordered(phase1_worker, args_list, chunksize=10):
                     total_stats['total_attempts'] += 1
                     total_stats['failed_hover'] += status['failed_hover']
                     total_stats['failed_stage1'] += status['failed_stage1']
@@ -380,24 +515,41 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
               f"(budget={init_pop_max_evals}, threshold={init_pop_gates_threshold} gates, "
               f"workers={init_pop_tuning_workers})...")
 
-        tuning_args = [
-            (
-                ind.tolist(),
-                gate_cfg,
-                init_pop_max_evals,
-                init_pop_gates_threshold,
-                sim_time, dt,
-                timeout,
-            )
-            for ind in phase1_survivors
-        ]
+        if is_indirect:
+            tuning_args = [
+                (
+                    ind,
+                    handler_kwargs,
+                    handler_class,
+                    gate_cfg,
+                    init_pop_max_evals,
+                    init_pop_gates_threshold,
+                    sim_time, dt,
+                    timeout,
+                )
+                for ind in phase1_survivors
+            ]
+            phase2_worker = _tune_cppn_individual
+        else:
+            tuning_args = [
+                (
+                    ind.tolist(),
+                    gate_cfg,
+                    init_pop_max_evals,
+                    init_pop_gates_threshold,
+                    sim_time, dt,
+                    timeout,
+                )
+                for ind in phase1_survivors
+            ]
+            phase2_worker = _tune_single_individual
 
         batch_accepted = 0
         batch_attempted = 0
 
         with Pool(processes=init_pop_tuning_workers) as pool:
             with tqdm(total=len(phase1_survivors), desc=f"Phase 2 (batch {batch_idx + 1})", unit="drone") as pbar2:
-                for tuned_ind, tuning_result in pool.imap_unordered(_tune_single_individual, tuning_args):
+                for tuned_ind, tuning_result in pool.imap_unordered(phase2_worker, tuning_args):
                     batch_attempted += 1
                     total_stats['phase2_attempted'] += 1
 
@@ -453,10 +605,32 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
         print(f"Warning: Could only generate {len(accepted_individuals)}/{pop_size} individuals")
         print(f"Consider increasing max_iterations or adjusting parameters.\n")
 
-    return np.array(accepted_individuals[:pop_size]) if len(accepted_individuals) > 0 else None
+    stats = {
+        'total_attempts': total_stats['total_attempts'],
+        'failed_hover': total_stats['failed_hover'],
+        'failed_stage1': total_stats['failed_stage1'],
+        'failed_stage3': total_stats['failed_stage3'],
+        'phase1_success': total_stats['phase1_success'],
+        'phase2_attempted': total_stats['phase2_attempted'],
+        'phase2_accepted': total_stats['phase2_accepted'],
+        'wall_clock_seconds': end_time - start_time,
+        'num_iterations': batch_idx + 1,
+        'pop_size_requested': pop_size,
+        'pop_size_generated': len(accepted_individuals),
+        'handler_type': handler_type,
+        'skip_init_tuning': skip_init_tuning,
+    }
+
+    if len(accepted_individuals) == 0:
+        return None, stats
+    trimmed = accepted_individuals[:pop_size]
+    if is_indirect:
+        return trimmed, stats  # List of CPPNNetwork/HybridGenome objects
+    return np.array(trimmed), stats
 
 
-def get_genome_handler_config(handler_type, min_narms=6, max_narms=6):
+def get_genome_handler_config(handler_type, min_narms=6, max_narms=6,
+                              num_segments=8, initial_hidden_nodes=0):
     """
     Get genome handler class and configuration based on type.
 
@@ -500,21 +674,121 @@ def get_genome_handler_config(handler_type, min_narms=6, max_narms=6):
             'param_limits': spherical_params,
             'coordinate_system': 'cartesian'
         }
+    elif handler_type == 'cppn':
+        return {
+            'handler_class': CPPNNeatDroneGenomeHandler,
+            'handler_kwargs': {
+                'num_segments': num_segments,
+                'min_max_narms': (min_narms, max_narms),
+                'initial_hidden_nodes': initial_hidden_nodes,
+                'repair': False,
+            },
+            'param_limits': None,
+            'coordinate_system': 'cppn'
+        }
+    elif handler_type == 'hybrid-cppn':
+        return {
+            'handler_class': HybridCPPNDroneGenomeHandler,
+            'handler_kwargs': {
+                'min_max_narms': (min_narms, max_narms),
+                'initial_hidden_nodes': initial_hidden_nodes,
+                'repair': False,
+            },
+            'param_limits': None,
+            'coordinate_system': 'hybrid-cppn'
+        }
     else:
         raise ValueError(f"Unknown genome handler type: {handler_type}")
 
 
-def create_fitness_function(args):
-    """Create fitness function for Lee controller tuning evaluation."""
-    return functools.partial(
-        evaluate_individual_with_tuning,
+class _RepairAndEvaluateFitness:
+    """Picklable fitness wrapper that runs the full repair pipeline before evaluation.
+
+    Pipeline: genome → (CPPN decode) → hover check → optimization repair →
+    hover repair → evaluate.  Returns fitness 0 if any repair stage fails.
+    """
+
+    def __init__(self, gate_cfg, max_evals, cma_workers, sim_time, dt, timeout,
+                 coordinate_system, is_indirect=False, handler_class=None,
+                 handler_kwargs=None):
+        self.gate_cfg = gate_cfg
+        self.max_evals = max_evals
+        self.cma_workers = cma_workers
+        self.sim_time = sim_time
+        self.dt = dt
+        self.timeout = timeout
+        self.coordinate_system = coordinate_system
+        self.is_indirect = is_indirect
+        self.handler_class = handler_class
+        self.handler_kwargs = handler_kwargs
+
+    def __call__(self, genome, ind_save_dir):
+        # Decode indirect encoding to phenotype if needed
+        if self.is_indirect:
+            handler = self.handler_class(genome=genome, **self.handler_kwargs)
+            phenotype = handler.get_phenotype()
+            repair_coord = 'spherical'  # Indirect phenotype is in spherical format
+        else:
+            phenotype = genome
+            repair_coord = self.coordinate_system
+
+        # Hover check
+        can_hover, _ = stage2_hover_check(
+            phenotype, verbose=False, allow_spinning=False
+        )
+        if not can_hover:
+            return 0
+
+        # Optimization repair (fix collisions)
+        repair_config = OptimizationRepairConfig(fixed_params=[3, 4])
+        repaired, _ = stage1_optimization_repair(
+            phenotype, coordinate_system=repair_coord,
+            config=repair_config, verbose=False
+        )
+        if repaired is None:
+            return 0
+
+        # Hover repair (align thrust vectors)
+        final, _ = stage3_hover_repair(
+            repaired, coordinate_system=repair_coord, verbose=False
+        )
+        if final is None:
+            return 0
+
+        # Evaluate the repaired phenotype
+        fitness = evaluate_individual_with_tuning(
+            final, ind_save_dir,
+            gate_cfg=self.gate_cfg,
+            max_evals=self.max_evals,
+            num_workers=self.cma_workers,
+            sim_time=self.sim_time,
+            dt=self.dt,
+            timeout=self.timeout,
+            num=None,
+        )
+
+        # Save the original indirect genome (CPPN/HybridGenome) alongside the phenotype
+        if self.is_indirect and ind_save_dir is not None:
+            with open(os.path.join(ind_save_dir, "genotype.pkl"), 'wb') as f:
+                pickle.dump(genome, f)
+
+        return fitness
+
+
+def create_fitness_function(args, config=None):
+    """Create fitness function with repair pipeline for all genome types."""
+    is_indirect = args.genome_handler in ('cppn', 'hybrid-cppn')
+    return _RepairAndEvaluateFitness(
         gate_cfg=args.gate_cfg,
         max_evals=args.max_evals,
-        num_workers=args.cma_workers,
+        cma_workers=args.cma_workers,
         sim_time=args.sim_time,
         dt=args.dt,
         timeout=args.timeout,
-        num=None
+        coordinate_system=config['coordinate_system'],
+        is_indirect=is_indirect,
+        handler_class=config['handler_class'] if is_indirect else None,
+        handler_kwargs=config['handler_kwargs'] if is_indirect else None,
     )
 
 
@@ -565,6 +839,11 @@ def main():
     print(f"  Timeout per evaluation: {args.timeout}s")
     print()
     print(f"Evolution parallel workers: {args.num_workers}")
+    if args.genome_handler == 'cppn':
+        print(f"CPPN segments: {args.num_segments}")
+        print(f"CPPN initial hidden nodes: {args.initial_hidden_nodes}")
+    elif args.genome_handler == 'hybrid-cppn':
+        print(f"Hybrid-CPPN initial hidden nodes: {args.initial_hidden_nodes}")
     print(f"Repair workflow: ENABLED (3-stage: Optimization -> Hover Check -> Hover Repair)")
     print(f"Symmetry: DISABLED (not supported)")
     print()
@@ -583,10 +862,14 @@ def main():
     print()
 
     # Get genome handler configuration
-    config = get_genome_handler_config(args.genome_handler, args.min_narms, args.max_narms)
+    config = get_genome_handler_config(
+        args.genome_handler, args.min_narms, args.max_narms,
+        num_segments=args.num_segments,
+        initial_hidden_nodes=args.initial_hidden_nodes,
+    )
 
     # Create fitness function
-    fitness_function = create_fitness_function(args)
+    fitness_function = create_fitness_function(args, config=config)
 
     # Create a wrapper class for the genome handler
     WrappedHandler = create_genome_handler_wrapper(config['handler_class'], config['handler_kwargs'])
@@ -595,7 +878,7 @@ def main():
     print("=" * 80)
     print("Phase 1: Initial Population Generation (Parallel)")
     print("=" * 80)
-    initial_population = generate_initial_pop_parallel(
+    initial_population, init_pop_stats = generate_initial_pop_parallel(
         WrappedHandler(),
         args.population_size,
         coordinate_system=config['coordinate_system'],
@@ -609,7 +892,14 @@ def main():
         dt=args.dt,
         timeout=args.timeout,
         skip_init_tuning=args.skip_init_tuning,
+        handler_type=args.genome_handler,
+        handler_kwargs=config['handler_kwargs'],
+        handler_class=config['handler_class'],
     )
+
+    # Save initial population generation stats
+    with open(os.path.join(full_log_dir, "init_pop_stats.json"), 'w') as f:
+        json.dump(init_pop_stats, f, indent=2)
 
     if initial_population is None or len(initial_population) == 0:
         print("\n✗ Failed to generate initial population. Exiting.")
