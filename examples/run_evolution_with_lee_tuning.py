@@ -781,6 +781,15 @@ class _RepairAndEvaluateFitness:
         self.handler_kwargs = handler_kwargs
 
     def __call__(self, genome, ind_save_dir):
+        # Save genome immediately so the directory is never left empty
+        if ind_save_dir is not None:
+            os.makedirs(ind_save_dir, exist_ok=True)
+            if self.is_indirect:
+                with open(os.path.join(ind_save_dir, "genotype.pkl"), 'wb') as f:
+                    pickle.dump(genome, f)
+            else:
+                np.save(os.path.join(ind_save_dir, "genome.npy"), genome)
+
         # Decode indirect encoding to phenotype if needed
         if self.is_indirect:
             handler = self.handler_class(genome=genome, **self.handler_kwargs)
@@ -824,11 +833,6 @@ class _RepairAndEvaluateFitness:
             timeout=self.timeout,
             num=None,
         )
-
-        # Save the original indirect genome (CPPN/HybridGenome) alongside the phenotype
-        if self.is_indirect and ind_save_dir is not None:
-            with open(os.path.join(ind_save_dir, "genotype.pkl"), 'wb') as f:
-                pickle.dump(genome, f)
 
         return fitness
 
