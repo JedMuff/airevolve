@@ -38,11 +38,11 @@ def parse_arguments():
     # Genome and evolution parameters
     parser.add_argument('--genome-handler', choices=['spherical', 'cartesian'],
                        default='spherical', help='Genome handler to use (default: spherical)')
-    parser.add_argument('--population-size', type=int, default=30,
+    parser.add_argument('--population-size', type=int, default=12,
                        help='Population size (default: 30)')
     parser.add_argument('--generations', type=int, default=40,
-                       help='Number of generations (default: 40)')
-    parser.add_argument('--num-mutate', type=int, default=30,
+                       help='Number of generations (default: 30)')
+    parser.add_argument('--num-mutate', type=int, default=12,
                        help='Number of individuals to mutate per generation (default: 30)')
     parser.add_argument('--num-crossover', type=int, default=0,
                        help='Number of crossover operations per generation (default: 0)')

@@ -6,7 +6,7 @@
 
 ## --- Resources Requested ---
 #SBATCH --time=100:00:00
-#SBATCH --cpus-per-task=14
+#SBATCH --cpus-per-task=32
 #SBATCH --mem=31G
 
 ## --- Job Array: 8 repetitions x 2 arm configs = 16 tasks ---
@@ -58,7 +58,7 @@ echo "Temporary data directory: $TMP_DIR"
 cd "$PROJECT_DIR"
 
 srun python3 examples/run_evolution_with_curriculum.py \
-    --num-workers 32 \
+    --num-workers 24 \
     --min-narms $NARMS \
     --max-narms $NARMS \
     --log-dir "$TMP_DIR/curriculum_runs"
