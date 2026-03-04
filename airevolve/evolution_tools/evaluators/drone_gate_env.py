@@ -397,6 +397,11 @@ class DroneGateEnv(VecEnv):
         # Combine back into full state
         new_states = np.concatenate([new_base_state, new_motor_rpms], axis=1)
 
+        # Detect numerical divergence (e.g. Euler angle singularity at ±90° pitch)
+        diverged = np.any(~np.isfinite(new_states), axis=1)
+        if np.any(diverged):
+            new_states[diverged] = self.world_states[diverged]
+
         self.step_counts += 1
 
         pos_old = self.world_states[:,0:3]
@@ -432,7 +437,8 @@ class DroneGateEnv(VecEnv):
         out_of_bounds = x_bounds_broken | y_bounds_broken | z_bounds_broken
 
         rewards[out_of_bounds] = -20
-        
+        rewards[diverged] = -20
+
         # Check number of steps
         max_steps_reached = self.step_counts >= self.max_steps
 
@@ -444,7 +450,7 @@ class DroneGateEnv(VecEnv):
         self.num_gates_passed[gate_passed] += 1
 
         # Check if the episode is done
-        dones = max_steps_reached | out_of_bounds
+        dones = max_steps_reached | out_of_bounds | diverged
         self.dones = dones
 
         # Save gates passed before reset (for info dict)

@@ -315,6 +315,11 @@ class DroneHoverEnv(VecEnv):
         # Use the new simulator's dynamics function
         new_states = self.world_states + self.dt * self.drone_sim.dynamics_func(self.world_states.T, motor_commands.T).T + disturbance * self.dt
 
+        # Detect numerical divergence (e.g. Euler angle singularity at ±90° pitch)
+        diverged = np.any(~np.isfinite(new_states), axis=1)
+        if np.any(diverged):
+            new_states[diverged] = self.world_states[diverged]
+
         self.step_counts += 1
 
         pos_current = self.world_states[:,0:3]
@@ -351,7 +356,7 @@ class DroneHoverEnv(VecEnv):
         max_steps_reached = self.step_counts >= self.max_steps
 
         # Check if the episode is done
-        dones = max_steps_reached | out_of_bounds
+        dones = max_steps_reached | out_of_bounds | diverged
         self.dones = dones
 
         # Update world states
