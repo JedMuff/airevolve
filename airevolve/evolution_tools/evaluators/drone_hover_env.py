@@ -315,8 +315,8 @@ class DroneHoverEnv(VecEnv):
         # Use the new simulator's dynamics function
         new_states = self.world_states + self.dt * self.drone_sim.dynamics_func(self.world_states.T, motor_commands.T).T + disturbance * self.dt
 
-        # Detect numerical divergence (e.g. Euler angle singularity at ±90° pitch)
-        diverged = np.any(~np.isfinite(new_states), axis=1)
+        # Detect numerical divergence (NaN, Inf, or excessively large finite values)
+        diverged = np.any(~np.isfinite(new_states) | (np.abs(new_states) > 1e6), axis=1)
         if np.any(diverged):
             new_states[diverged] = self.world_states[diverged]
 

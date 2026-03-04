@@ -397,8 +397,8 @@ class DroneGateEnv(VecEnv):
         # Combine back into full state
         new_states = np.concatenate([new_base_state, new_motor_rpms], axis=1)
 
-        # Detect numerical divergence (e.g. Euler angle singularity at ±90° pitch)
-        diverged = np.any(~np.isfinite(new_states), axis=1)
+        # Detect numerical divergence (NaN, Inf, or excessively large finite values)
+        diverged = np.any(~np.isfinite(new_states) | (np.abs(new_states) > 1e6), axis=1)
         if np.any(diverged):
             new_states[diverged] = self.world_states[diverged]
 
