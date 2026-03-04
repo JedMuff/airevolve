@@ -11,7 +11,7 @@
 
 ## --- Job Array: 8 repetitions x 2 arm configs = 16 tasks ---
 ## Even tasks (0,2,4,...18): 4 arms, Odd tasks (1,3,5,...19): 6 arms
-#SBATCH --array=0-19
+#SBATCH --array=0-9
 
 ## --- Slurm Job Logs ---
 #SBATCH --output=./out/%x_%A_%a.out
