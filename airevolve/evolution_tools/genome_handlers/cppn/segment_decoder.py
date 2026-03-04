@@ -27,12 +27,12 @@ def decode_cppn_to_phenotype(
         num_segments: Number of azimuthal segments to evaluate.
         arm_limit: Maximum number of arms (rows in output array).
         parameter_limits: Array of shape ``(6, 2)`` with ``[min, max]`` per
-            parameter: ``[magnitude, arm_yaw, arm_pitch, motor_yaw,
-            motor_pitch, direction]``.
+            parameter: ``[magnitude, arm_yaw, arm_pitch, motor_pitch,
+            motor_yaw, direction]``.
 
     Returns:
         Array of shape ``(arm_limit, 6)`` with NaN for unused rows.
-        Columns: ``[magnitude, arm_yaw, arm_pitch, motor_yaw, motor_pitch,
+        Columns: ``[magnitude, arm_yaw, arm_pitch, motor_pitch, motor_yaw,
         direction]``.
     """
     phenotype = np.full((arm_limit, 6), np.nan)
@@ -67,8 +67,8 @@ def decode_cppn_to_phenotype(
 
             mag_min, mag_max = parameter_limits[0]
             pitch_min, pitch_max = parameter_limits[2]
-            motor_yaw_min, motor_yaw_max = parameter_limits[3]
-            motor_pitch_min, motor_pitch_max = parameter_limits[4]
+            motor_pitch_min, motor_pitch_max = parameter_limits[3]
+            motor_yaw_min, motor_yaw_max = parameter_limits[4]
 
             magnitude = _map_tanh_to_range(outputs[1], mag_min, mag_max)
             arm_yaw = segment_center + outputs[2] * half_width
@@ -79,7 +79,7 @@ def decode_cppn_to_phenotype(
 
             phenotype[arms_placed] = [
                 magnitude, arm_yaw, arm_pitch,
-                motor_yaw, motor_pitch, direction,
+                motor_pitch, motor_yaw, direction,
             ]
             arms_placed += 1
 

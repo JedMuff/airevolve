@@ -202,15 +202,9 @@ def main():
     """Main function with performance optimizations."""
     
     # Define experiment directories
+    base_dir = "/media/jed/My Passport/airevolve030326"
     experiment_dirs = {
-        # "asym_figure8": "/media/jed/MyPassport/data_backup/asym_figure8",
-        # "asym_circle": "/media/jed/MyPassport/data_backup/asym_circle/",
-        # "asym_slalom": "/media/jed/MyPassport/data_backup/asym_slalom/",
-        # "asym_backnforth": "/media/jed/MyPassport/data_backup/asym_backnforth/",
-        "sym_figure8": "/media/jed/MyPassport/data_backup/sym_figure8/",
-        "sym_circle": "/media/jed/MyPassport/data_backup/sym_circle/",
-        "sym_slalom": "/media/jed/MyPassport/data_backup/sym_slalom/",
-        "sym_shuttlerun": "/media/jed/MyPassport/data_backup/sym_shuttlerun/",
+        "spherical": os.path.join(base_dir, "spherical"),
     }
     
     # Parameters

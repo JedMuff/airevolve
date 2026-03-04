@@ -71,7 +71,7 @@ def calculate_diversity_data(pop_data, min_max_params=None):
     
     for generation in pop_data:
         # Filter out NaN individuals
-        valid_individuals = [ind for ind in generation if not pd.isna(ind).any() if isinstance(ind, np.ndarray)]
+        valid_individuals = [ind for ind in generation if isinstance(ind, np.ndarray) and not np.isnan(ind).any()]
         
         if len(valid_individuals) == 0:
             diversity_values.append(np.nan)
@@ -92,48 +92,41 @@ def calculate_diversity_data(pop_data, min_max_params=None):
     return np.array(diversity_values)
 
 
-def process_experiment_runs(experiment_dir, experiment_name, save_dir):
+def process_experiment_runs(experiment_dir, experiment_name, save_dir, compute_diversity=True):
     """Process all runs for a single experiment and save aggregated data."""
     print(f"Processing experiment: {experiment_name}")
-    
+
     if not os.path.exists(experiment_dir):
         print(f"Warning: Directory {experiment_dir} does not exist")
         return
-    
+
     all_fitness_data = []
     all_diversity_data = []
-    
+
     # Process each run in the experiment directory
     run_folders = [d for d in os.listdir(experiment_dir) if d != ".DS_Store"]
-    
+
     for run_folder in run_folders:
         run_path = os.path.join(experiment_dir, run_folder)
         evolution_file = os.path.join(run_path, "evolution_data.csv")
-        
+
         if not os.path.exists(evolution_file):
             print(f"Warning: {evolution_file} not found, skipping run {run_folder}")
             continue
-        
+
         print(f"  Processing run: {run_folder}")
-        
+
         # Load evolution data
         evo_data = pd.read_csv(evolution_file)
-        
-        # Aggregate fitness and population data
+
+        # Aggregate fitness data
         fit_data = aggregate_fitness(evo_data, column='fitness')
-        pop_data = aggregate_population(evo_data)
-        
+
         # Calculate fitness statistics per generation
         max_fitness = np.nanmax(fit_data, axis=1)
         mean_fitness = np.nanmean(fit_data, axis=1)
         std_fitness = np.nanstd(fit_data, axis=1)
-        
-        # Convert population data to proper numpy arrays
-        pop_data = np.array([[np.array(ind) for ind in pop] for pop in pop_data])
-        
-        # Calculate diversity using EditDistanceEvaluator
-        diversity_data = calculate_diversity_data(pop_data)
-        
+
         # Store data for this run
         run_data = {
             'experiment': experiment_name,
@@ -142,9 +135,15 @@ def process_experiment_runs(experiment_dir, experiment_name, save_dir):
             'max_fitness': max_fitness,
             'mean_fitness': mean_fitness,
             'std_fitness': std_fitness,
-            'diversity': diversity_data[:len(max_fitness)]  # Ensure same length
         }
-        
+
+        if compute_diversity:
+            pop_data = aggregate_population(evo_data)
+            diversity_data = calculate_diversity_data(pop_data)
+            run_data['diversity'] = diversity_data[:len(max_fitness)]
+        else:
+            run_data['diversity'] = np.nan
+
         all_fitness_data.append(pd.DataFrame(run_data))
     
     if not all_fitness_data:
@@ -164,40 +163,32 @@ def process_experiment_runs(experiment_dir, experiment_name, save_dir):
 
 def main():
     """Main function to process all experiments."""
-    
-    # Define experiment directories and names
-    experiment_dirs = {
-        # "asym_figure8": "data_backup/asym_figure8",
-        # "asym_circle": "data_backup/asym_circle/",
-        # "asym_slalom": "data_backup/asym_slalom/",
-        # "asym_backnforth": "data_backup/asym_backnforth/",
-        "sym_data/sym_fig8": "data_backup/sym_data/sym_fig8/",
-        "sym_data/sym_circle": "data_backup/sym_data/sym_circle/",
-        "sym_data/sym_slalom": "data_backup/sym_data/sym_slalom/",
-        "sym_data/sym_shuttlerun": "data_backup/sym_data/sym_shuttlerun/",
+
+    base_dir = "/media/jed/My Passport/airevolve030326"
+
+    # Define experiment directories and whether diversity can be computed
+    # (offspring column must contain numpy array strings for diversity)
+    experiments = {
+        "spherical":  {"dir": os.path.join(base_dir, "spherical"),   "diversity": True},
+        "cppn":       {"dir": os.path.join(base_dir, "cppn"),        "diversity": False},
+        "hybrid_cppn": {"dir": os.path.join(base_dir, "hybrid_cppn"), "diversity": False},
     }
-    
+
     # Output directory for CSV files
-    save_dir = "data_backup/"
-    
-    # Create save directory if it doesn't exist
-    os.makedirs(save_dir, exist_ok=True)
-    
+    save_dir = base_dir
+
     # Process each experiment
     all_experiment_data = []
-    
-    for experiment_name, experiment_dir in experiment_dirs.items():
-        experiment_data = process_experiment_runs(experiment_dir, experiment_name, save_dir)
+
+    for experiment_name, cfg in experiments.items():
+        os.makedirs(os.path.join(save_dir, experiment_name), exist_ok=True)
+        experiment_data = process_experiment_runs(
+            cfg["dir"], experiment_name, save_dir,
+            compute_diversity=cfg["diversity"],
+        )
         if experiment_data is not None:
             all_experiment_data.append(experiment_data)
-    
-    # Optionally, create a combined file with all experiments
-    # if all_experiment_data:
-    #     combined_all = pd.concat(all_experiment_data, ignore_index=True)
-    #     combined_file = os.path.join(save_dir, "all_experiments_fitness_diversity_data.csv")
-    #     combined_all.to_csv(combined_file, index=False)
-    #     print(f"Combined data saved to: {combined_file}")
-    
+
     print("Processing complete!")
 
 

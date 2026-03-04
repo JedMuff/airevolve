@@ -184,7 +184,7 @@ class DroneHoverEnv(VecEnv):
 
         propellers = []
         for row in individual_clean:
-            magnitude, arm_yaw, arm_pitch, mot_yaw, mot_pitch, direction = row
+            magnitude, arm_yaw, arm_pitch, mot_pitch, mot_yaw, direction = row
 
             # Position: spherical to ENU cartesian
             enu_x = magnitude * np.cos(arm_pitch) * np.cos(arm_yaw)

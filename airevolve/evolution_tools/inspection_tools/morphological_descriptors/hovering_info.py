@@ -71,8 +71,8 @@ def get_sim(individual, motor_template = {"propsize": 2}):
 
     props = []
     propeller_positions = []
-    mypypd = individual[:,:6] # [mag, arm_yaw, arm_pitch, mot_yaw, mot_pitch, dir]
-    for mag, arm_yaw, arm_pitch, mot_yaw, mot_pitch, dir in mypypd:
+    mypypd = individual[:,:6] # [mag, arm_yaw, arm_pitch, mot_pitch, mot_yaw, dir]
+    for mag, arm_yaw, arm_pitch, mot_pitch, mot_yaw, dir in mypypd:
         global_x,global_y,global_z = u.convert_to_cartesian(mag, arm_yaw, arm_pitch)
         x,y,z = u.ENU_to_NED(global_x,global_y,global_z)
 

@@ -26,7 +26,7 @@ def _convert_genome_to_propellers_ned(genome):
 
     propellers = []
     for row in individual_clean:
-        magnitude, arm_yaw, arm_pitch, mot_yaw, mot_pitch, direction = row
+        magnitude, arm_yaw, arm_pitch, mot_pitch, mot_yaw, direction = row
 
         # Position: spherical to ENU cartesian
         enu_x = magnitude * np.cos(arm_pitch) * np.cos(arm_yaw)
@@ -75,7 +75,7 @@ def compare_conversions():
     ])
 
     print(f"\nGenome (mot_pitch=0, mot_yaw=0 for all motors):")
-    print(f"  [mag, arm_yaw, arm_pitch, mot_yaw, mot_pitch, dir]")
+    print(f"  [mag, arm_yaw, arm_pitch, mot_pitch, mot_yaw, dir]")
     for i, row in enumerate(genome):
         print(f"  Arm {i}: {row}")
 
@@ -83,7 +83,7 @@ def compare_conversions():
     print("  Applies: convert_to_cartesian → ENU_to_NED for positions")
     print("  Applies: orientation_to_unit_vector (with internal ENU→NED) for thrust")
 
-    for i, (mag, arm_yaw, arm_pitch, mot_yaw, mot_pitch, direction) in enumerate(genome):
+    for i, (mag, arm_yaw, arm_pitch, mot_pitch, mot_yaw, direction) in enumerate(genome):
         gx, gy, gz = u.convert_to_cartesian(mag, arm_yaw, arm_pitch)
         nx, ny, nz = u.ENU_to_NED(gx, gy, gz)
         thrust_ned = orientation_to_unit_vector(0, mot_pitch, mot_yaw)

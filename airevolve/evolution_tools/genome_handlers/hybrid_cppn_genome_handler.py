@@ -125,8 +125,8 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
                 [0.055, 0.17],           # magnitude
                 [-np.pi, np.pi],         # arm yaw (azimuth)
                 [-np.pi / 2, np.pi / 2], # arm pitch
-                [-np.pi, np.pi],         # motor yaw
                 [-np.pi / 2, np.pi / 2], # motor pitch
+                [-np.pi, np.pi],         # motor yaw
                 [0, 1],                  # direction
             ])
         else:
@@ -345,13 +345,16 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
         cppn_output = evaluate_cppn(self.genome.cppn, cppn_input)  # (narms, 3)
 
         # Map tanh outputs [-1, 1] to motor parameter ranges
-        motor_limits = self.parameter_limits[3:]  # (3, 2)
+        # CPPN outputs: [motor_yaw, motor_pitch, direction]
+        # Phenotype cols 3-4: [motor_pitch, motor_yaw] — swap to match convention
+        motor_limits = self.parameter_limits[3:]  # (3, 2): [pitch_lim, yaw_lim, dir_lim]
         motor_lo = motor_limits[:, 0]
         motor_hi = motor_limits[:, 1]
-        # tanh output in [-1, 1] → [lo, hi]
+        # tanh output in [-1, 1] → [lo, hi], reorder CPPN outputs to [pitch, yaw]
+        cppn_motor_reordered = cppn_output[:, [1, 0]]
         phenotype[:, 3:5] = (
             motor_lo[:2]
-            + (cppn_output[:, :2] + 1.0) * 0.5 * (motor_hi[:2] - motor_lo[:2])
+            + (cppn_motor_reordered + 1.0) * 0.5 * (motor_hi[:2] - motor_lo[:2])
         )
         # Direction: threshold at 0
         phenotype[:, 5] = np.where(cppn_output[:, 2] >= 0.0, 1.0, 0.0)

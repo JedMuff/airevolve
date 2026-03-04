@@ -211,7 +211,7 @@ def drone_hover_props_to_genome(
         # convert_to_cartesian uses: z = mag * sin(pitch), so pitch = arcsin(z/mag)
         arm_pitch = np.where(mag > 0, np.arcsin(np.clip(enu_z / mag, -1, 1)), 0.0)
 
-        # --- Motor orientation: NED direction -> (mot_yaw, mot_pitch) ---
+        # --- Motor orientation: NED direction -> (mot_pitch, mot_yaw) ---
         # orientation_to_unit_vector(0, p, y) produces NED direction:
         #   [-sin(p)*sin(y), -sin(p)*cos(y), cos(p)]
         # Inversion: mot_pitch = arccos(ned_z), mot_yaw = arctan2(-ned_x, -ned_y)
@@ -221,8 +221,8 @@ def drone_hover_props_to_genome(
         mot_pitch = np.arccos(np.clip(dirs_normalized[:, 2], -1, 1))
         mot_yaw = np.arctan2(-dirs_normalized[:, 0], -dirs_normalized[:, 1])
 
-        # Genome columns: [mag, arm_yaw, arm_pitch, mot_yaw, mot_pitch, direction]
-        genome = np.column_stack([mag, arm_yaw, arm_pitch, mot_yaw, mot_pitch, rotations])
+        # Genome columns: [mag, arm_yaw, arm_pitch, mot_pitch, mot_yaw, direction]
+        genome = np.column_stack([mag, arm_yaw, arm_pitch, mot_pitch, mot_yaw, rotations])
 
     elif coordinate_system == 'cartesian':
         from scipy.spatial.transform import Rotation as ScipyRotation

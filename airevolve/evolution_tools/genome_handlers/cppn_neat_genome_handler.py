@@ -95,8 +95,8 @@ class CPPNNeatDroneGenomeHandler(GenomeHandler):
                 [0.055, 0.17],           # magnitude
                 [-np.pi, np.pi],         # arm yaw (azimuth)
                 [-np.pi / 2, np.pi / 2], # arm pitch
-                [-np.pi, np.pi],         # motor yaw
                 [-np.pi / 2, np.pi / 2], # motor pitch
+                [-np.pi, np.pi],         # motor yaw
                 [0, 1],                  # direction
             ])
         else:

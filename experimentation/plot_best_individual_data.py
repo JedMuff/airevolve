@@ -286,15 +286,9 @@ def main():
     """
     
     # Define experiment directories (same as in your collection script)
+    base_dir = "/media/jed/My Passport/airevolve030326"
     experiment_dirs = {
-        # "asym_figure8": "data_backup/asym_figure8",
-        # "asym_circle": "data_backup/asym_circle/",
-        # "asym_slalom": "data_backup/asym_slalom/",
-        # "asym_backnforth": "data_backup/asym_backnforth/",
-        "sym_figure8": "data_backup/sym_figure8/",
-        "sym_circle": "data_backup/sym_circle/",
-        "sym_slalom": "data_backup/sym_slalom/",
-        "sym_shuttlerun": "data_backup/sym_shuttlerun/",
+        "spherical": os.path.join(base_dir, "spherical"),
     }
     
     # Parameters

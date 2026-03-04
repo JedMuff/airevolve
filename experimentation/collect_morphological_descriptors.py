@@ -207,11 +207,9 @@ def main():
     """Main function to process all experiment directories."""
     
     # Define experiment directories
+    base_dir = "/media/jed/My Passport/airevolve030326"
     experiment_dirs = {
-        "asym_figure8": "data_backup/asym_figure8/",
-        "asym_circle": "data_backup/asym_circle/",
-        "asym_slalom": "data_backup/asym_slalom/",
-        "asym_backnforth": "data_backup/asym_backnforth/",
+        "spherical": os.path.join(base_dir, "spherical/"),
     }
     
     # Set number of workers (None for auto-detection, or specify a number)

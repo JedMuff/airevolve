@@ -277,7 +277,7 @@ def plot_fitness_from_csv(ax, df: pd.DataFrame, gen_line: Optional[int] = None,
     if legend:
         ax.legend()
     ax.grid()
-    ax.set_ylim([np.nanmin(mean_of_means) * 0.95, np.nanmax(mean_of_maxs) * 1.05])
+    # ax.set_ylim([np.nanmin(mean_of_means) * 0.95, np.nanmax(mean_of_maxs) * 1.05])
 
 
 def plot_diversity_from_csv(ax, df: pd.DataFrame, title: str = 'Diversity', 
@@ -431,7 +431,7 @@ def plot_grouped_experiments(experiment_data: Dict[str, pd.DataFrame],
     
     # Set proper limits after all plots are added
     ax_fitness.set_xlim(0, max_generations)
-    ax_fitness.set_ylim([overall_min * 0.95, overall_max * 1.05])
+    # ax_fitness.set_ylim([overall_min * 0.95, overall_max * 1.05])
     plt.tight_layout()
     
     # Save fitness plot
@@ -479,7 +479,7 @@ def plot_grouped_experiments(experiment_data: Dict[str, pd.DataFrame],
     if all_diversity_mins and all_diversity_maxs:
         diversity_min = min(all_diversity_mins)
         diversity_max = max(all_diversity_maxs)
-        ax_diversity.set_ylim([diversity_min * 0.95, diversity_max * 1.05])
+        # ax_diversity.set_ylim([diversity_min * 0.95, diversity_max * 1.05])
     
     plt.tight_layout()
     
@@ -639,33 +639,24 @@ def main():
     """Main function to load data and create plots."""
     
     # Configuration
-    data_dir = "data_backup/"
-    save_dir = "plots/"
-    
-    # Example 1: Original 1D array (backward compatibility)
+    data_dir = "/media/jed/My Passport/airevolve030326/"
+    save_dir = "/media/jed/My Passport/airevolve030326/plots/"
+
+    # All three experiment types
     experiment_names_1d = [
-        "asym_figure8",
-        "asym_circle", 
-        "asym_slalom",
-        "asym_backnforth"
+        "spherical",
+        "cppn",
+        "hybrid_cppn",
     ]
-    
-    # Example 2: 2D array with custom colors for each row
-    experiment_names_2d = [
-        ["asym_circle", "sym_circle"], 
-        ["asym_figure8", "sym_figure8"],   
-        ["asym_slalom", "sym_slalom"],
-        ["asym_backnforth","sym_shuttlerun"],  
-    ]
-    
+
     # Custom colors for each row (optional)
     column_colors = ['blue', 'red', 'green', 'orange', 'purple']
-    
+
     # Optional row names for better file naming
-    row_names = ['circle', 'figure8', 'slalom', 'shuttlerun']
-    
+    row_names = ['spherical', 'cppn', 'hybrid_cppn']
+
     # Choose which experiment configuration to use
-    experiment_names = experiment_names_2d  # Change this to experiment_names_1d for 1D behavior
+    experiment_names = experiment_names_1d
     use_2d_plotting = isinstance(experiment_names[0], list)
     
     # Plot customization options

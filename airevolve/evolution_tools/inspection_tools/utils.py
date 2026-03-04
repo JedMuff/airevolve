@@ -197,7 +197,7 @@ def extract_polar_genome_data(genome_array: npt.NDArray) -> dict:
     
     Args:
         genome_array: Array with shape (n_arms, 6) containing
-                     [magnitude, azimuth, pitch, motor_yaw, motor_pitch, direction]
+                     [magnitude, azimuth, pitch, motor_pitch, motor_yaw, direction]
         
     Returns:
         Dictionary with converted data for visualization
@@ -211,7 +211,7 @@ def extract_polar_genome_data(genome_array: npt.NDArray) -> dict:
     directions = []
     
     for arm in valid_genome:
-        mag, azimuth, pitch, motor_yaw, motor_pitch, direction = arm[:6]
+        mag, azimuth, pitch, motor_pitch, motor_yaw, direction = arm[:6]
         
         # Convert position to Cartesian
         x, y, z = convert_to_cartesian(mag, azimuth, pitch)

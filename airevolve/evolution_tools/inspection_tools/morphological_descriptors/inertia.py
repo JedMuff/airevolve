@@ -25,7 +25,7 @@ def inertia(individual):
 
     Args:
         individual (np.ndarray): Genome array with shape (n_arms, 6)
-            Columns: [magnitude, arm_yaw, arm_pitch, mot_yaw, mot_pitch, direction]
+            Columns: [magnitude, arm_yaw, arm_pitch, mot_pitch, mot_yaw, direction]
 
     Returns:
         tuple: (Ix, Iy, Iz, Ixy, Ixz, Iyz) inertia components in kg*m^2
@@ -41,7 +41,7 @@ def inertia(individual):
     props = []
     propeller_positions = []
 
-    for mag, arm_yaw, arm_pitch, mot_yaw, mot_pitch, direction in individual:
+    for mag, arm_yaw, arm_pitch, mot_pitch, mot_yaw, direction in individual:
         # Convert spherical to Cartesian (ENU frame)
         global_x, global_y, global_z = u.convert_to_cartesian(mag, arm_yaw, arm_pitch)
 

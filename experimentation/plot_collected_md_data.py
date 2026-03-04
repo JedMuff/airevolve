@@ -866,15 +866,13 @@ def create_correlation_heatmap(all_data, save_dir=None):
 def main():
     """Main analysis function."""
     # Define experiment directories (modify these paths as needed)
+    base_dir = "/media/jed/My Passport/airevolve030326"
     experiment_dirs = {
-        "asym_figure8": "data_backup/asym_figure8/",
-        "asym_circle": "data_backup/asym_circle/",
-        "asym_slalom": "data_backup/asym_slalom/",
-        "asym_backnforth": "data_backup/asym_backnforth/",
+        "spherical": os.path.join(base_dir, "spherical/"),
     }
-    
+
     # Set output directory for saving plots and results
-    output_dir = "./analysis_results/"
+    output_dir = os.path.join(base_dir, "analysis_results/")
     os.makedirs(output_dir, exist_ok=True)
     
     print("Loading experiment data...")

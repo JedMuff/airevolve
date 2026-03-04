@@ -290,7 +290,9 @@ def _tune_cppn_individual(args):
     """
     Worker function to CMA-ES tune a single CPPN individual.
 
-    Decodes the CPPN to phenotype, then tunes the controller.
+    Decodes the CPPN to phenotype, runs the 3-stage repair pipeline
+    (hover check → optimization repair → hover repair), then tunes the
+    controller on the repaired phenotype.
     Returns the CPPN genome if gates_passed >= threshold.
 
     Returns:
@@ -301,10 +303,37 @@ def _tune_cppn_individual(args):
 
     handler = handler_class(genome=cppn_genome, **handler_kwargs)
     phenotype = handler.get_phenotype()
-    gate_config = GATE_CONFIGS[gate_config_name]
 
+    # Apply the same 3-stage repair pipeline used in _RepairAndEvaluateFitness
+    # so the phenotype CMA-ES tunes matches what generation 0 will evaluate.
+
+    # STEP 1: Hover check
+    can_hover, _ = stage2_hover_check(
+        phenotype, verbose=False, allow_spinning=False
+    )
+    if not can_hover:
+        return None, {"gates_passed": 0, "skipped": "failed_hover_check"}
+
+    # STEP 2: Optimization repair (fix collisions)
+    repair_config = OptimizationRepairConfig(fixed_params=[3, 4])
+    repaired, _ = stage1_optimization_repair(
+        phenotype, coordinate_system='spherical',
+        config=repair_config, verbose=False
+    )
+    if repaired is None:
+        return None, {"gates_passed": 0, "skipped": "failed_optimization_repair"}
+
+    # STEP 3: Hover repair (align thrust vectors)
+    final, _ = stage3_hover_repair(
+        repaired, coordinate_system='spherical', verbose=False
+    )
+    if final is None:
+        return None, {"gates_passed": 0, "skipped": "failed_hover_repair"}
+
+    # Tune the repaired phenotype
+    gate_config = GATE_CONFIGS[gate_config_name]
     tuning = optimize_controller_with_early_stop(
-        phenotype, gate_config,
+        final, gate_config,
         max_evaluations=max_evals,
         num_workers=1,
         sim_time=sim_time,
@@ -323,6 +352,8 @@ def _tune_single_individual(args):
     """
     Worker function to CMA-ES tune a single hover+repair-validated individual.
 
+    Runs the 3-stage repair pipeline (hover check → optimization repair →
+    hover repair) then tunes the controller on the repaired phenotype.
     Top-level function (picklable for multiprocessing). Each worker runs
     CMA-ES single-threaded (num_workers=1) — the outer Pool provides
     parallelism across drones.
@@ -335,10 +366,37 @@ def _tune_single_individual(args):
      sim_time, dt, timeout) = args
 
     individual = np.array(individual_list)
-    gate_config = GATE_CONFIGS[gate_config_name]
 
+    # Apply the same 3-stage repair pipeline used in _RepairAndEvaluateFitness
+    # so the phenotype CMA-ES tunes matches what generation 0 will evaluate.
+
+    # STEP 1: Hover check
+    can_hover, _ = stage2_hover_check(
+        individual, verbose=False, allow_spinning=False
+    )
+    if not can_hover:
+        return None, {"gates_passed": 0, "skipped": "failed_hover_check"}
+
+    # STEP 2: Optimization repair (fix collisions)
+    repair_config = OptimizationRepairConfig(fixed_params=[3, 4])
+    repaired, _ = stage1_optimization_repair(
+        individual, coordinate_system='spherical',
+        config=repair_config, verbose=False
+    )
+    if repaired is None:
+        return None, {"gates_passed": 0, "skipped": "failed_optimization_repair"}
+
+    # STEP 3: Hover repair (align thrust vectors)
+    final, _ = stage3_hover_repair(
+        repaired, coordinate_system='spherical', verbose=False
+    )
+    if final is None:
+        return None, {"gates_passed": 0, "skipped": "failed_hover_repair"}
+
+    # Tune the repaired phenotype
+    gate_config = GATE_CONFIGS[gate_config_name]
     tuning = optimize_controller_with_early_stop(
-        individual, gate_config,
+        final, gate_config,
         max_evaluations=max_evals,
         num_workers=1,
         sim_time=sim_time,
