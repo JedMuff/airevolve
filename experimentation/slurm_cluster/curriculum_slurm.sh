@@ -9,8 +9,7 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=31G
 
-## --- Job Array: 8 repetitions x 2 arm configs = 16 tasks ---
-## Even tasks (0,2,4,...18): 4 arms, Odd tasks (1,3,5,...19): 6 arms
+## --- Job Array: 10 repetitions with 6 arms ---
 #SBATCH --array=0-9
 
 ## --- Slurm Job Logs ---
@@ -37,13 +36,8 @@ python3 --version
 # --- Create output directories ---
 mkdir -p "$PROJECT_DIR/out"
 
-# --- Determine arm configuration from array task ID ---
-# Even tasks (0,2,4,...): 4 arms, Odd tasks (1,3,5,...): 6 arms
-if [ $(( SLURM_ARRAY_TASK_ID % 2 )) -eq 0 ]; then
-    NARMS=4
-else
-    NARMS=6
-fi
+# --- Arm configuration ---
+NARMS=6
 
 echo "Arm configuration: ${NARMS} arms"
 

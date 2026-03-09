@@ -583,17 +583,22 @@ def evaluate_individual_curriculum(individual, ind_save_dir,
     plt.close()
 
     # STAGE 1: HOVER TRAINING (SILENT MODE)
-    hover_success_rate, hover_model_path, actual_hover_timesteps = stage1_hover_training(
-        individual=individual,
-        save_dir=ind_save_dir,
-        max_timesteps=hover_max_timesteps,
-        num_envs=num_envs,
-        device=device,
-        success_threshold=hover_success_threshold,
-        window_size=hover_window_size,
-        check_freq=hover_check_freq,
-        verbose=0  # SILENT for evolution
-    )
+    try:
+        hover_success_rate, hover_model_path, actual_hover_timesteps = stage1_hover_training(
+            individual=individual,
+            save_dir=ind_save_dir,
+            max_timesteps=hover_max_timesteps,
+            num_envs=num_envs,
+            device=device,
+            success_threshold=hover_success_threshold,
+            window_size=hover_window_size,
+            check_freq=hover_check_freq,
+            verbose=0  # SILENT for evolution
+        )
+    except (ValueError, RuntimeError) as e:
+        # NaN propagation in simulation can cause PyTorch distribution errors
+        print(f"Hover training failed with error: {e}")
+        return 0
 
     # CRITICAL: Check if hover threshold met
     if hover_success_rate < hover_success_threshold:
