@@ -228,14 +228,16 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
             # Motor rotation direction
             rot = "ccw" if direction < 0.5 else "cw"
 
-            # Thrust direction: orientation_to_unit_vector returns motor axis (NED),
-            # negate to get thrust direction (DroneInterface convention, see create_2inch_quad)
-            motor_axis = orientation_to_unit_vector(0.0, motor_pitch, motor_yaw)
-            thrust_dir = -motor_axis
+            # Motor direction: orientation_to_unit_vector returns the motor force
+            # direction in NED. Use directly — same convention as the hover check
+            # (hovering_info.get_sim) which validates that the drone can hover.
+            # Do NOT negate: negation inverts force directions, making hoverable
+            # drones produce downward force in the simulation.
+            motor_dir = orientation_to_unit_vector(0.0, motor_pitch, motor_yaw)
 
             propellers.append({
                 "loc": [float(x), float(y), float(z)],
-                "dir": [float(thrust_dir[0]), float(thrust_dir[1]), float(thrust_dir[2]), rot],
+                "dir": [float(motor_dir[0]), float(motor_dir[1]), float(motor_dir[2]), rot],
                 "propsize": 2
             })
 

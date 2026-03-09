@@ -17,11 +17,10 @@ def _genome_to_propellers(genome):
         ex, ey, ez = convert_to_cartesian(r, theta, phi)
         x, y, z = ENU_to_NED(ex, ey, ez)
         rot = "ccw" if direction < 0.5 else "cw"
-        motor_axis = orientation_to_unit_vector(0.0, motor_pitch, motor_yaw)
-        thrust_dir = -motor_axis
+        motor_dir = orientation_to_unit_vector(0.0, motor_pitch, motor_yaw)
         propellers.append({
             "loc": [float(x), float(y), float(z)],
-            "dir": [float(thrust_dir[0]), float(thrust_dir[1]), float(thrust_dir[2]), rot],
+            "dir": [float(motor_dir[0]), float(motor_dir[1]), float(motor_dir[2]), rot],
             "propsize": 2,
         })
     return propellers
