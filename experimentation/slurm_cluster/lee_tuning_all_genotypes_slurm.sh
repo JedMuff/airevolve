@@ -76,7 +76,7 @@ srun python3 examples/run_evolution_with_lee_tuning.py \
     --genome-handler "$GENOTYPE" \
     --gate-cfg "$TASK" \
     --population-size 16 \
-    --generations 75 \
+    --generations 50 \
     --num-mutate 16 \
     --num-crossover 0 \
     --max-evals 500 \
