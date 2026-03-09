@@ -28,6 +28,10 @@ from airevolve.evolution_tools.evaluators.drone_gate_env import DroneGateEnv
 from airevolve.evolution_tools.evaluators.drone_hover_env import DroneHoverEnv
 from airevolve.evolution_tools.inspection_tools.morphological_descriptors.hovering_info import get_sim
 from airevolve.evolution_tools.inspection_tools.drone_visualizer import DroneVisualizer
+from airevolve.evolution_tools.genome_handlers.repair_workflow import (
+    repair_operation_process,
+    is_nan_individual
+)
 
 
 class ThresholdStoppingCallback(BaseCallback):
@@ -541,6 +545,19 @@ def evaluate_individual_curriculum(individual, ind_save_dir,
         int: Number of gates passed (0 if hover stage failed threshold)
     """
     start_time = time.time()
+
+    # Apply repair pipeline to ensure individual is valid (fixes collisions, aligns thrust)
+    individual, repair_status = repair_operation_process(
+        individual,
+        coordinate_system='spherical',
+        verbose=False
+    )
+    if is_nan_individual(individual):
+        return 0
+
+    # Save repaired genome so the actual evaluated design is preserved
+    os.makedirs(ind_save_dir, exist_ok=True)
+    np.save(os.path.join(ind_save_dir, "repaired_genome.npy"), individual)
 
     # Check if individual can hover (static stability check)
     sim = get_sim(individual)
