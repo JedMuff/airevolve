@@ -317,7 +317,11 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
 
         for step in range(num_steps):
             # Update dynamics
-            quad.update(t, dt, ctrl.w_cmd, wind)
+            try:
+                quad.update(t, dt, ctrl.w_cmd, wind)
+            except RuntimeError:
+                crashed = True
+                break
             t += dt
 
             # Get desired state
