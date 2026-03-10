@@ -47,7 +47,7 @@ def animate_hover_policy(individual, model, env, deterministic=False, log=None, 
     env.reset()
 
     # Convert individual to propellers configuration
-    propellers = env._convert_individual_to_propellers(individual)
+    propellers, _ = env._convert_individual_to_propellers(individual)
 
     def get_drone_state():
         actions, _ = model.predict(env.states, deterministic=deterministic)

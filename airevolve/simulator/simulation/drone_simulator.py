@@ -17,18 +17,20 @@ class DroneSimulator:
     Uses propeller configurations for automatic computation of mass, inertia, and allocation matrices.
     """
     
-    def __init__(self, propellers=None, dt=0.005, gravity=9.81):
+    def __init__(self, propellers=None, mountpoints=None, dt=0.005, gravity=9.81):
         """
         Initialize drone simulator from propeller configuration.
-        
+
         Args:
             propellers (list): List of propeller dictionaries, each containing:
                 - "loc": [x, y, z] position in body frame (meters)
-                - "dir": [x, y, z, rotation] thrust direction and spin direction  
+                - "dir": [x, y, z, rotation] thrust direction and spin direction
                 - "propsize": propeller size in inches (4-8)
+            mountpoints (list, optional): Mounting points for each propeller.
+                If None, defaults to origin for all propellers.
             dt (float): Integration time step
             gravity (float): Gravitational acceleration
-            
+
         Example:
             # Standard quadrotor
             propellers = [
@@ -39,13 +41,13 @@ class DroneSimulator:
             ]
             drone = DroneSimulator(propellers=propellers)
         """
-        
+
         # Use default quadrotor if no propellers specified
         if propellers is None:
             propellers = create_standard_propeller_config("quad", arm_length=0.11, prop_size=2)
-        
+
         # Create drone configuration and compute physical properties
-        self.config = DroneConfiguration(propellers)
+        self.config = DroneConfiguration(propellers, mountpoints=mountpoints)
         
         # Extract computed properties
         self.Bf, self.Bm = self.config.get_allocation_matrices()

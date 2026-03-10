@@ -8,6 +8,9 @@ from stable_baselines3.common.vec_env import VecEnv
 # Import new simulation API
 from airevolve.simulator.simulation.drone_simulator import DroneSimulator
 from airevolve.simulator.simulation.drone_configuration import DroneConfiguration
+from airevolve.evolution_tools.genome_handlers.mounting_points import (
+    generate_disc_mounting_points, assign_nearest_mounting_point
+)
 
 
 class DroneHoverEnv(VecEnv):
@@ -91,8 +94,8 @@ class DroneHoverEnv(VecEnv):
             self.drone_sim = DroneSimulator(propellers=propellers, dt=dt)
         elif individual is not None:
             # Convert legacy individual array to propeller configuration
-            propellers = self._convert_individual_to_propellers(individual)
-            self.drone_sim = DroneSimulator(propellers=propellers, dt=dt)
+            propellers, mountpoints = self._convert_individual_to_propellers(individual)
+            self.drone_sim = DroneSimulator(propellers=propellers, mountpoints=mountpoints, dt=dt)
         else:
             # Default quadrotor configuration
             self.drone_sim = DroneSimulator.create_standard_drone("quad", dt=dt)
@@ -177,12 +180,17 @@ class DroneHoverEnv(VecEnv):
         Uses the same NED coordinate conventions as get_sim() in hovering_info.py:
         - Position: spherical → ENU cartesian → NED via (x,y,z) → (y,x,-z)
         - Thrust: orientation_to_unit_vector(0, pitch, yaw) with internal ENU→NED transform
+
+        Returns:
+            (propellers, mounting_points): Propeller configs and disc mounting points,
+            matching the conventions used by get_sim() in hovering_info.py.
         """
         # Remove NaN rows
         valid_rows = ~np.isnan(individual).any(axis=1)
         individual_clean = individual[valid_rows]
 
         propellers = []
+        propeller_positions = []
         for row in individual_clean:
             magnitude, arm_yaw, arm_pitch, mot_pitch, mot_yaw, direction = row
 
@@ -211,8 +219,13 @@ class DroneHoverEnv(VecEnv):
                 "dir": [thrust_x, thrust_y, thrust_z, rotation],
                 "propsize": 2  # Default prop size
             })
+            propeller_positions.append([x, y, z])
 
-        return propellers
+        # Compute mounting points matching get_sim() in hovering_info.py
+        disc_mounting_points = generate_disc_mounting_points(num_points=8, diameter=0.060)
+        mounting_points = assign_nearest_mounting_point(propeller_positions, disc_mounting_points)
+
+        return propellers, mounting_points
 
     def reset_seed(self):
         if self.seed is not None:
@@ -363,7 +376,7 @@ class DroneHoverEnv(VecEnv):
         self.world_states = new_states
 
         # Write info dicts BEFORE resetting (so we capture the final metrics)
-        infos = [{}] * self.num_envs
+        infos = [{} for _ in range(self.num_envs)]
         for i in range(self.num_envs):
             if dones[i]:
                 infos[i]["terminal_observation"] = self.states[i]
