@@ -60,6 +60,7 @@ class BSplineGateTrajectory:
         self.gate_yaws = np.array(gate_config.gate_yaw, dtype=np.float64)
         self.gate_size = gate_config.gate_size
         self.n_gates = len(self.gate_positions)
+        self.periodic = getattr(gate_config, 'periodic', True)
 
         # Control points: gate[0], gate[1], ..., gate[N-1] (periodic)
         self.n_total_control_points = self.n_gates
@@ -85,8 +86,12 @@ class BSplineGateTrajectory:
         # Formula: offset_i = tension * (2*G_i - G_{i-1} - G_{i+1}) / 4
         self.gate_offsets = np.zeros((self.n_gates, 3))
         for i in range(self.n_gates):
-            prev_gate = self.gate_positions[(i - 1) % self.n_gates]
-            next_gate = self.gate_positions[(i + 1) % self.n_gates]
+            if self.periodic:
+                prev_gate = self.gate_positions[(i - 1) % self.n_gates]
+                next_gate = self.gate_positions[(i + 1) % self.n_gates]
+            else:
+                prev_gate = self.gate_positions[max(0, i - 1)]
+                next_gate = self.gate_positions[min(self.n_gates - 1, i + 1)]
             self.gate_offsets[i] = self.tension * (2 * self.gate_positions[i] - prev_gate - next_gate) / 4
 
     def get_all_control_points(self) -> np.ndarray:
@@ -102,8 +107,9 @@ class BSplineGateTrajectory:
         """Rebuild the single periodic B-spline curve."""
         all_cps = self.get_all_control_points()
 
-        # Create single periodic spline
-        self.spline = BSplineCurve(all_cps, degree=self.degree, boundary='periodic')
+        # Create spline with appropriate boundary condition
+        boundary = 'periodic' if self.periodic else 'clamped'
+        self.spline = BSplineCurve(all_cps, degree=self.degree, boundary=boundary)
 
         # Find the best starting parameter u for the trajectory (closest to desired starting position)
         self._find_optimal_start_parameter()
@@ -116,6 +122,11 @@ class BSplineGateTrajectory:
         This ensures that in gate-only mode, the drone starts near the configured starting position
         and moves in the correct direction through the gates.
         """
+        # For non-periodic splines, start at the beginning of the curve
+        if not self.periodic:
+            self._u_start = self.spline.u_min
+            return
+
         # Get the desired starting position and first gate position
         desired_start = self.get_start_position()
         first_gate_pos = self.gate_positions[0] + self.gate_offsets[0]
@@ -146,8 +157,11 @@ class BSplineGateTrajectory:
         for u_candidate, pos_candidate, dist_to_start in candidates:
             # Look ahead a bit on the trajectory (0.5 parameter units)
             u_ahead = u_candidate + 0.5
-            if u_ahead >= u_max:
-                u_ahead = u_min + (u_ahead - u_min) % (u_max - u_min)
+            if self.periodic:
+                if u_ahead >= u_max:
+                    u_ahead = u_min + (u_ahead - u_min) % (u_max - u_min)
+            else:
+                u_ahead = min(u_ahead, u_max - 1e-10)
 
             pos_ahead = self.spline.position(u_ahead)
 
@@ -301,9 +315,16 @@ class BSplineGateTrajectory:
         # This ensures when t wraps from total_time to startup_time, position/velocity/acceleration are continuous
         loop_time = self.total_time - self.startup_time
 
-        # The loop phase should traverse a full u_range distance
+        # The loop phase traverses a full u_range for periodic, or the remaining range for non-periodic
         loop_u_distance = u_range
         loop_speed = loop_u_distance / loop_time if loop_time > 0 else 1.0
+
+        # For non-periodic splines, the startup already covers some parameter distance,
+        # so the loop phase only needs to cover the remainder to reach u_max exactly
+        if not self.periodic:
+            startup_u_consumed = loop_speed * self.startup_time
+            remaining_u = u_range - startup_u_consumed
+            loop_u_distance = max(remaining_u, 0.0)
 
         if t < self.startup_time:
             # Startup phase: quintic ramp from rest at u_start
@@ -346,10 +367,14 @@ class BSplineGateTrajectory:
             # Loop phase: constant speed completing full periodic cycle
             t_loop = t - self.startup_time
 
-            # Use modulo for repeated loops (allows t > total_time)
-            # At t=total_time, we complete one full cycle and return to u at t=startup_time
+            # Map loop time to spline parameter
             if loop_time > 0:
-                t_normalized = (t_loop % loop_time) / loop_time
+                if self.periodic:
+                    # Use modulo for repeated loops (allows t > total_time)
+                    t_normalized = (t_loop % loop_time) / loop_time
+                else:
+                    # Clamp for non-periodic: traverse once then hold at end
+                    t_normalized = min(t_loop / loop_time, 1.0)
 
                 # Start from where startup ended and traverse full u_range
                 u_startup_end = u_start + loop_speed * self.startup_time
@@ -361,9 +386,14 @@ class BSplineGateTrajectory:
 
             d2u_dt2 = 0.0
 
-        # Wrap parameter for periodic spline
-        if u >= u_max:
-            u = u_min + (u - u_min) % u_range
+        # Handle parameter bounds
+        if self.periodic:
+            # Wrap parameter for periodic spline
+            if u >= u_max:
+                u = u_min + (u - u_min) % u_range
+        else:
+            # Clamp parameter for non-periodic spline
+            u = np.clip(u, u_min, u_max - 1e-10)
 
         u = np.clip(u, u_min, u_max - 1e-10)
 
@@ -554,7 +584,7 @@ class BSplineGateTrajectory:
             'n_parameters': self.get_parameter_count(),
             'gate_size': self.gate_size,
             'gate_offset_scale': self.gate_offset_scale,
-            'spline_type': 'single_periodic'
+            'spline_type': 'single_periodic' if self.periodic else 'single_clamped'
         }
 
 

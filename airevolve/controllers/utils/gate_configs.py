@@ -26,6 +26,7 @@ class GateConfig:
     y_bounds = [-10, 10]
     z_bounds = [-2, 2]
     starting_pos = None  # Initial drone position
+    periodic = True  # Whether the trajectory loops back to gate 0
 
 
 class Figure8Gates(GateConfig):
@@ -70,7 +71,7 @@ class CircleGates(GateConfig):
 
 class SlalomGates(GateConfig):
     """Slalom gate configuration"""
-    num_gates = 20
+    num_gates = 100
     gate_pos = np.array([[x, (i % 2) * (1 if i % 4 == 1 else -1), 0]
                          for i, x in enumerate(range(0, num_gates*2, 2))],
                         dtype=np.float64)
@@ -79,6 +80,7 @@ class SlalomGates(GateConfig):
     y_bounds = np.array([-3, 3], dtype=np.float64)
     z_bounds = np.array([-1, 1], dtype=np.float64)
     starting_pos = np.array([0, -1, 0], dtype=np.float64)
+    periodic = False  # Slalom is a one-way linear path
 
 
 class BackAndForthGates(GateConfig):

@@ -41,15 +41,15 @@ def generate_knot_vector(n_control_points: int, degree: int,
         if n_internal < 1:
             raise ValueError(f"Need at least {degree+1} control points for degree {degree}")
 
-        # Create uniform internal knots from 1 to n_internal
-        # This ensures a non-zero parameter range even for minimal control points
+        # Create uniform internal knots strictly between 0 and max_knot
+        # For n CPs and degree p, we need n-p-1 distinct internal knots
         if n_internal == 1:
             # Minimal case: only boundary knots
             internal_knots = np.array([])
             max_knot = 1.0
         else:
             internal_knots = np.arange(1, n_internal)
-            max_knot = n_internal - 1
+            max_knot = n_internal
 
         # Add repeated boundary knots
         knots = np.concatenate([
