@@ -553,6 +553,7 @@ def evaluate_individual_curriculum(individual, ind_save_dir,
         verbose=False
     )
     if is_nan_individual(individual):
+        print(f"  [ind {num}] Repair failed: {repair_status}", flush=True)
         return 0
 
     # Save repaired genome so the actual evaluated design is preserved
@@ -571,6 +572,7 @@ def evaluate_individual_curriculum(individual, ind_save_dir,
     success = sim.static_success  # or spinning_success
 
     if not success:
+        print(f"  [ind {num}] Failed static hover check (static={sim.static_success})", flush=True)
         # Individual cannot hover - save morphology and return 0
         try:
             fig = plt.figure(figsize=plt.figaspect(0.5))
@@ -614,11 +616,12 @@ def evaluate_individual_curriculum(individual, ind_save_dir,
         )
     except (ValueError, RuntimeError) as e:
         # NaN propagation in simulation can cause PyTorch distribution errors
-        print(f"Hover training failed with error: {e}")
+        print(f"  [ind {num}] Hover training crashed: {e}", flush=True)
         return 0
 
     # CRITICAL: Check if hover threshold met
     if hover_success_rate < hover_success_threshold:
+        print(f"  [ind {num}] Hover threshold not met: {hover_success_rate:.2%} < {hover_success_threshold:.2%} ({actual_hover_timesteps:,} steps)", flush=True)
         # Failed to meet hover threshold - save morphology and return 0
         fig = plt.figure(figsize=plt.figaspect(0.5))
         ax = fig.add_subplot(111, projection='3d')
