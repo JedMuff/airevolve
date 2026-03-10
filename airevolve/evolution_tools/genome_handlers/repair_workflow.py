@@ -548,7 +548,11 @@ def repair_operation_process(
     if verbose:
         print("\n=== Repair Operation Process ===")
 
-    # Stage 1: Optimization Repair
+    # Default config: always fix motor orientation params (pitch=3, yaw=4)
+    if optimization_config is None:
+        optimization_config = OptimizationRepairConfig(fixed_params=[3, 4])
+
+    # Stage 1: Optimization Repair (fix collisions, preserve motor orientation)
     repaired, msg = stage1_optimization_repair(
         individual, coordinate_system, optimization_config, verbose
     )
@@ -560,10 +564,18 @@ def repair_operation_process(
             print(f"✗ Repair failed: {msg}\n")
         return nan_individual, msg
 
+    # If Stage 1 didn't change the genome (no collisions), the individual is
+    # already valid — skip Stages 2+3 to avoid breaking already-repaired genomes
+    # whose geometry may not survive the Stage 3 round-trip.
+    if np.array_equal(repaired, individual):
+        if verbose:
+            print("  No collisions found — skipping Stages 2+3\n")
+        return individual.copy(), "No repair needed: collision-free"
+
     if verbose:
         print(f"  Post-Stage 1 genome:\n{repaired}")
 
-    # Stage 2: Hover Check
+    # Stage 2: Hover Check (only after Stage 1 modified the genome)
     can_hover, msg = stage2_hover_check(repaired, verbose, allow_spinning_hover)
 
     if not can_hover:
