@@ -8,7 +8,9 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+from itertools import combinations
 from typing import Dict, List, Optional, Union
+from scipy.stats import mannwhitneyu, combine_pvalues
 
 
 def load_experiment_data(data_dir: str, experiment_names: Union[List[str], List[List[str]]]) -> Dict[str, pd.DataFrame]:
@@ -275,7 +277,7 @@ def plot_fitness_from_csv(ax, df: pd.DataFrame, gen_line: Optional[int] = None,
     ax.tick_params(axis='both', which='major', labelsize=tick_fontsize)
     
     if legend:
-        ax.legend()
+        ax.legend(fontsize=tick_fontsize)
     ax.grid()
     # ax.set_ylim([np.nanmin(mean_of_means) * 0.95, np.nanmax(mean_of_maxs) * 1.05])
 
@@ -380,41 +382,6 @@ def plot_grouped_experiments(experiment_data: Dict[str, pd.DataFrame],
         print(f"No data found for any experiments in row: {experiments_row}")
         return
     
-    # Find the maximum number of generations across all experiments in this row
-    max_generations = 40
-    # for exp_name in available_experiments:
-    #     max_gen = experiment_data[exp_name]['generation'].max()
-    #     max_generations = max(max_generations, max_gen)
-    
-    # Pre-calculate fitness limits across all experiments for proper scaling
-    all_mean_mins, all_mean_maxs, all_max_mins, all_max_maxs = [], [], [], []
-    
-    for exp_name in available_experiments:
-        df = experiment_data[exp_name]
-        agg_data = aggregate_runs_by_generation(df)
-        
-        max_fitness_data = agg_data['max_fitness']
-        mean_fitness_data = agg_data['mean_fitness']
-        
-        # Handle infinities and nans
-        max_fitness_data[max_fitness_data == -np.inf] = np.nan
-        max_fitness_data[max_fitness_data == np.inf] = np.nan
-        mean_fitness_data[mean_fitness_data == -np.inf] = np.nan
-        mean_fitness_data[mean_fitness_data == np.inf] = np.nan
-        
-        # Calculate statistics
-        mean_of_means = np.nanmean(mean_fitness_data, axis=1)
-        mean_of_maxs = np.nanmean(max_fitness_data, axis=1)
-        
-        all_mean_mins.append(np.nanmin(mean_of_means))
-        all_mean_maxs.append(np.nanmax(mean_of_means))
-        all_max_mins.append(np.nanmin(mean_of_maxs))
-        all_max_maxs.append(np.nanmax(mean_of_maxs))
-    
-    # Calculate overall limits
-    overall_min = min(min(all_mean_mins), min(all_max_mins))
-    overall_max = max(max(all_mean_maxs), max(all_max_maxs))
-    
     # Create fitness plot
     fig_fitness, ax_fitness = plt.subplots(1, 1, figsize=fitness_figsize)
     
@@ -429,9 +396,6 @@ def plot_grouped_experiments(experiment_data: Dict[str, pd.DataFrame],
                              ylabel_fontsize=ylabel_fontsize,
                              tick_fontsize=tick_fontsize)
     
-    # Set proper limits after all plots are added
-    ax_fitness.set_xlim(0, max_generations)
-    # ax_fitness.set_ylim([overall_min * 0.95, overall_max * 1.05])
     plt.tight_layout()
     
     # Save fitness plot
@@ -447,21 +411,6 @@ def plot_grouped_experiments(experiment_data: Dict[str, pd.DataFrame],
     
     # plt.show()
     
-    # Pre-calculate diversity limits across all experiments
-    all_diversity_mins, all_diversity_maxs = [], []
-    
-    for exp_name in available_experiments:
-        df = experiment_data[exp_name]
-        agg_data = aggregate_runs_by_generation(df)
-        diversity_data = agg_data['diversity']
-        
-        means = np.nanmean(diversity_data, axis=1)
-        valid_means = means[~np.isnan(means)]
-        
-        if len(valid_means) > 0:
-            all_diversity_mins.append(np.nanmin(valid_means))
-            all_diversity_maxs.append(np.nanmax(valid_means))
-    
     # Create diversity plot
     fig_diversity, ax_diversity = plt.subplots(1, 1, figsize=diversity_figsize)
     
@@ -473,13 +422,6 @@ def plot_grouped_experiments(experiment_data: Dict[str, pd.DataFrame],
                               xlabel_fontsize=xlabel_fontsize, 
                               ylabel_fontsize=ylabel_fontsize,
                               tick_fontsize=tick_fontsize)
-    
-    # Set proper limits after all plots are added
-    ax_diversity.set_xlim(0, max_generations)
-    if all_diversity_mins and all_diversity_maxs:
-        diversity_min = min(all_diversity_mins)
-        diversity_max = max(all_diversity_maxs)
-        # ax_diversity.set_ylim([diversity_min * 0.95, diversity_max * 1.05])
     
     plt.tight_layout()
     
@@ -505,15 +447,8 @@ def plot_comparison(experiment_data: Dict[str, pd.DataFrame],
                    tick_fontsize: int = 10):
     """Create separate comparison plots for fitness, diversity, and max fitness."""
     
-    colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink']
-    
-    # Find the maximum number of generations across all experiments
-    max_generations = 0
-    for exp_name in experiments_to_compare:
-        if exp_name in experiment_data:
-            max_gen = experiment_data[exp_name]['generation'].max()
-            max_generations = max(max_generations, max_gen)
-    
+    colors = ['#4477AA', '#EE6677', '#228833', '#CCBB44', '#AA3377', '#66CCEE', '#BBBBBB']
+
     # Create fitness comparison plot
     fig_fitness, ax_fitness = plt.subplots(1, 1, figsize=figsize)
     
@@ -529,31 +464,29 @@ def plot_comparison(experiment_data: Dict[str, pd.DataFrame],
                                 ylabel_fontsize=ylabel_fontsize,
                                 tick_fontsize=tick_fontsize)
     
-    ax_fitness.set_xlim(0, max_generations)
     plt.tight_layout()
-    
+
     if save_path:
-        plt.savefig(os.path.join(save_path, "fitness_comparison.png"), 
+        plt.savefig(os.path.join(save_path, "fitness_comparison.png"),
                    dpi=300, bbox_inches='tight')
         print("Saved fitness comparison plot")
-    
+
     # plt.show()
-    
+
     # Create diversity comparison plot
     fig_diversity, ax_diversity = plt.subplots(1, 1, figsize=figsize)
-    
+
     for i, exp_name in enumerate(experiments_to_compare):
         if exp_name in experiment_data:
             color = colors[i % len(colors)]
             df = experiment_data[exp_name]
-            
+
             # Plot diversity comparison
             plot_diversity_from_csv(ax_diversity, df, label=exp_name, color=color,
-                                  xlabel_fontsize=xlabel_fontsize, 
+                                  xlabel_fontsize=xlabel_fontsize,
                                   ylabel_fontsize=ylabel_fontsize,
                                   tick_fontsize=tick_fontsize)
-    
-    ax_diversity.set_xlim(0, max_generations)
+
     plt.tight_layout()
     
     if save_path:
@@ -593,9 +526,8 @@ def plot_comparison(experiment_data: Dict[str, pd.DataFrame],
     ax_max_fitness.set_xlabel('Generation', fontsize=xlabel_fontsize)
     ax_max_fitness.set_ylabel('Max Fitness', fontsize=ylabel_fontsize)
     ax_max_fitness.tick_params(axis='both', which='major', labelsize=tick_fontsize)
-    ax_max_fitness.legend()
+    ax_max_fitness.legend(fontsize=tick_fontsize)
     ax_max_fitness.grid()
-    ax_max_fitness.set_xlim(0, max_generations)
     
     plt.tight_layout()
     
@@ -605,6 +537,53 @@ def plot_comparison(experiment_data: Dict[str, pd.DataFrame],
         print("Saved max fitness comparison plot")
     
     # plt.show()
+
+
+def plot_median_max_fitness(experiment_data: Dict[str, pd.DataFrame],
+                           experiments_to_compare: List[str],
+                           colors: List[str],
+                           save_path: Optional[str] = None,
+                           figsize: tuple = (10, 6),
+                           xlabel_fontsize: int = 12, ylabel_fontsize: int = 12,
+                           tick_fontsize: int = 10):
+    """Plot median max fitness across runs with IQR shading."""
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+    for i, exp_name in enumerate(experiments_to_compare):
+        if exp_name not in experiment_data:
+            continue
+        color = colors[i % len(colors)]
+        df = experiment_data[exp_name]
+
+        agg_data = aggregate_runs_by_generation(df)
+        max_fitness_data = agg_data['max_fitness']
+
+        # Handle infinities and nans
+        max_fitness_data[max_fitness_data == -np.inf] = np.nan
+        max_fitness_data[max_fitness_data == np.inf] = np.nan
+
+        # Calculate median and IQR across runs for each generation
+        median = np.nanmedian(max_fitness_data, axis=1)
+        q25 = np.nanpercentile(max_fitness_data, 25, axis=1)
+        q75 = np.nanpercentile(max_fitness_data, 75, axis=1)
+
+        generations = np.arange(len(median))
+
+        ax.plot(generations, median, label=exp_name, color=color)
+        ax.fill_between(generations, q25, q75, alpha=0.2, color=color)
+
+    ax.set_xlabel('Generation', fontsize=xlabel_fontsize)
+    ax.set_ylabel('Max Fitness (Median)', fontsize=ylabel_fontsize)
+    ax.tick_params(axis='both', which='major', labelsize=tick_fontsize)
+    ax.legend(fontsize=tick_fontsize)
+    ax.grid()
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(os.path.join(save_path, "median_max_fitness_comparison.png"),
+                    dpi=300, bbox_inches='tight')
+        print("Saved median max fitness comparison plot")
 
 
 def generate_summary_statistics(experiment_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -635,30 +614,260 @@ def generate_summary_statistics(experiment_data: Dict[str, pd.DataFrame]) -> pd.
     return pd.DataFrame(summary_data)
 
 
+def run_significance_tests(experiment_data: Dict[str, pd.DataFrame], genome_names: List[str]) -> Dict:
+    """
+    Run pairwise Mann-Whitney U tests on final-generation fitness values between genomes.
+    Returns results with median values, U-statistic, p-values, and significance flags.
+    """
+    # Extract final-generation values per genome
+    final_values = {}
+    for name in genome_names:
+        if name not in experiment_data:
+            continue
+        df = experiment_data[name]
+        final_gen = df['generation'].max()
+        final_data = df[df['generation'] == final_gen]
+        final_values[name] = {
+            'max_fitness': final_data['max_fitness'].values,
+            'mean_fitness': final_data['mean_fitness'].values,
+        }
+
+    available = [n for n in genome_names if n in final_values]
+    pairs = list(combinations(available, 2))
+    n_comparisons = len(pairs)
+
+    results = {}
+    for metric in ['max_fitness', 'mean_fitness']:
+        results[metric] = []
+        for a, b in pairs:
+            vals_a = final_values[a][metric]
+            vals_b = final_values[b][metric]
+
+            # Filter out NaN values
+            vals_a = vals_a[~np.isnan(vals_a)]
+            vals_b = vals_b[~np.isnan(vals_b)]
+
+            if len(vals_a) < 2 or len(vals_b) < 2:
+                results[metric].append({
+                    'genome_a': a, 'genome_b': b,
+                    'median_a': np.nan, 'median_b': np.nan,
+                    'u_stat': np.nan, 'p_value': np.nan,
+                    'p_corrected': np.nan, 'significant': False,
+                })
+                continue
+
+            u_stat, p_value = mannwhitneyu(vals_a, vals_b, alternative='two-sided')
+            p_corrected = min(p_value * n_comparisons, 1.0)
+
+            results[metric].append({
+                'genome_a': a,
+                'genome_b': b,
+                'median_a': np.median(vals_a),
+                'median_b': np.median(vals_b),
+                'u_stat': u_stat,
+                'p_value': p_value,
+                'p_corrected': p_corrected,
+                'significant': p_corrected < 0.05,
+            })
+
+    return results
+
+
+def print_significance_table(results: Dict, task_name: str = ""):
+    """Print formatted significance test results for each metric."""
+    prefix = f" - {task_name}" if task_name else ""
+    for metric in ['max_fitness', 'mean_fitness']:
+        metric_label = metric.replace('_', ' ').title()
+        print(f"\nSIGNIFICANCE TESTS{prefix} - {metric_label} (Final Generation)")
+        print("-" * 110)
+        print(f"{'Comparison':<30} | {'Median A':>10} | {'Median B':>10} | {'U-stat':>10} | {'p-value':>10} | {'p-corrected':>12} | {'Significant':>11}")
+        print("-" * 110)
+        for r in results[metric]:
+            label = f"{r['genome_a']} vs {r['genome_b']}"
+            sig = "Yes" if r['significant'] else "No"
+            print(f"{label:<30} | {r['median_a']:>10.4f} | {r['median_b']:>10.4f} | {r['u_stat']:>10.1f} | {r['p_value']:>10.4f} | {r['p_corrected']:>12.4f} | {sig:>11}")
+        print("-" * 110)
+
+
+def generate_significance_latex_table(results: Dict, save_path: str, task_name: str = ""):
+    """Generate LaTeX table of significance test results and save to file."""
+    latex_lines = []
+    for metric in ['max_fitness', 'mean_fitness']:
+        metric_label = metric.replace('_', ' ').title()
+        label_suffix = metric.replace('_', '')
+        task_suffix = f"_{task_name}" if task_name else ""
+
+        latex_lines.append(f"\\begin{{table}}[htbp]")
+        latex_lines.append(f"\\centering")
+        latex_lines.append(f"\\caption{{Significance Tests - {metric_label}{' (' + task_name + ')' if task_name else ''}}}")
+        latex_lines.append(f"\\label{{tab:significance_{label_suffix}{task_suffix}}}")
+        latex_lines.append(f"\\begin{{tabular}}{{|l|c|c|c|c|c|c|}}")
+        latex_lines.append(f"\\hline")
+        latex_lines.append(f"\\textbf{{Comparison}} & \\textbf{{Median A}} & \\textbf{{Median B}} & \\textbf{{U-stat}} & \\textbf{{p-value}} & \\textbf{{p-corrected}} & \\textbf{{Sig.}} \\\\")
+        latex_lines.append(f"\\hline")
+
+        for r in results[metric]:
+            a_clean = r['genome_a'].replace('_', '\\_')
+            b_clean = r['genome_b'].replace('_', '\\_')
+            sig = "Yes" if r['significant'] else "No"
+            latex_lines.append(
+                f"{a_clean} vs {b_clean} & {r['median_a']:.4f} & {r['median_b']:.4f} & "
+                f"{r['u_stat']:.1f} & {r['p_value']:.4f} & {r['p_corrected']:.4f} & {sig} \\\\"
+            )
+            latex_lines.append("\\hline")
+
+        latex_lines.append("\\end{tabular}")
+        latex_lines.append("\\end{table}")
+        latex_lines.append("")
+
+    latex_table = "\n".join(latex_lines)
+    filepath = os.path.join(save_path, "significance_table.tex")
+    with open(filepath, 'w') as f:
+        f.write(latex_table)
+    print(f"LaTeX significance table saved to: {filepath}")
+
+
+def print_cross_task_summary(all_task_results: Dict[str, Dict], genome_names: List[str], save_path: Optional[str] = None):
+    """
+    Print cross-task pairwise win matrix and combined p-values (Fisher's method).
+
+    Args:
+        all_task_results: Dict mapping task_name -> significance test results
+        genome_names: List of genome names
+        save_path: Optional path to save LaTeX tables
+    """
+    available = genome_names
+    pairs = list(combinations(available, 2))
+    tasks = list(all_task_results.keys())
+    n_tasks = len(tasks)
+
+    for metric in ['max_fitness', 'mean_fitness']:
+        metric_label = metric.replace('_', ' ').title()
+
+        # Build win matrix: wins[a][b] = number of tasks where a significantly beats b
+        wins = {g: {g2: 0 for g2 in available} for g in available}
+
+        # Collect p-values per pair across tasks for Fisher's method
+        pair_pvalues = {(a, b): [] for a, b in pairs}
+
+        for task_name, results in all_task_results.items():
+            for r in results[metric]:
+                a, b = r['genome_a'], r['genome_b']
+                if not np.isnan(r['p_value']):
+                    pair_pvalues[(a, b)].append(r['p_value'])
+                if r['significant']:
+                    if r['median_a'] > r['median_b']:
+                        wins[a][b] += 1
+                    elif r['median_b'] > r['median_a']:
+                        wins[b][a] += 1
+
+        # Print win matrix
+        print(f"\nCROSS-TASK PAIRWISE WIN MATRIX - {metric_label}")
+        print("-" * (25 + 15 * len(available)))
+        header = f"{'':>20}" + "".join(f"{g:>15}" for g in available)
+        print(header)
+        for a in available:
+            row = f"{a:>20}"
+            for b in available:
+                if a == b:
+                    row += f"{'—':>15}"
+                else:
+                    row += f"{wins[a][b]}/{n_tasks}".rjust(15)
+            print(row)
+        print("-" * (25 + 15 * len(available)))
+
+        # Combined p-values (Fisher's method)
+        print(f"\nCOMBINED P-VALUES (Fisher's method) - {metric_label}")
+        print("-" * 70)
+        print(f"{'Comparison':<30} | {'Combined p-value':>16} | {'Significant':>11}")
+        print("-" * 70)
+
+        fisher_results = []
+        for a, b in pairs:
+            pvals = pair_pvalues[(a, b)]
+            if len(pvals) >= 2:
+                _, combined_p = combine_pvalues(pvals, method='fisher')
+            elif len(pvals) == 1:
+                combined_p = pvals[0]
+            else:
+                combined_p = np.nan
+
+            sig = "Yes" if combined_p < 0.05 else "No"
+            label = f"{a} vs {b}"
+            print(f"{label:<30} | {combined_p:>16.6f} | {sig:>11}")
+            fisher_results.append({
+                'genome_a': a, 'genome_b': b,
+                'combined_p': combined_p,
+                'significant': combined_p < 0.05,
+            })
+        print("-" * 70)
+
+        # Save LaTeX version
+        if save_path:
+            _save_cross_task_latex(wins, fisher_results, available, n_tasks, metric, metric_label, save_path)
+
+
+def _save_cross_task_latex(wins, fisher_results, available, n_tasks, metric, metric_label, save_path):
+    """Save cross-task significance results as LaTeX tables."""
+    latex_lines = []
+    label_suffix = metric.replace('_', '')
+
+    # Win matrix table
+    latex_lines.append("\\begin{table}[htbp]")
+    latex_lines.append("\\centering")
+    latex_lines.append(f"\\caption{{Cross-Task Pairwise Win Matrix - {metric_label}}}")
+    latex_lines.append(f"\\label{{tab:win_matrix_{label_suffix}}}")
+    col_spec = "|l|" + "c|" * len(available)
+    latex_lines.append(f"\\begin{{tabular}}{{{col_spec}}}")
+    latex_lines.append("\\hline")
+    header = " & ".join([""] + [g.replace('_', '\\_') for g in available]) + " \\\\"
+    latex_lines.append(header)
+    latex_lines.append("\\hline")
+    for a in available:
+        cells = [a.replace('_', '\\_')]
+        for b in available:
+            if a == b:
+                cells.append("---")
+            else:
+                cells.append(f"{wins[a][b]}/{n_tasks}")
+        latex_lines.append(" & ".join(cells) + " \\\\")
+        latex_lines.append("\\hline")
+    latex_lines.append("\\end{tabular}")
+    latex_lines.append("\\end{table}")
+    latex_lines.append("")
+
+    # Fisher's method table
+    latex_lines.append("\\begin{table}[htbp]")
+    latex_lines.append("\\centering")
+    latex_lines.append(f"\\caption{{Combined P-Values (Fisher's Method) - {metric_label}}}")
+    latex_lines.append(f"\\label{{tab:fisher_{label_suffix}}}")
+    latex_lines.append("\\begin{tabular}{|l|c|c|}")
+    latex_lines.append("\\hline")
+    latex_lines.append("\\textbf{Comparison} & \\textbf{Combined p-value} & \\textbf{Significant} \\\\")
+    latex_lines.append("\\hline")
+    for r in fisher_results:
+        a_clean = r['genome_a'].replace('_', '\\_')
+        b_clean = r['genome_b'].replace('_', '\\_')
+        sig = "Yes" if r['significant'] else "No"
+        latex_lines.append(f"{a_clean} vs {b_clean} & {r['combined_p']:.6f} & {sig} \\\\")
+        latex_lines.append("\\hline")
+    latex_lines.append("\\end{tabular}")
+    latex_lines.append("\\end{table}")
+
+    filepath = os.path.join(save_path, "cross_task_significance.tex")
+    with open(filepath, 'w') as f:
+        f.write("\n".join(latex_lines))
+    print(f"LaTeX cross-task significance tables saved to: {filepath}")
+
+
 def main():
-    """Main function to load data and create plots."""
-    
-    # Configuration
-    data_dir = "/media/jed/My Passport/airevolve030326/"
-    save_dir = "/media/jed/My Passport/airevolve030326/plots/"
+    """Main function to load data and create plots for v2 per-task comparisons."""
 
-    # All three experiment types
-    experiment_names_1d = [
-        "spherical",
-        "cppn",
-        "hybrid_cppn",
-    ]
+    base_dir = "/media/jed/My Passport/airevolve030326/v2"
+    tasks = ["backandforth", "figure8", "circle"]
+    experiment_names = ["spherical", "cppn", "hybrid_cppn"]
+    column_colors = ['#4477AA', '#EE6677', '#228833']  # Tol bright: blue, rose, green
 
-    # Custom colors for each row (optional)
-    column_colors = ['blue', 'red', 'green', 'orange', 'purple']
-
-    # Optional row names for better file naming
-    row_names = ['spherical', 'cppn', 'hybrid_cppn']
-
-    # Choose which experiment configuration to use
-    experiment_names = experiment_names_1d
-    use_2d_plotting = isinstance(experiment_names[0], list)
-    
     # Plot customization options
     fitness_figsize = (10, 6)
     diversity_figsize = (10, 6)
@@ -666,65 +875,59 @@ def main():
     xlabel_fontsize = 30
     ylabel_fontsize = 30
     tick_fontsize = 25
-    
-    # Create save directory if it doesn't exist
-    os.makedirs(save_dir, exist_ok=True)
-    
-    # Load all experiment data
-    print("Loading experiment data...")
-    experiment_data = load_experiment_data(data_dir, experiment_names)
-    
-    if not experiment_data:
-        print("No experiment data loaded. Please check your data directory and file paths.")
-        return
-    
-    # Calculate and print fitness improvements
-    print("\nCalculating fitness improvements...")
-    improvement_stats = calculate_fitness_improvement(experiment_data)
-    print_fitness_improvement_summary(improvement_stats)
-    
-    # Generate and save LaTeX table
-    if improvement_stats:
-        print("\nGenerating LaTeX table...")
-        latex_table = generate_latex_table(improvement_stats, save_dir)
-        print("\nLaTeX Table Code:")
-        print("="*50)
-        print(latex_table)
-        print("="*50)
-    
-    # Save improvement statistics to CSV
-    if improvement_stats:
-        improvement_df = pd.DataFrame(improvement_stats).T  # Transpose to have experiments as rows
-        improvement_df.to_csv(os.path.join(save_dir, "fitness_improvement_stats.csv"))
-        print(f"\nFitness improvement statistics saved to: {os.path.join(save_dir, 'fitness_improvement_stats.csv')}")
-    
-    # Generate summary statistics
-    print("\nGenerating summary statistics...")
-    summary_stats = generate_summary_statistics(experiment_data)
-    print(summary_stats)
-    
-    # Save summary statistics
-    summary_stats.to_csv(os.path.join(save_dir, "experiment_summary.csv"), index=False)
-    
-    # Create plots based on experiment configuration
-    if use_2d_plotting:
-        print("\nCreating grouped experiment plots (2D mode)...")
-        # Plot each row of experiments together
-        for row_idx, experiments_row in enumerate(experiment_names):
-            row_name = row_names[row_idx] if row_idx < len(row_names) else f"row_{row_idx}"
-            
-            print(f"Creating plots for row {row_idx} ({row_name}): {experiments_row}")
-            plot_grouped_experiments(experiment_data, experiments_row, 
-                                   column_colors=column_colors,
-                                   save_path=save_dir,
-                                   row_name=row_name,
-                                   fitness_figsize=fitness_figsize,
-                                   diversity_figsize=diversity_figsize,
-                                   xlabel_fontsize=xlabel_fontsize,
-                                   ylabel_fontsize=ylabel_fontsize,
-                                   tick_fontsize=tick_fontsize)
-        
-        # Also create individual plots for each experiment if desired
+
+    all_task_significance = {}
+
+    for task in tasks:
+        print(f"\n{'='*60}")
+        print(f"Task: {task}")
+        print(f"{'='*60}")
+
+        data_dir = os.path.join(base_dir, task)
+        save_dir = os.path.join(base_dir, "plots", task)
+        os.makedirs(save_dir, exist_ok=True)
+
+        # Load all genotype data for this task
+        print("Loading experiment data...")
+        experiment_data = load_experiment_data(data_dir, experiment_names)
+
+        if not experiment_data:
+            print(f"No experiment data loaded for task {task}. Skipping.")
+            continue
+
+        # Calculate and print fitness improvements
+        print("\nCalculating fitness improvements...")
+        improvement_stats = calculate_fitness_improvement(experiment_data)
+        print_fitness_improvement_summary(improvement_stats)
+
+        # Generate and save LaTeX table
+        if improvement_stats:
+            print("\nGenerating LaTeX table...")
+            latex_table = generate_latex_table(improvement_stats, save_dir)
+            print("\nLaTeX Table Code:")
+            print("="*50)
+            print(latex_table)
+            print("="*50)
+
+        # Save improvement statistics to CSV
+        if improvement_stats:
+            improvement_df = pd.DataFrame(improvement_stats).T
+            improvement_df.to_csv(os.path.join(save_dir, "fitness_improvement_stats.csv"))
+
+        # Generate summary statistics
+        print("\nGenerating summary statistics...")
+        summary_stats = generate_summary_statistics(experiment_data)
+        print(summary_stats)
+        summary_stats.to_csv(os.path.join(save_dir, "experiment_summary.csv"), index=False)
+
+        # Run significance tests
+        print("\nRunning significance tests...")
+        sig_results = run_significance_tests(experiment_data, experiment_names)
+        print_significance_table(sig_results, task_name=task)
+        generate_significance_latex_table(sig_results, save_dir, task_name=task)
+        all_task_significance[task] = sig_results
+
+        # Individual experiment plots
         print("\nCreating individual experiment plots...")
         for exp_name in experiment_data.keys():
             plot_single_experiment(experiment_data, exp_name, save_dir,
@@ -733,8 +936,20 @@ def main():
                                  xlabel_fontsize=xlabel_fontsize,
                                  ylabel_fontsize=ylabel_fontsize,
                                  tick_fontsize=tick_fontsize)
-        
-        # Create comparison plots across all experiments
+
+        # Grouped genotype comparison (all 3 genotypes overlaid)
+        print("\nCreating grouped genotype comparison plots...")
+        plot_grouped_experiments(experiment_data, experiment_names,
+                               column_colors=column_colors,
+                               save_path=save_dir,
+                               row_name=task,
+                               fitness_figsize=fitness_figsize,
+                               diversity_figsize=diversity_figsize,
+                               xlabel_fontsize=xlabel_fontsize,
+                               ylabel_fontsize=ylabel_fontsize,
+                               tick_fontsize=tick_fontsize)
+
+        # Comparison plots (fitness, diversity, max fitness)
         print("\nCreating comparison plots...")
         available_experiments = list(experiment_data.keys())
         plot_comparison(experiment_data, available_experiments, save_dir,
@@ -742,27 +957,24 @@ def main():
                        xlabel_fontsize=xlabel_fontsize,
                        ylabel_fontsize=ylabel_fontsize,
                        tick_fontsize=tick_fontsize)
-    
-    else:
-        print("\nCreating individual experiment plots (1D mode)...")
-        # Original behavior for 1D array
-        for exp_name in experiment_data.keys():
-            plot_single_experiment(experiment_data, exp_name, save_dir,
-                                 fitness_figsize=fitness_figsize,
-                                 diversity_figsize=diversity_figsize,
-                                 xlabel_fontsize=xlabel_fontsize,
-                                 ylabel_fontsize=ylabel_fontsize,
-                                 tick_fontsize=tick_fontsize)
-        
-        # Create comparison plots (now 3 separate figures)
-        print("\nCreating comparison plots...")
-        available_experiments = list(experiment_data.keys())
-        plot_comparison(experiment_data, available_experiments, save_dir,
-                       figsize=comparison_figsize,
-                       xlabel_fontsize=xlabel_fontsize,
-                       ylabel_fontsize=ylabel_fontsize,
-                       tick_fontsize=tick_fontsize)
-    
+
+        # Median max fitness plot
+        print("\nCreating median max fitness plot...")
+        plot_median_max_fitness(experiment_data, experiment_names, column_colors,
+                               save_path=save_dir, figsize=fitness_figsize,
+                               xlabel_fontsize=xlabel_fontsize,
+                               ylabel_fontsize=ylabel_fontsize,
+                               tick_fontsize=tick_fontsize)
+
+    # Cross-task significance summary
+    if all_task_significance:
+        print(f"\n{'='*60}")
+        print("CROSS-TASK SIGNIFICANCE SUMMARY")
+        print(f"{'='*60}")
+        cross_task_save_dir = os.path.join(base_dir, "plots")
+        os.makedirs(cross_task_save_dir, exist_ok=True)
+        print_cross_task_summary(all_task_significance, experiment_names, save_path=cross_task_save_dir)
+
     print("Plotting complete!")
 
 
