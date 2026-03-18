@@ -9,11 +9,11 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=31G
 
-## --- Job Array: 10 reps x 3 genotypes x 4 tasks = 120 jobs ---
+## --- Job Array: 10 reps x 3 genotypes x 3 tasks = 90 jobs ---
 ## Index layout: task varies fastest, then genotype, then rep
-## idx = rep * 12 + geno * 4 + task
+## idx = rep * 9 + geno * 3 + task
 ## e.g. 0=backandforth/spherical/r0, 1=figure8/spherical/r0, ...
-#SBATCH --array=0-119
+#SBATCH --array=0-89
 
 ## --- Slurm Job Logs ---
 #SBATCH --output=./out/%x_%A_%a.out
