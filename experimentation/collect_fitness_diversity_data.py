@@ -81,7 +81,9 @@ def load_phenotypes_from_dirs(run_path):
         for ind_entry in os.listdir(gen_path):
             if not ind_entry.startswith("individual_"):
                 continue
-            genome_file = os.path.join(gen_path, ind_entry, "genome.npy")
+            genome_file = os.path.join(gen_path, ind_entry, "phenotype.npy")
+            if not os.path.exists(genome_file):
+                genome_file = os.path.join(gen_path, ind_entry, "genome.npy")
             if not os.path.exists(genome_file):
                 continue
             try:
@@ -195,12 +197,12 @@ def process_experiment_runs(experiment_dir, experiment_name, save_dir,
         }
 
         if compute_diversity:
-            if genome_type == "spherical":
-                # Parse offspring column from CSV (string numpy arrays)
+            # Prefer loading phenotypes from genome.npy files in directory structure
+            pop_data = load_phenotypes_from_dirs(run_path)
+
+            if len(pop_data) == 0 and genome_type == "spherical" and 'offspring' in evo_data.columns:
+                # Fallback: parse offspring column from CSV (v1 spherical data)
                 pop_data = aggregate_population(evo_data)
-            else:
-                # CPPN / hybrid: load phenotypes from genome.npy files
-                pop_data = load_phenotypes_from_dirs(run_path)
 
             if len(pop_data) > 0:
                 diversity_data = calculate_diversity_data(pop_data)
@@ -231,31 +233,34 @@ def process_experiment_runs(experiment_dir, experiment_name, save_dir,
 def main():
     """Main function to process all experiments."""
 
-    # base_dir = "/media/jed/My Passport/airevolve030326"
-    base_dir = ".data/combined_hover_gate_circle_6arms_20260310_113449/"
+    base_dir = "/media/jed/My Passport/airevolve030326/v2"
 
-    # Define experiment directories and settings
-    experiments = {
-        # "spherical":   {"dir": os.path.join(base_dir, "spherical"),    "diversity": True,  "genome_type": "spherical"},
-        "cppn":        {"dir": os.path.join(base_dir, "cppn"),         "diversity": True,  "genome_type": "cppn"},
-        # "hybrid_cppn": {"dir": os.path.join(base_dir, "hybrid_cppn"),  "diversity": True,  "genome_type": "hybrid_cppn"},
-    }
+    tasks = ["backandforth", "figure8", "circle", "slalom"]
+    genotypes = [
+        {"name": "spherical",   "diversity": True, "genome_type": "spherical"},
+        {"name": "cppn",        "diversity": True, "genome_type": "cppn"},
+        {"name": "hybrid_cppn", "diversity": True, "genome_type": "hybrid_cppn"},
+    ]
 
-    # Output directory for CSV files
-    save_dir = base_dir
-
-    # Process each experiment
     all_experiment_data = []
 
-    for experiment_name, cfg in experiments.items():
-        os.makedirs(os.path.join(save_dir, experiment_name), exist_ok=True)
-        experiment_data = process_experiment_runs(
-            cfg["dir"], experiment_name, save_dir,
-            compute_diversity=cfg["diversity"],
-            genome_type=cfg["genome_type"],
-        )
-        if experiment_data is not None:
-            all_experiment_data.append(experiment_data)
+    for task in tasks:
+        print(f"\n{'='*60}")
+        print(f"Task: {task}")
+        print(f"{'='*60}")
+
+        for geno in genotypes:
+            experiment_dir = os.path.join(base_dir, task, geno["name"])
+            save_dir = os.path.join(base_dir, task)
+            os.makedirs(os.path.join(save_dir, geno["name"]), exist_ok=True)
+
+            experiment_data = process_experiment_runs(
+                experiment_dir, geno["name"], save_dir,
+                compute_diversity=geno["diversity"],
+                genome_type=geno["genome_type"],
+            )
+            if experiment_data is not None:
+                all_experiment_data.append(experiment_data)
 
     print("Processing complete!")
 

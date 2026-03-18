@@ -63,51 +63,82 @@ def load_experiment_data(experiment_dirs):
     return all_data
 
 def load_individual_morphologies(md_df, exp_dir):
-    """Load individual morphology data and merge with morphological descriptors."""
+    """Load individual morphology data and merge with morphological descriptors.
+
+    Supports both v2 format (phenotype.npy files in generation/individual dirs)
+    and v1 format (offspring column in evolution_data.csv).
+    """
     # Get all run directories
-    run_dirs = [d for d in os.listdir(exp_dir) if d != ".DS_Store" and os.path.isdir(os.path.join(exp_dir, d))]
-    
+    run_dirs = sorted([d for d in os.listdir(exp_dir)
+                       if d != ".DS_Store" and os.path.isdir(os.path.join(exp_dir, d))])
+
     # Dictionary to store individual morphologies
     morphology_data = {}
-    
+
     for run_idx, run_dir in enumerate(run_dirs):
         run_path = os.path.join(exp_dir, run_dir)
-        evolution_data_path = os.path.join(run_path, "evolution_data.csv")
-        
-        if os.path.exists(evolution_data_path):
-            try:
-                evo_data = pd.read_csv(evolution_data_path)
-                
-                # Process each row to extract individual morphologies
-                for idx, row in evo_data.iterrows():
-                    generation = row['generation']
-                    offspring_str = row['offspring']
-                    
-                    # Convert offspring string to array
-                    try:
-                        offspring_array = convert_str_to_nparray(offspring_str)
-                        key = (run_idx, generation, idx % 24)  # Assuming max 24 individuals per generation
-                        morphology_data[key] = offspring_array
-                    except:
-                        continue
-                        
-            except Exception as e:
-                print(f"    Warning: Could not load evolution data from {run_path}: {e}")
+
+        # Try v2 format: load from phenotype.npy files
+        loaded_from_dirs = False
+        for gen_entry in os.listdir(run_path):
+            gen_m = re.match(r"generation_(\d+)$", gen_entry)
+            if not gen_m:
                 continue
-    
+            gen_idx = int(gen_m.group(1))
+            gen_path = os.path.join(run_path, gen_entry)
+            if not os.path.isdir(gen_path):
+                continue
+
+            for ind_entry in sorted(os.listdir(gen_path)):
+                if not ind_entry.startswith("individual_"):
+                    continue
+                ind_idx = int(ind_entry.replace("individual_", ""))
+
+                phenotype_file = os.path.join(gen_path, ind_entry, "phenotype.npy")
+                if not os.path.exists(phenotype_file):
+                    phenotype_file = os.path.join(gen_path, ind_entry, "genome.npy")
+                if not os.path.exists(phenotype_file):
+                    continue
+
+                try:
+                    phenotype = np.load(phenotype_file)
+                    if phenotype.ndim == 2 and not np.isnan(phenotype).all():
+                        morphology_data[(run_idx, gen_idx, ind_idx)] = phenotype
+                        loaded_from_dirs = True
+                except Exception:
+                    continue
+
+        # Fallback: v1 format — parse offspring column from CSV
+        if not loaded_from_dirs:
+            evolution_data_path = os.path.join(run_path, "evolution_data.csv")
+            if os.path.exists(evolution_data_path):
+                try:
+                    evo_data = pd.read_csv(evolution_data_path)
+                    if 'offspring' in evo_data.columns:
+                        for idx, row in evo_data.iterrows():
+                            generation = row['generation']
+                            try:
+                                offspring_array = convert_str_to_nparray(row['offspring'])
+                                key = (run_idx, generation, idx % 24)
+                                morphology_data[key] = offspring_array
+                            except Exception:
+                                continue
+                except Exception as e:
+                    print(f"    Warning: Could not load evolution data from {run_path}: {e}")
+
     # Add morphology data to the morphological descriptors dataframe
     offspring_list = []
     for idx, row in md_df.iterrows():
         run_id = row['run']
-        generation = row['generation'] 
+        generation = row['generation']
         individual_id = row['individual']
-        
+
         key = (run_id, generation, individual_id)
         if key in morphology_data:
             offspring_list.append(str(morphology_data[key].tolist()))
         else:
             offspring_list.append(np.nan)
-    
+
     md_df['offspring'] = offspring_list
     return md_df
 
@@ -522,12 +553,12 @@ def plot_combined_metrics_vs_fitness_with_dominance(all_data, save_dir=None,
     """Plot combined metrics vs fitness with task dominance based on fitness levels and morphology examples."""
     metrics = ['Central_Asymmetry', 'Bilateral_Asymmetry']
     
-    # Task name mapping
+    # Name mapping (identity for v2 genotype names, kept for backward compat)
     task_name_mapping = {
         "asym_circle": "Circle",
-        "asym_slalom": "Slalom", 
+        "asym_slalom": "Slalom",
         "asym_backnforth": "Shuttlerun",
-        "asym_figure8": "Figure 8"
+        "asym_figure8": "Figure 8",
     }
     
     for metric in metrics:
@@ -566,12 +597,11 @@ def plot_combined_metrics_vs_fitness_with_dominance(all_data, save_dir=None,
         for task, max_fit in sorted_tasks:
             print(f"  {task}: {max_fit:.3f}")
         
-        # Define colors for each task
+        # Define colors for each experiment
+        color_list = ['#4477AA', '#EE6677', '#228833', '#CCBB44', '#AA3377', '#66CCEE']
         task_colors = {
-            sorted_tasks[0][0]: 'red',
-            sorted_tasks[1][0]: 'blue', 
-            sorted_tasks[2][0]: 'green',
-            sorted_tasks[3][0]: 'orange'
+            sorted_tasks[i][0]: color_list[i % len(color_list)]
+            for i in range(len(sorted_tasks))
         }
         
         # Create fitness ranges for dominance
@@ -638,8 +668,8 @@ def plot_combined_metrics_vs_fitness_with_dominance(all_data, save_dir=None,
                 ax_main.plot(fit_range, p(fit_range), '--', 
                            color=task_colors[task_name], alpha=0.9, linewidth=2)
             
-            # Collect morphology examples ONLY for figure8 task
-            if task_name == 'Figure 8':
+            # Collect morphology examples for the first experiment that has data
+            if task_name not in task_morphology_examples:
                 # Calculate fitness threshold (75th percentile) for high-fitness examples
                 fitness_threshold = np.percentile(data['fitness'], 75)
                 high_fitness_data = data[data['fitness'] >= fitness_threshold]
@@ -812,16 +842,15 @@ def create_legend_figure(task_colors, sorted_tasks, save_dir=None, metric='', le
                                      linestyle=line_style, linewidth=2, alpha=0.7,
                                      label=f'{task} max: {max_fit:.2f}'))
     
-    # Morphology markers (only for figure8)
-    if 'figure8' in task_colors:
-        legend_elements.append(Line2D([0], [0], marker='v', color='w', 
-                                     markerfacecolor=task_colors['figure8'], 
-                                     markersize=10, markeredgecolor='black',
-                                     label='Low metric example (figure8)', linestyle='None'))
-        legend_elements.append(Line2D([0], [0], marker='^', color='w', 
-                                     markerfacecolor=task_colors['figure8'], 
-                                     markersize=10, markeredgecolor='black',
-                                     label='High metric example (figure8)', linestyle='None'))
+    # Morphology markers
+    legend_elements.append(Line2D([0], [0], marker='v', color='w',
+                                 markerfacecolor='gray',
+                                 markersize=10, markeredgecolor='black',
+                                 label='Low metric example', linestyle='None'))
+    legend_elements.append(Line2D([0], [0], marker='^', color='w',
+                                 markerfacecolor='gray',
+                                 markersize=10, markeredgecolor='black',
+                                 label='High metric example', linestyle='None'))
     
     # Create the legend with multiple columns
     legend = ax_legend.legend(handles=legend_elements, loc='center', 
@@ -865,36 +894,43 @@ def create_correlation_heatmap(all_data, save_dir=None):
 
 def main():
     """Main analysis function."""
-    # Define experiment directories (modify these paths as needed)
-    base_dir = "/media/jed/My Passport/airevolve030326"
-    experiment_dirs = {
-        "spherical": os.path.join(base_dir, "spherical/"),
-    }
+    base_dir = "/media/jed/My Passport/airevolve030326/v2"
 
-    # Set output directory for saving plots and results
-    output_dir = os.path.join(base_dir, "analysis_results/")
-    os.makedirs(output_dir, exist_ok=True)
-    
-    print("Loading experiment data...")
-    all_data = load_experiment_data(experiment_dirs)
-    
-    if not all_data:
-        print("No data loaded. Check your file paths.")
-        return
-    
-    print(f"\nLoaded data from {len(all_data)} experiments")
-    
-    # Create visualizations
-    print("\nGenerating plots...")
-    # plot_metrics_over_generations(all_data, output_dir)
-    # plot_metrics_vs_fitness(all_data, output_dir)  # Individual task plots
-    plot_combined_metrics_vs_fitness_with_dominance(all_data, output_dir)  # Combined smart plots
-    create_correlation_heatmap(all_data, output_dir)
-    
-    # Perform statistical analysis
-    correlation_results = statistical_analysis(all_data, output_dir)
-    
-    print(f"\nAnalysis complete! Results saved to: {output_dir}")
+    tasks = ["backandforth", "figure8", "circle", "slalom"]
+    genotypes = ["spherical", "cppn", "hybrid_cppn"]
+
+    for task in tasks:
+        print(f"\n{'='*60}")
+        print(f"Task: {task}")
+        print(f"{'='*60}")
+
+        experiment_dirs = {}
+        for genotype in genotypes:
+            exp_dir = os.path.join(base_dir, task, genotype)
+            if os.path.exists(exp_dir):
+                experiment_dirs[genotype] = exp_dir
+
+        output_dir = os.path.join(base_dir, "plots", task)
+        os.makedirs(output_dir, exist_ok=True)
+
+        print("Loading experiment data...")
+        all_data = load_experiment_data(experiment_dirs)
+
+        if not all_data:
+            print(f"No data loaded for task {task}. Skipping.")
+            continue
+
+        print(f"\nLoaded data from {len(all_data)} experiments")
+
+        # Create visualizations
+        print("\nGenerating plots...")
+        plot_combined_metrics_vs_fitness_with_dominance(all_data, output_dir)
+        create_correlation_heatmap(all_data, output_dir)
+
+        # Perform statistical analysis
+        correlation_results = statistical_analysis(all_data, output_dir)
+
+        print(f"\nAnalysis complete for {task}! Results saved to: {output_dir}")
 
 if __name__ == "__main__":
     main()

@@ -284,22 +284,25 @@ def process_experiment(experiment_name, experiment_dir, output_dir):
 
 
 def main():
-    base_dir = "/media/jed/My Passport/airevolve030326"
-    output_dir = os.path.join(base_dir, "plots", "genome_visualizations")
+    base_dir = "/media/jed/My Passport/airevolve030326/v2"
+    tasks = ["backandforth", "figure8", "circle", "slalom"]
+    genotype_names = ["spherical", "cppn", "hybrid_cppn"]
 
-    experiments = {
-        "spherical": os.path.join(base_dir, "spherical"),
-        "cppn": os.path.join(base_dir, "cppn"),
-        "hybrid_cppn": os.path.join(base_dir, "hybrid_cppn"),
-    }
+    for task in tasks:
+        print(f"\n{'='*60}")
+        print(f"Task: {task}")
+        print(f"{'='*60}")
 
-    for experiment_name, experiment_dir in experiments.items():
-        if not os.path.exists(experiment_dir):
-            print(f"Skipping {experiment_name}: directory not found")
-            continue
+        for genotype_name in genotype_names:
+            experiment_dir = os.path.join(base_dir, task, genotype_name)
+            output_dir = os.path.join(base_dir, "plots", task, "genome_visualizations")
 
-        print(f"Processing {experiment_name}...")
-        process_experiment(experiment_name, experiment_dir, output_dir)
+            if not os.path.exists(experiment_dir):
+                print(f"Skipping {task}/{genotype_name}: directory not found")
+                continue
+
+            print(f"Processing {task}/{genotype_name}...")
+            process_experiment(genotype_name, experiment_dir, output_dir)
 
     print("Done!")
 

@@ -12,7 +12,7 @@ import shutil
 
 
 # Source directory
-SRC_DIR = os.path.expanduser("~/workspaces/airevolve/tmp/airevolve_data_180226")
+SRC_DIR = os.path.expanduser("~/workspaces/airevolve/tmp/combined_hg/")
 # Target directory on external drive
 DST_DIR = "/media/jed/My Passport/airevolve030326"
 
@@ -43,26 +43,55 @@ def parse_dir_name(name):
         subdir = f"spherical/run_{m.group(1)}_{m.group(2)}"
         return subdir, f"spherical run_{m.group(1)}_{m.group(2)}"
 
+    # combined_hg_{task}_{genotype}_rep{N}_{jobid}_{arrayid}
+    m = re.match(r"combined_hg_(\w+?)_(spherical|cppn|hybrid-cppn)_rep(\d+)_\d+_\d+$", name)
+    if m:
+        task = m.group(1)
+        genotype = m.group(2).replace("-", "_")
+        rep = m.group(3)
+        # Return group dir (without rep) so main() can assign the next available rep
+        return f"v2/{task}/{genotype}", f"v2 {task}/{genotype} rep{rep}"
+
     return None, f"unrecognized pattern: {name}"
 
 
+def next_available_rep(group_dir, assigned_reps):
+    """Return the next available rep number for a group directory.
+
+    Scans group_dir for existing rep{N} subdirectories, also considers
+    reps already assigned in this run (tracked in assigned_reps dict),
+    and returns the next free number.
+    """
+    existing = set(assigned_reps.get(group_dir, []))
+    if os.path.isdir(group_dir):
+        for d in os.listdir(group_dir):
+            m = re.match(r"rep(\d+)$", d)
+            if m:
+                existing.add(int(m.group(1)))
+    next_rep = 0
+    while next_rep in existing:
+        next_rep += 1
+    assigned_reps.setdefault(group_dir, []).append(next_rep)
+    return next_rep
+
+
 def find_inner_run(src_path):
-    """Unwrap the lee_tuning_runs/{actual_run}/ nesting.
+    """Unwrap the lee_tuning_runs/ or combined_hover_gate_runs/ nesting.
 
     Returns the path to the innermost run directory, or None.
     """
-    runs_dir = os.path.join(src_path, "lee_tuning_runs")
-    if not os.path.isdir(runs_dir):
-        return None
+    for runs_subdir in ("lee_tuning_runs", "combined_hover_gate_runs"):
+        runs_dir = os.path.join(src_path, runs_subdir)
+        if not os.path.isdir(runs_dir):
+            continue
 
-    subdirs = [d for d in os.listdir(runs_dir)
-               if os.path.isdir(os.path.join(runs_dir, d))]
-    if len(subdirs) == 1:
-        return os.path.join(runs_dir, subdirs[0])
-    elif len(subdirs) > 1:
-        # Multiple runs — shouldn't happen, but pick alphabetically first
-        subdirs.sort()
-        return os.path.join(runs_dir, subdirs[0])
+        subdirs = [d for d in os.listdir(runs_dir)
+                   if os.path.isdir(os.path.join(runs_dir, d))]
+        if len(subdirs) == 1:
+            return os.path.join(runs_dir, subdirs[0])
+        elif len(subdirs) > 1:
+            subdirs.sort()
+            return os.path.join(runs_dir, subdirs[0])
     return None
 
 
@@ -92,6 +121,7 @@ def main():
     copied = 0
     skipped = 0
     errors = 0
+    assigned_reps = {}  # track reps assigned in this run to avoid collisions
 
     for entry in entries:
         src_path = os.path.join(args.src, entry)
@@ -106,6 +136,12 @@ def main():
 
         dst_path = os.path.join(args.dst, target_subdir)
 
+        # For v2 combined_hg entries, assign the next available rep number
+        if target_subdir.startswith("v2/"):
+            next_rep = next_available_rep(dst_path, assigned_reps)
+            target_subdir = f"{target_subdir}/rep{next_rep}"
+            dst_path = os.path.join(args.dst, target_subdir)
+
         # Check if target already has data
         if os.path.exists(os.path.join(dst_path, "evolution_data.csv")):
             print(f"  EXISTS {entry} -> {target_subdir}")
@@ -115,7 +151,7 @@ def main():
         # Find the inner run directory
         inner_run = find_inner_run(src_path)
         if inner_run is None:
-            print(f"  ERROR {entry}: no lee_tuning_runs/ subdirectory found")
+            print(f"  ERROR {entry}: no lee_tuning_runs/ or combined_hover_gate_runs/ subdirectory found")
             errors += 1
             continue
 

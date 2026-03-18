@@ -15,7 +15,7 @@ from airevolve.evolution_tools.evaluators.edit_distance import compute_edit_dist
 
 def detect_genome_type(evo_data):
     """Detect genome type from the offspring column content."""
-    sample = str(evo_data['offspring'].iloc[0])
+    sample = str(evo_data['genome'].iloc[0])
     if sample.startswith("CPPNNetwork("):
         return "cppn"
     if sample.startswith("HybridGenome("):
@@ -186,13 +186,10 @@ def collect_best_individuals_from_experiment_parallel(experiment_dir, k=3, simil
 def main():
     """Main function with performance optimizations."""
 
-    # Define experiment directories
-    base_dir = "/media/jed/My Passport/airevolve030326"
-    experiment_dirs = {
-        "spherical": os.path.join(base_dir, "spherical"),
-        "cppn": os.path.join(base_dir, "cppn"),
-        "hybrid_cppn": os.path.join(base_dir, "hybrid_cppn"),
-    }
+    base_dir = "/media/jed/My Passport/airevolve030326/v2"
+
+    tasks = ["backandforth", "figure8", "circle", "slalom"]
+    genotype_names = ["spherical", "cppn", "hybrid_cppn"]
 
     # Parameters
     k_best = 10
@@ -202,38 +199,42 @@ def main():
 
     total_start_time = time.time()
 
-    # Process each experiment
-    for experiment_name, experiment_dir in experiment_dirs.items():
-        if not os.path.exists(experiment_dir):
-            print(f"Warning: Directory {experiment_dir} does not exist")
-            continue
+    for task in tasks:
+        print(f"\n{'='*60}")
+        print(f"Task: {task}")
+        print(f"{'='*60}")
 
-        start_time = time.time()
+        for genotype_name in genotype_names:
+            experiment_dir = os.path.join(base_dir, task, genotype_name)
 
-        # Collect best individuals data using parallel processing
-        best_individuals_data = collect_best_individuals_from_experiment_parallel(
-            experiment_dir,
-            k=k_best,
-            similarity_threshold=similarity_threshold,
-            use_similarity=use_similarity,
-            n_processes=n_processes
-        )
+            if not os.path.exists(experiment_dir):
+                print(f"Warning: Directory {experiment_dir} does not exist")
+                continue
 
-        processing_time = time.time() - start_time
+            start_time = time.time()
 
-        if not best_individuals_data:
-            print(f"No data found for experiment {experiment_name}")
-            continue
+            best_individuals_data = collect_best_individuals_from_experiment_parallel(
+                experiment_dir,
+                k=k_best,
+                similarity_threshold=similarity_threshold,
+                use_similarity=use_similarity,
+                n_processes=n_processes
+            )
 
-        # Create DataFrame and save
-        df = pd.DataFrame(best_individuals_data)
-        output_file = os.path.join(experiment_dir, "best_individual_data.csv")
-        df.to_csv(output_file, index=False)
+            processing_time = time.time() - start_time
 
-        print(f"Saved {len(best_individuals_data)} best individuals to {output_file}")
-        print(f"Best fitness found: {df['fitness'].max():.4f}")
-        print(f"Processing time: {processing_time:.2f} seconds")
-        print("-" * 50)
+            if not best_individuals_data:
+                print(f"No data found for {task}/{genotype_name}")
+                continue
+
+            df = pd.DataFrame(best_individuals_data)
+            output_file = os.path.join(experiment_dir, "best_individual_data.csv")
+            df.to_csv(output_file, index=False)
+
+            print(f"Saved {len(best_individuals_data)} best individuals to {output_file}")
+            print(f"Best fitness found: {df['fitness'].max():.4f}")
+            print(f"Processing time: {processing_time:.2f} seconds")
+            print("-" * 50)
 
     total_time = time.time() - total_start_time
     print(f"Total processing time: {total_time:.2f} seconds")

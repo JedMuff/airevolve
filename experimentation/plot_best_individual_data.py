@@ -282,60 +282,57 @@ def generate_summary_figure(experiment_dir, top_n=6, output_subdir="blueprints")
 
 def main():
     """
-    Main function to generate blueprints for all experiments.
+    Main function to generate blueprints for all v2 experiments.
     """
-    
-    # Define experiment directories (same as in your collection script)
-    base_dir = "/media/jed/My Passport/airevolve030326"
-    experiment_dirs = {
-        "spherical": os.path.join(base_dir, "spherical"),
-    }
-    
+
+    base_dir = "/media/jed/My Passport/airevolve030326/v2"
+    tasks = ["backandforth", "figure8", "circle", "slalom"]
+    genotype_names = ["spherical", "cppn", "hybrid_cppn"]
+
     # Parameters
-    max_individuals_per_experiment = 15  # Limit to avoid too many files
+    max_individuals_per_experiment = 15
     generate_summary = True
-    dpi = 300  # High resolution for publication quality
-    
+    dpi = 300
+
     total_start_time = time.time()
-    
-    # Process each experiment
-    for experiment_name, experiment_dir in experiment_dirs.items():
-        if not os.path.exists(experiment_dir):
-            print(f"Warning: Directory {experiment_dir} does not exist")
-            continue
-        
-        print(f"\n{'='*60}")
-        print(f"Processing experiment: {experiment_name}")
-        print(f"Directory: {experiment_dir}")
-        print(f"{'='*60}")
-        
-        start_time = time.time()
-        
-        try:
-            # Generate individual blueprints
-            generate_blueprints_for_experiment(
-                experiment_dir, 
-                max_individuals=max_individuals_per_experiment,
-                dpi=dpi
-            )
-            
-            # Generate summary figure
-            if generate_summary:
-                generate_summary_figure(experiment_dir, top_n=6)
-            
-            # Save designs as numpy arrays text file
-            save_designs_as_numpy_arrays(
-                experiment_dir,
-                max_individuals=max_individuals_per_experiment
-            )
-            
-        except Exception as e:
-            print(f"Error processing experiment {experiment_name}: {e}")
-            continue
-        
-        processing_time = time.time() - start_time
-        print(f"Processing time for {experiment_name}: {processing_time:.2f} seconds")
-    
+
+    for task in tasks:
+        for genotype_name in genotype_names:
+            experiment_dir = os.path.join(base_dir, task, genotype_name)
+
+            if not os.path.exists(experiment_dir):
+                print(f"Warning: Directory {experiment_dir} does not exist")
+                continue
+
+            print(f"\n{'='*60}")
+            print(f"Processing: {task}/{genotype_name}")
+            print(f"Directory: {experiment_dir}")
+            print(f"{'='*60}")
+
+            start_time = time.time()
+
+            try:
+                generate_blueprints_for_experiment(
+                    experiment_dir,
+                    max_individuals=max_individuals_per_experiment,
+                    dpi=dpi
+                )
+
+                if generate_summary:
+                    generate_summary_figure(experiment_dir, top_n=6)
+
+                save_designs_as_numpy_arrays(
+                    experiment_dir,
+                    max_individuals=max_individuals_per_experiment
+                )
+
+            except Exception as e:
+                print(f"Error processing {task}/{genotype_name}: {e}")
+                continue
+
+            processing_time = time.time() - start_time
+            print(f"Processing time: {processing_time:.2f} seconds")
+
     total_time = time.time() - total_start_time
     print(f"\nTotal processing time: {total_time:.2f} seconds")
     print("Blueprint generation completed!")
