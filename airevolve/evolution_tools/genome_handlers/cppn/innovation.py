@@ -30,6 +30,16 @@ class InnovationCounter:
             self._global_counter += 1
         return self._generation_cache[key]
 
+    def next_innovation(self) -> int:
+        """Return the next innovation number without caching.
+
+        Use this for structural mutations that have no natural cache key
+        (e.g. arm additions in the spherical encoding).
+        """
+        inno = self._global_counter
+        self._global_counter += 1
+        return inno
+
     def reset_generation(self) -> None:
         """Clear the per-generation cache. Call at the start of each generation."""
         self._generation_cache.clear()
