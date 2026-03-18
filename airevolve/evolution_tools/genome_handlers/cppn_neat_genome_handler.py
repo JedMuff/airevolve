@@ -19,6 +19,8 @@ from .cppn.innovation import InnovationCounter
 from .cppn.evaluation import evaluate_cppn
 from .cppn.segment_decoder import decode_cppn_to_phenotype
 from .cppn.mutations import mutate_cppn
+from .cppn.crossover import crossover_cppn
+from .cppn.compatibility import cppn_compatibility_distance
 from .operators import SphericalRepairOperator, RepairConfig
 
 
@@ -81,6 +83,7 @@ class CPPNNeatDroneGenomeHandler(GenomeHandler):
         rng: Optional[np.random.Generator] = None,
     ) -> None:
         # --- Do NOT call super().__init__() ---
+        self.fitness: float | None = None
         self.rng = rng if rng is not None else np.random.default_rng()
 
         self.num_segments = num_segments
@@ -176,18 +179,12 @@ class CPPNNeatDroneGenomeHandler(GenomeHandler):
     ]
 
     def _generate_random_genome(self) -> CPPNNetwork:
-        """Create a CPPN with random output biases and initial hidden nodes.
+        """Create a CPPN with input and output nodes only (no connections).
 
-        The base topology is fully-connected (2 inputs x 7 outputs).  On top
-        of that:
-
-        * Each output node receives a random bias so the network starts with
-          varied base values.  The ``arm_present`` output (index 0) gets a
-          positive bias to encourage arm placement.
-        * ``initial_hidden_nodes`` hidden nodes are inserted by splitting
-          random connections, using spatially-interesting activations (SIN,
-          COS, GAUSSIAN, …) so there is segment-dependent variation from the
-          start.
+        The network starts empty — structure is grown from scratch through
+        add-connection and add-node mutations during evolution.  Each output
+        node receives a random bias so the network starts with varied base
+        values.
         """
         net = CPPNNetwork()
 
@@ -202,75 +199,18 @@ class CPPNNeatDroneGenomeHandler(GenomeHandler):
                 input_label=label,
             )
 
-        # --- Output nodes (tanh) with random biases ---
+        # --- Output nodes (zero bias so all initial individuals are identical) ---
         for j in range(_N_OUTPUTS):
             nid = _N_INPUTS + j
-            if j == 0:
-                # arm_present: positive bias so arms are placed by default
-                bias = self.rng.uniform(-self.bias_range, self.bias_range) # uniform(0.5, 1.5)
-            else:
-                bias = self.rng.uniform(-self.bias_range, self.bias_range)
             net.nodes[nid] = NodeGene(
                 node_id=nid,
                 node_type=NodeType.OUTPUT,
                 activation=ActivationFunction.SIN,
-                bias=bias,
+                bias=0.0,
                 output_index=j,
             )
 
         net.next_node_id = _N_INPUTS + _N_OUTPUTS
-
-        # --- Fully-connected input→output edges ---
-        for i in range(_N_INPUTS):
-            for j in range(_N_OUTPUTS):
-                tgt = _N_INPUTS + j
-                inn = self._innovation_counter.get_innovation(i, tgt)
-                net.connections[inn] = ConnectionGene(
-                    innovation_number=inn,
-                    source_id=i,
-                    target_id=tgt,
-                    weight=self.rng.uniform(-self.weight_range, self.weight_range),
-                    enabled=True,
-                )
-
-        # --- Insert initial hidden nodes by splitting random connections ---
-        n_hidden = self.rng.integers(0, self.initial_hidden_nodes + 1)
-        for _ in range(n_hidden):
-            enabled = net.get_enabled_connections()
-            if not enabled:
-                break
-            conn = enabled[self.rng.integers(len(enabled))]
-            conn.enabled = False
-
-            new_id = net.next_node_id
-            net.next_node_id += 1
-
-            activation = self._HIDDEN_ACTIVATIONS[
-                self.rng.integers(len(self._HIDDEN_ACTIVATIONS))
-            ]
-            net.nodes[new_id] = NodeGene(
-                node_id=new_id,
-                node_type=NodeType.HIDDEN,
-                activation=activation,
-                bias=self.rng.uniform(-self.bias_range, self.bias_range),
-            )
-
-            inn1 = self._innovation_counter.get_innovation(conn.source_id, new_id)
-            inn2 = self._innovation_counter.get_innovation(new_id, conn.target_id)
-            net.connections[inn1] = ConnectionGene(
-                innovation_number=inn1,
-                source_id=conn.source_id,
-                target_id=new_id,
-                weight=self.rng.uniform(-self.weight_range, self.weight_range),
-                enabled=True,
-            )
-            net.connections[inn2] = ConnectionGene(
-                innovation_number=inn2,
-                source_id=new_id,
-                target_id=conn.target_id,
-                weight=conn.weight,
-                enabled=True,
-            )
 
         return net
 
@@ -334,16 +274,51 @@ class CPPNNeatDroneGenomeHandler(GenomeHandler):
             population.append(handler)
         return population
 
-    def crossover(self, other: GenomeHandler) -> CPPNNeatDroneGenomeHandler:
-        raise NotImplementedError("CPPN-NEAT crossover not yet implemented")
+    def crossover(self, other: CPPNNeatDroneGenomeHandler) -> CPPNNeatDroneGenomeHandler:
+        """NEAT-style aligned crossover of two CPPN genomes."""
+        child_net = crossover_cppn(
+            self.genome, other.genome,
+            self.fitness, other.fitness,
+            self.rng,
+        )
+        return CPPNNeatDroneGenomeHandler(
+            genome=child_net,
+            num_segments=self.num_segments,
+            min_max_narms=(self.min_narms, self.max_narms),
+            parameter_limits=self.parameter_limits,
+            initial_hidden_nodes=self.initial_hidden_nodes,
+            prob_add_node=self.prob_add_node,
+            prob_add_connection=self.prob_add_connection,
+            prob_remove_node=self.prob_remove_node,
+            prob_remove_connection=self.prob_remove_connection,
+            prob_mutate_weights=self.prob_mutate_weights,
+            prob_mutate_activation=self.prob_mutate_activation,
+            prob_toggle_connection=self.prob_toggle_connection,
+            weight_perturb_std=self.weight_perturb_std,
+            weight_replace_prob=self.weight_replace_prob,
+            weight_range=self.weight_range,
+            bias_perturb_std=self.bias_perturb_std,
+            bias_replace_prob=self.bias_replace_prob,
+            bias_range=self.bias_range,
+            repair=self.repair_enabled,
+            enable_collision_repair=self.enable_collision_repair,
+            propeller_radius=self.propeller_radius,
+            inner_boundary_radius=self.inner_boundary_radius,
+            outer_boundary_radius=self.outer_boundary_radius,
+            max_repair_iterations=self.max_repair_iterations,
+            repair_step_size=self.repair_step_size,
+            propeller_tolerance=self.propeller_tolerance,
+            rng=self.rng,
+        )
 
     def crossover_population(
         self,
         population1: List[GenomeHandler],
         population2: List[GenomeHandler],
     ) -> List[GenomeHandler]:
-        """No crossover — return copies of population1."""
-        return [p.copy() for p in population1]
+        """Perform NEAT crossover on paired populations."""
+        assert len(population1) == len(population2)
+        return [p1.crossover(p2) for p1, p2 in zip(population1, population2)]
 
     def mutate(self) -> None:
         """Mutate the CPPN genome in-place."""
@@ -402,6 +377,10 @@ class CPPNNeatDroneGenomeHandler(GenomeHandler):
         phenotype = self.get_phenotype()
         arm_count = int(np.sum(~np.isnan(phenotype[:, 0])))
         return self.min_narms <= arm_count <= self.max_narms
+
+    def compatibility_distance(self, other: CPPNNeatDroneGenomeHandler) -> float:
+        """NEAT compatibility distance based on CPPN topology and weights."""
+        return cppn_compatibility_distance(self.genome, other.genome)
 
     def repair(self) -> None:
         """No-op — repair is applied to the decoded phenotype in get_phenotype()."""

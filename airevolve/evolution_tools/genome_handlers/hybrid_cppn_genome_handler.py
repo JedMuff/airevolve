@@ -25,6 +25,8 @@ from .cppn.network import (
 from .cppn.innovation import InnovationCounter
 from .cppn.evaluation import evaluate_cppn
 from .cppn.mutations import mutate_cppn
+from .cppn.crossover import crossover_cppn
+from .cppn.compatibility import cppn_compatibility_distance
 from .operators import SphericalRepairOperator, RepairConfig
 
 
@@ -113,6 +115,7 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
         rng: Optional[np.random.Generator] = None,
     ) -> None:
         # --- Do NOT call super().__init__() ---
+        self.fitness: float | None = None
         self.rng = rng if rng is not None else np.random.default_rng()
 
         if min_max_narms is None:
@@ -229,7 +232,13 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
         return HybridGenome(direct=direct, cppn=cppn)
 
     def _create_initial_cppn(self) -> CPPNNetwork:
-        """Build a 4-input, 3-output CPPN with optional initial hidden nodes."""
+        """Build a 4-input, 3-output CPPN with no connections.
+
+        The network starts empty — structure is grown from scratch through
+        add-connection and add-node mutations during evolution.  Each output
+        node receives a random bias so the network starts with varied base
+        values.
+        """
         net = CPPNNetwork()
 
         # --- Input nodes ---
@@ -242,70 +251,18 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
                 input_label=_INPUT_LABELS[i],
             )
 
-        # --- Output nodes (tanh) with random biases ---
+        # --- Output nodes (tanh, zero bias so all initial CPPNs are identical) ---
         for j in range(_N_CPPN_OUTPUTS):
             nid = _N_CPPN_INPUTS + j
             net.nodes[nid] = NodeGene(
                 node_id=nid,
                 node_type=NodeType.OUTPUT,
                 activation=ActivationFunction.TANH,
-                bias=self.rng.uniform(-self.bias_range, self.bias_range),
+                bias=0.0,
                 output_index=j,
             )
 
         net.next_node_id = _N_CPPN_INPUTS + _N_CPPN_OUTPUTS
-
-        # --- Fully-connected input→output edges ---
-        for i in range(_N_CPPN_INPUTS):
-            for j in range(_N_CPPN_OUTPUTS):
-                tgt = _N_CPPN_INPUTS + j
-                inn = self._innovation_counter.get_innovation(i, tgt)
-                net.connections[inn] = ConnectionGene(
-                    innovation_number=inn,
-                    source_id=i,
-                    target_id=tgt,
-                    weight=self.rng.uniform(-self.weight_range, self.weight_range),
-                    enabled=True,
-                )
-
-        # --- Insert initial hidden nodes by splitting random connections ---
-        n_hidden = self.rng.integers(0, self.initial_hidden_nodes + 1)
-        for _ in range(n_hidden):
-            enabled = net.get_enabled_connections()
-            if not enabled:
-                break
-            conn = enabled[self.rng.integers(len(enabled))]
-            conn.enabled = False
-
-            new_id = net.next_node_id
-            net.next_node_id += 1
-
-            activation = self._HIDDEN_ACTIVATIONS[
-                self.rng.integers(len(self._HIDDEN_ACTIVATIONS))
-            ]
-            net.nodes[new_id] = NodeGene(
-                node_id=new_id,
-                node_type=NodeType.HIDDEN,
-                activation=activation,
-                bias=self.rng.uniform(-self.bias_range, self.bias_range),
-            )
-
-            inn1 = self._innovation_counter.get_innovation(conn.source_id, new_id)
-            inn2 = self._innovation_counter.get_innovation(new_id, conn.target_id)
-            net.connections[inn1] = ConnectionGene(
-                innovation_number=inn1,
-                source_id=conn.source_id,
-                target_id=new_id,
-                weight=self.rng.uniform(-self.weight_range, self.weight_range),
-                enabled=True,
-            )
-            net.connections[inn2] = ConnectionGene(
-                innovation_number=inn2,
-                source_id=new_id,
-                target_id=conn.target_id,
-                weight=conn.weight,
-                enabled=True,
-            )
 
         return net
 
@@ -459,16 +416,75 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
             population.append(handler)
         return population
 
-    def crossover(self, other: GenomeHandler) -> HybridCPPNDroneGenomeHandler:
-        raise NotImplementedError("Hybrid CPPN crossover not yet implemented")
+    def crossover(self, other: HybridCPPNDroneGenomeHandler) -> HybridCPPNDroneGenomeHandler:
+        """Crossover hybrid genomes: NEAT crossover for CPPN, arm-wise for direct."""
+        # CPPN part: NEAT-style aligned crossover
+        child_cppn = crossover_cppn(
+            self.genome.cppn, other.genome.cppn,
+            self.fitness, other.fitness,
+            self.rng,
+        )
+
+        # Direct part: arm-wise random selection from fitter parent's arm count
+        # Determine which parent is fitter to inherit arm count
+        if self.fitness is not None and other.fitness is not None:
+            if self.fitness >= other.fitness:
+                fitter_direct, other_direct = self.genome.direct, other.genome.direct
+            else:
+                fitter_direct, other_direct = other.genome.direct, self.genome.direct
+        else:
+            fitter_direct, other_direct = self.genome.direct, other.genome.direct
+
+        narms_child = fitter_direct.shape[0]
+        narms_other = other_direct.shape[0]
+        child_direct = np.empty((narms_child, 3))
+
+        for i in range(narms_child):
+            if i < narms_other and self.rng.random() < 0.5:
+                child_direct[i] = other_direct[i]
+            else:
+                child_direct[i] = fitter_direct[i]
+
+        child_genome = HybridGenome(direct=child_direct, cppn=child_cppn)
+        return HybridCPPNDroneGenomeHandler(
+            genome=child_genome,
+            min_max_narms=(self.min_narms, self.max_narms),
+            parameter_limits=self.parameter_limits,
+            prob_mutate_direct=self.prob_mutate_direct,
+            direct_mutation_scale_pct=self.direct_mutation_scale_pct,
+            initial_hidden_nodes=self.initial_hidden_nodes,
+            prob_add_node=self.prob_add_node,
+            prob_add_connection=self.prob_add_connection,
+            prob_remove_node=self.prob_remove_node,
+            prob_remove_connection=self.prob_remove_connection,
+            prob_mutate_weights=self.prob_mutate_weights,
+            prob_mutate_activation=self.prob_mutate_activation,
+            prob_toggle_connection=self.prob_toggle_connection,
+            weight_perturb_std=self.weight_perturb_std,
+            weight_replace_prob=self.weight_replace_prob,
+            weight_range=self.weight_range,
+            bias_perturb_std=self.bias_perturb_std,
+            bias_replace_prob=self.bias_replace_prob,
+            bias_range=self.bias_range,
+            repair=self.repair_enabled,
+            enable_collision_repair=self.enable_collision_repair,
+            propeller_radius=self.propeller_radius,
+            inner_boundary_radius=self.inner_boundary_radius,
+            outer_boundary_radius=self.outer_boundary_radius,
+            max_repair_iterations=self.max_repair_iterations,
+            repair_step_size=self.repair_step_size,
+            propeller_tolerance=self.propeller_tolerance,
+            rng=self.rng,
+        )
 
     def crossover_population(
         self,
         population1: List[GenomeHandler],
         population2: List[GenomeHandler],
     ) -> List[GenomeHandler]:
-        """No crossover — return copies of population1."""
-        return [p.copy() for p in population1]
+        """Perform crossover on paired populations."""
+        assert len(population1) == len(population2)
+        return [p1.crossover(p2) for p1, p2 in zip(population1, population2)]
 
     def copy(self) -> HybridCPPNDroneGenomeHandler:
         return HybridCPPNDroneGenomeHandler(
@@ -506,6 +522,35 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
         """Check that the arm count falls within bounds."""
         narms = self.genome.direct.shape[0]
         return self.min_narms <= narms <= self.max_narms
+
+    def compatibility_distance(self, other: HybridCPPNDroneGenomeHandler) -> float:
+        """Compatibility distance combining CPPN topology and direct parameter distance."""
+        cppn_dist = cppn_compatibility_distance(self.genome.cppn, other.genome.cppn)
+        direct_dist = self._direct_parameter_distance(other)
+        return cppn_dist + direct_dist
+
+    def _direct_parameter_distance(self, other: HybridCPPNDroneGenomeHandler) -> float:
+        """Normalized Euclidean distance between direct parameter arrays."""
+        d1 = self.genome.direct
+        d2 = other.genome.direct
+        # Normalize by parameter ranges
+        ranges = self.parameter_limits[:3, 1] - self.parameter_limits[:3, 0]
+        ranges = np.where(ranges == 0, 1.0, ranges)
+
+        min_arms = min(d1.shape[0], d2.shape[0])
+        max_arms = max(d1.shape[0], d2.shape[0])
+
+        if min_arms == 0:
+            return float(max_arms)
+
+        # Distance over overlapping arms
+        norm1 = d1[:min_arms] / ranges
+        norm2 = d2[:min_arms] / ranges
+        overlap_dist = float(np.mean(np.sqrt(np.sum((norm1 - norm2) ** 2, axis=1))))
+
+        # Penalty for arm count difference
+        arm_penalty = (max_arms - min_arms) / max_arms
+        return overlap_dist + arm_penalty
 
     def repair(self) -> None:
         """No-op — repair is applied to the decoded phenotype in get_phenotype()."""

@@ -11,19 +11,15 @@ class GenomeHandler(ABC):
     def __init__(self, genome: npt.NDArray[Any] | None = None) -> None:
         """
         Initialize the genotype.
-        
+
         Args:
             genome: The genome array. If None, creates empty genome.
         """
+        self.fitness: float | None = None
         if genome is None:
             self.genome = self._generate_random_genome()
         else:
             self.genome = genome.copy()
-    
-    @abstractmethod
-    def _generate_random_genome(self) -> npt.NDArray[Any]:
-        """Create an empty genome array."""
-        return np.full((1, 6), np.nan)
     
     @abstractmethod
     def _generate_random_genome(self) -> npt.NDArray[Any]:
@@ -125,3 +121,9 @@ class GenomeHandler(ABC):
         Default implementation does nothing.
         """
         pass
+
+    def compatibility_distance(self, other: GenomeHandler) -> float:
+        """Compute compatibility distance to another genome for speciation."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement compatibility_distance"
+        )

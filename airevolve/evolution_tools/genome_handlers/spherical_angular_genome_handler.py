@@ -1,17 +1,38 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, List, Tuple, Optional
 
 import numpy as np
 import numpy.typing as npt
 
 from .base import GenomeHandler
+from .cppn.innovation import InnovationCounter
 from .operators import (
     SphericalSymmetryOperator,
     SphericalRepairOperator,
     SymmetryConfig,
     RepairConfig
 )
+
+
+@dataclass
+class SphericalNeatGenome:
+    """Wraps a spherical arm array with NEAT-style innovation IDs.
+
+    Attributes:
+        arms: (max_narms, 6) array with NaN padding for empty slots.
+        innovation_ids: (max_narms,) int array; -1 marks empty slots.
+    """
+
+    arms: npt.NDArray[Any]
+    innovation_ids: npt.NDArray[Any]
+
+    def copy(self) -> SphericalNeatGenome:
+        return SphericalNeatGenome(
+            arms=self.arms.copy(),
+            innovation_ids=self.innovation_ids.copy(),
+        )
 
 
 class SphericalAngularDroneGenomeHandler(GenomeHandler):
@@ -29,9 +50,11 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
     - Variable population sizes with NaN masking
     """
 
+    _innovation_counter: InnovationCounter = InnovationCounter()
+
     def __init__(
         self,
-        genome: npt.NDArray[Any] | None = None,
+        genome: npt.NDArray[Any] | SphericalNeatGenome | None = None,
         min_max_narms: Tuple[int, int] | None = None,
         parameter_limits: npt.NDArray[Any] | None = None,
         append_arm_chance: float = 0.1,
@@ -127,8 +150,20 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
         # Initialize operators
         self._setup_operators()
         
-        # Initialize genome using parent class
-        super().__init__(genome)
+        # Initialize genome — handle SphericalNeatGenome, ndarray, or None
+        self.fitness: float | None = None
+        if isinstance(genome, SphericalNeatGenome):
+            self.genome = genome.copy()
+        elif genome is not None:
+            # Raw ndarray — wrap with sequential innovation IDs for
+            # backward compatibility with CMA-ES / mu+lambda strategies.
+            arms = genome.copy()
+            valid_mask = ~np.isnan(arms[:, 0])
+            inno = np.full(arms.shape[0], -1, dtype=int)
+            inno[valid_mask] = np.arange(int(valid_mask.sum()))
+            self.genome = SphericalNeatGenome(arms=arms, innovation_ids=inno)
+        else:
+            self.genome = self._generate_random_genome()
 
     def _validate_initialization_parameters(
         self,
@@ -250,16 +285,26 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
             rng=self.rnd
         )
 
-    def _generate_random_genome(self) -> npt.NDArray[Any]:
-        """Generate a single random genome."""
-        genome = np.full((self.max_narms, 6), np.nan)
+    def _generate_random_genome(self, innovation_ids: npt.NDArray[Any] | None = None) -> SphericalNeatGenome:
+        """Generate a single random genome.
+
+        Parameters
+        ----------
+        innovation_ids : array, optional
+            Pre-assigned innovation IDs for the initial arms.  When
+            generating the initial population all individuals share the
+            same IDs so that NEAT crossover alignment works from gen 0.
+            If *None*, new IDs are drawn from the class-level counter.
+        """
+        arms = np.full((self.max_narms, 6), np.nan)
+        inno = np.full(self.max_narms, -1, dtype=int)
 
         # Determine number of arms for this individual
         num_arms = self.rnd.integers(self.min_narms, self.max_narms + 1)
 
         # Generate random parameters for the arms (excluding phi)
         for i in [0, 1, 3, 4]:  # r, theta, pitch, yaw
-            genome[:num_arms, i] = self.rnd.uniform(
+            arms[:num_arms, i] = self.rnd.uniform(
                 low=self.parameter_limits[i, 0],
                 high=self.parameter_limits[i, 1],
                 size=num_arms
@@ -271,33 +316,50 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
         # with arcsin.  This is valid for any elevation range including negatives.
         phi_min, phi_max = self.parameter_limits[2, 0], self.parameter_limits[2, 1]
         sin_phi = self.rnd.uniform(low=np.sin(phi_min), high=np.sin(phi_max), size=num_arms)
-        genome[:num_arms, 2] = np.arcsin(sin_phi)
+        arms[:num_arms, 2] = np.arcsin(sin_phi)
 
-        genome[:num_arms, 5] = self.rnd.integers(0, 2, size=num_arms)
+        arms[:num_arms, 5] = self.rnd.integers(0, 2, size=num_arms)
+
+        # Assign innovation IDs
+        if innovation_ids is not None:
+            inno[:num_arms] = innovation_ids[:num_arms]
+        else:
+            for j in range(num_arms):
+                inno[j] = self._innovation_counter.next_innovation()
 
         # If symmetry is enabled, apply symmetry to the genome
         if self.symmetry:
             # Reduce to half if symmetry is enabled
-            genome[self.max_narms // 2:] = np.nan
+            arms[self.max_narms // 2:] = np.nan
+            inno[self.max_narms // 2:] = -1
 
         if self.symmetry:
-            genome = self.symmetry_operator.apply_symmetry(genome)
-        
-        if self.repair_enabled:
-            genome = self.repair_operator.repair(genome)
+            arms = self.symmetry_operator.apply_symmetry(arms)
 
-        return genome
+        if self.repair_enabled:
+            arms = self.repair_operator.repair(arms)
+
+        return SphericalNeatGenome(arms=arms, innovation_ids=inno)
 
     def generate_random_population(self, population_size: int, as_nparray : bool = False) -> List[SphericalAngularDroneGenomeHandler]:
         """
         Generate a population of random genome handlers.
-        
+
+        All individuals share the same innovation IDs for their starting
+        arms so that NEAT crossover alignment works from generation 0.
+
         Args:
             population_size: Number of individuals to generate
-            
+
         Returns:
             List of random genome handler instances
         """
+        # Pre-allocate shared innovation IDs for the starting topology
+        shared_innos = np.array(
+            [self._innovation_counter.next_innovation() for _ in range(self.max_narms)],
+            dtype=int,
+        )
+
         population = []
         for _ in range(population_size):
             individual = SphericalAngularDroneGenomeHandler(
@@ -318,9 +380,11 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
                 propeller_tolerance=self.propeller_tolerance,
                 rnd=self.rnd,
             )
-            individual.genome = individual._generate_random_genome()
+            individual.genome = individual._generate_random_genome(
+                innovation_ids=shared_innos,
+            )
             population.append(individual)
-        
+
         return population
 
     def random_population(self, pop_size: int) -> npt.NDArray[Any]:
@@ -392,24 +456,78 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
         return population
 
     def crossover(self, other: SphericalAngularDroneGenomeHandler) -> SphericalAngularDroneGenomeHandler:
-        """
-        Perform crossover with another genome handler to produce offspring.
-        
-        Args:
-            other: The other parent genome handler
-            
-        Returns:
-            Child genome handler from crossover
+        """NEAT-style crossover using innovation-number gene alignment.
+
+        Matching genes (same innovation ID in both parents) are inherited
+        randomly.  Disjoint / excess genes are inherited from the fitter
+        parent; when fitness is equal each disjoint gene has a 50 %
+        chance of inclusion.
         """
         if not isinstance(other, SphericalAngularDroneGenomeHandler):
             raise TypeError("Other parent must be SphericalAngularDroneGenomeHandler")
-        
-        if self.genome.shape != other.genome.shape:
-            raise ValueError("Parents must have the same genome shape")
 
-        # Create child with same parameters as parents
+        # Determine fitter parent (self.fitness / other.fitness set by NEAT loop)
+        f1 = self.fitness if self.fitness is not None else 0.0
+        f2 = other.fitness if other.fitness is not None else 0.0
+        equal_fitness = np.isclose(f1, f2)
+        self_is_fitter = f1 > f2
+
+        # Build {innovation_id: arm_params} dicts for each parent
+        g1_arms, g1_inno = self.genome.arms, self.genome.innovation_ids
+        g2_arms, g2_inno = other.genome.arms, other.genome.innovation_ids
+
+        d1 = {int(inno): g1_arms[i] for i, inno in enumerate(g1_inno) if inno >= 0}
+        d2 = {int(inno): g2_arms[i] for i, inno in enumerate(g2_inno) if inno >= 0}
+
+        all_innos = sorted(set(d1.keys()) | set(d2.keys()))
+
+        child_arms_list: list[tuple[int, npt.NDArray[Any]]] = []
+        for inno in all_innos:
+            in1, in2 = inno in d1, inno in d2
+            if in1 and in2:
+                # Matching gene — inherit randomly
+                child_arms_list.append(
+                    (inno, d1[inno].copy() if self.rnd.random() < 0.5 else d2[inno].copy())
+                )
+            elif in1 and not in2:
+                # Only in self
+                if self_is_fitter or (equal_fitness and self.rnd.random() < 0.5):
+                    child_arms_list.append((inno, d1[inno].copy()))
+            else:
+                # Only in other
+                if not self_is_fitter or (equal_fitness and self.rnd.random() < 0.5):
+                    child_arms_list.append((inno, d2[inno].copy()))
+
+        # Enforce min/max arm constraints
+        if len(child_arms_list) > self.max_narms:
+            child_arms_list = child_arms_list[:self.max_narms]
+        while len(child_arms_list) < self.min_narms:
+            # Fill from fitter parent's genes not yet included
+            source = d1 if self_is_fitter or equal_fitness else d2
+            for k, v in source.items():
+                if k not in {x[0] for x in child_arms_list}:
+                    child_arms_list.append((k, v.copy()))
+                    break
+            else:
+                break
+
+        # Pack into (max_narms, 6) array
+        child_arr = np.full((self.max_narms, 6), np.nan)
+        child_inno = np.full(self.max_narms, -1, dtype=int)
+        for idx, (inno, params) in enumerate(child_arms_list[:self.max_narms]):
+            child_arr[idx] = params
+            child_inno[idx] = inno
+
+        # Symmetry / repair
+        if self.symmetry:
+            child_arr = self._apply_symmetry_single(child_arr)
+        if self.repair_enabled:
+            child_arr = self.repair_operator.repair(child_arr)
+
+        child_genome = SphericalNeatGenome(arms=child_arr, innovation_ids=child_inno)
+
         child = SphericalAngularDroneGenomeHandler(
-            genome=None,
+            genome=child_genome,
             min_max_narms=(self.min_narms, self.max_narms),
             parameter_limits=self.parameter_limits,
             append_arm_chance=self.append_arm_chance,
@@ -425,39 +543,6 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
             rnd=self.rnd,
         )
 
-        # If symmetry is enabled, unapply symmetry to parents before crossover
-        if self.symmetry:
-            self_genome = self._unapply_symmetry_single(self.genome)
-            other_genome = self._unapply_symmetry_single(other.genome)
-            # Shuffle first half of the genome for crossover
-            self_genome[:self.max_narms//2] = self.rnd.permutation(self_genome[:self.max_narms//2], axis=0)
-            other_genome[:self.max_narms//2] = self.rnd.permutation(other_genome[:self.max_narms//2], axis=0)
-        else:
-            self_genome = self.genome.copy()
-            other_genome = other.genome.copy()
-            # Shuffle arms of each individual for genetic diversity
-            self_genome = self.rnd.permutation(self_genome, axis=0)
-            other_genome = self.rnd.permutation(other_genome, axis=0)
-        
-        # Arm-wise crossover with random selection
-        random_choices = self.rnd.choice([0, 1], self.max_narms)
-
-        child_genome = np.where(
-            random_choices[:, np.newaxis] == 0,
-            self_genome,
-            other_genome
-        )
-
-        # If symmetry is enabled, apply symmetry to the child genome
-        if self.symmetry:
-            child_genome = self._apply_symmetry_single(child_genome)
-
-        # Apply repair if needed
-        if self.repair_enabled:
-            child_genome = self.repair_operator.repair(child_genome)
-        
-        child.genome = child_genome
-        
         return child
 
     def crossover_vectorized(
@@ -514,14 +599,25 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
     def mutate(self, genome=None) -> None:
         """Mutate this genome in place."""
         if genome is not None:
-            self.genome = genome
-            
+            if isinstance(genome, SphericalNeatGenome):
+                self.genome = genome
+            else:
+                # Raw ndarray passed in — wrap it
+                arms = genome
+                valid_mask = ~np.isnan(arms[:, 0])
+                inno = np.full(arms.shape[0], -1, dtype=int)
+                inno[valid_mask] = np.arange(int(valid_mask.sum()))
+                self.genome = SphericalNeatGenome(arms=arms, innovation_ids=inno)
+
+        arms = self.genome.arms
+        inno = self.genome.innovation_ids
+
         if self.symmetry:
             # Temporarily remove symmetry for mutation
-            genome_half = self._unapply_symmetry_single(self.genome)
+            arms = self._unapply_symmetry_single(arms)
         else:
-            genome_half = self.genome.copy()
-        
+            arms = arms.copy()
+
         # Choose mutation type
         mutation_type = self.rnd.choice(
             len(self.mutation_probabilities),
@@ -529,23 +625,33 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
         )
 
         if mutation_type == 0:
-            # Add arm mutation
-            genome_half = self._mutate_add_arm(genome_half)
+            # Add arm mutation — assign new innovation ID
+            empty_mask = np.isnan(arms[:, 0])
+            arms = self._mutate_add_arm(arms)
+            # Find newly filled slot
+            new_filled = np.isnan(self.genome.arms[:, 0]) if not self.symmetry else empty_mask
+            for i in range(len(arms)):
+                if empty_mask[i] and not np.isnan(arms[i, 0]):
+                    inno[i] = self._innovation_counter.next_innovation()
+                    break
         elif mutation_type == 1:
-            # Remove arm mutation
-            genome_half = self._mutate_remove_arm(genome_half)
+            # Remove arm mutation — set innovation ID to -1
+            non_empty_before = ~np.isnan(arms[:, 0])
+            arms = self._mutate_remove_arm(arms)
+            for i in range(len(arms)):
+                if non_empty_before[i] and np.isnan(arms[i, 0]):
+                    inno[i] = -1
+                    break
         else:
             # Parameter mutation
             param_index = mutation_type - 2
-            genome_half = self._mutate_parameter(genome_half, param_index)
-        
+            arms = self._mutate_parameter(arms, param_index)
+
         # Ensure genome is valid has the correct number of arms for symmetry
         if self.symmetry:
-            # capped_narms = max(self.min_narms, genome_half.shape[0] // 2)
-            # genome_half = genome_half[:capped_narms, :]
-            self.genome = self._apply_symmetry_single(genome_half)
-        else:
-            self.genome = genome_half
+            arms = self._apply_symmetry_single(arms)
+
+        self.genome = SphericalNeatGenome(arms=arms, innovation_ids=inno)
 
         if self.repair_enabled:
             self.repair()
@@ -842,19 +948,75 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
     def is_valid(self) -> bool:
         """
         Check if the genome represents a valid drone configuration.
-        
+
         Returns:
             True if valid, False otherwise
         """
         # Use the repair operator to validate the genome
-        return self.repair_operator.validate(self.genome)
+        return self.repair_operator.validate(self.genome.arms)
+
+    def compatibility_distance(
+        self,
+        other: SphericalAngularDroneGenomeHandler,
+        c1: float = 1.0,
+        c2: float = 1.0,
+        c3: float = 0.4,
+    ) -> float:
+        """NEAT-style compatibility distance using innovation IDs.
+
+        ``(c1 * excess / N) + (c2 * disjoint / N) + (c3 * avg_param_diff)``
+        where *N* is the gene count of the larger genome and param diff
+        is normalized by parameter ranges over matching arms.
+        """
+        innos1 = {int(i) for i in self.genome.innovation_ids if i >= 0}
+        innos2 = {int(i) for i in other.genome.innovation_ids if i >= 0}
+
+        if not innos1 and not innos2:
+            return 0.0
+
+        matching = innos1 & innos2
+        only1 = innos1 - innos2
+        only2 = innos2 - innos1
+
+        N = max(len(innos1), len(innos2), 1)
+
+        # Classify disjoint vs excess
+        if innos1 and innos2:
+            max_shared = max(max(innos1), max(innos2))
+            min_max1 = max(innos1) if innos1 else 0
+            min_max2 = max(innos2) if innos2 else 0
+            threshold = min(min_max1, min_max2)
+            excess = sum(1 for i in (only1 | only2) if i > threshold)
+            disjoint = len(only1) + len(only2) - excess
+        else:
+            excess = len(only1) + len(only2)
+            disjoint = 0
+
+        # Average parameter difference over matching genes
+        avg_param_diff = 0.0
+        if matching:
+            ranges = self.parameter_limits[:, 1] - self.parameter_limits[:, 0]
+            ranges = np.where(ranges == 0, 1.0, ranges)
+
+            d1 = {int(i): self.genome.arms[idx]
+                  for idx, i in enumerate(self.genome.innovation_ids) if i >= 0}
+            d2 = {int(i): other.genome.arms[idx]
+                  for idx, i in enumerate(other.genome.innovation_ids) if i >= 0}
+
+            diffs = []
+            for inno in matching:
+                diff = np.abs(d1[inno] - d2[inno]) / ranges
+                diffs.append(float(np.mean(diff)))
+            avg_param_diff = float(np.mean(diffs))
+
+        return (c1 * excess / N) + (c2 * disjoint / N) + (c3 * avg_param_diff)
 
     def repair(self) -> None:
         """
         Repair the genome to make it valid by clipping out-of-bounds values.
         """
-        # Use the repair operator to repair the genome
-        self.genome = self.repair_operator.repair(self.genome)
+        # Use the repair operator on the arms array, preserving innovation IDs
+        self.genome.arms = self.repair_operator.repair(self.genome.arms)
 
     def repair_population(self, population: npt.NDArray[Any]) -> npt.NDArray[Any]:
         """
@@ -931,50 +1093,50 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
         """
         if not self.symmetry:
             return True
-        return self.symmetry_operator.validate_symmetry(self.genome)
-    
+        return self.symmetry_operator.validate_symmetry(self.genome.arms)
+
     def get_symmetry_pairs(self) -> List[tuple]:
         """
         Get pairs of indices that should be symmetric.
-        
+
         Returns:
             List of (source_index, target_index) tuples
         """
-        return self.symmetry_operator.get_symmetry_pairs(self.genome)
-    
+        return self.symmetry_operator.get_symmetry_pairs(self.genome.arms)
+
     def apply_symmetry(self) -> None:
         """
         Apply symmetry to the current genome.
         """
         if self.symmetry:
-            self.genome = self.symmetry_operator.apply_symmetry(self.genome)
-    
+            self.genome.arms = self.symmetry_operator.apply_symmetry(self.genome.arms)
+
     def unapply_symmetry(self) -> None:
         """
         Remove symmetry from the current genome (keep only first half).
         """
         if self.symmetry:
-            self.genome = self.symmetry_operator.unapply_symmetry(self.genome)
+            self.genome.arms = self.symmetry_operator.unapply_symmetry(self.genome.arms)
 
     def get_valid_arms(self) -> npt.NDArray[Any]:
         """
         Get only the valid (non-NaN) arms from the genome.
-        
+
         Returns:
             Array of valid arms with shape (num_valid_arms, 6)
         """
-        valid_mask = ~np.isnan(self.genome[:, 0])
-        return self.genome[valid_mask].copy()
+        valid_mask = ~np.isnan(self.genome.arms[:, 0])
+        return self.genome.arms[valid_mask].copy()
 
     def get_arm_count(self) -> int:
         """
         Get the number of valid arms in the genome.
-        
+
         Returns:
             Number of valid arms
         """
-        valid_mask = ~np.isnan(self.genome[:, 0])
-        return np.sum(valid_mask)
+        valid_mask = ~np.isnan(self.genome.arms[:, 0])
+        return int(np.sum(valid_mask))
 
     def get_spherical_coordinates(self) -> npt.NDArray[Any]:
         """
@@ -1020,42 +1182,44 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
         if len(arm_data) != 6:
             raise ValueError("arm_data must have exactly 6 elements")
         
-        self.genome[arm_index] = arm_data
+        self.genome.arms[arm_index] = arm_data
 
     def remove_arm(self, arm_index: int) -> None:
         """
         Remove an arm by setting it to NaN.
-        
+
         Args:
             arm_index: Index of the arm to remove
         """
         if not (0 <= arm_index < self.max_narms):
             raise ValueError(f"arm_index must be between 0 and {self.max_narms-1}")
-        
-        self.genome[arm_index] = np.nan
+
+        self.genome.arms[arm_index] = np.nan
+        self.genome.innovation_ids[arm_index] = -1
 
     def add_random_arm(self) -> bool:
         """
         Add a random arm to an empty slot.
-        
+
         Returns:
             True if arm was added, False if no empty slots available
         """
-        empty_mask = np.isnan(self.genome[:, 0])
+        empty_mask = np.isnan(self.genome.arms[:, 0])
         if not np.any(empty_mask):
             return False
-        
+
         empty_indices = np.where(empty_mask)[0]
         selected_index = self.rnd.choice(empty_indices)
-        
+
         new_arm = np.zeros(6)
         new_arm[:5] = self.rnd.uniform(
             low=self.parameter_limits[:5, 0],
             high=self.parameter_limits[:5, 1]
         )
         new_arm[5] = self.rnd.integers(0, 2)
-        
-        self.genome[selected_index] = new_arm
+
+        self.genome.arms[selected_index] = new_arm
+        self.genome.innovation_ids[selected_index] = self._innovation_counter.next_innovation()
         return True
 
     def compact_genome(self) -> npt.NDArray[Any]:
