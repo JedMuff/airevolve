@@ -164,9 +164,8 @@ def evolve_neat(
 
             sp_df = sp_df.sort_values("fitness", ascending=False).reset_index(drop=True)
 
-            # Elitism: copy champion only for species with more than 5 members
-            # (per the original NEAT paper)
-            n_elite = min(species_elitism, len(sp_df), n_offspring) if len(sp_df) > 5 else 0
+            # Elitism: copy champion of each species unchanged
+            n_elite = min(species_elitism, len(sp_df), n_offspring)
             for i in range(n_elite):
                 elite_genomes.append(sp_df.iloc[i]["genome"])
                 elite_parent_ids.append([sp_df.iloc[i]["id"], None])

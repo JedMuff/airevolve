@@ -75,7 +75,7 @@ cd "$PROJECT_DIR"
 srun python3 experimentation/run_neat_combined_hover_gate_evolution.py \
     --genome-handler "$GENOTYPE" \
     --gate-cfg "$TASK" \
-    --population-size 16 \
+    --population-size 32 \
     --generations 50 \
     --crossover-rate 0.75 \
     --compatibility-threshold 3.0 \
