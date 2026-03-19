@@ -955,61 +955,26 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
         # Use the repair operator to validate the genome
         return self.repair_operator.validate(self.genome.arms)
 
-    def compatibility_distance(
-        self,
-        other: SphericalAngularDroneGenomeHandler,
-        c1: float = 1.0,
-        c2: float = 1.0,
-        c3: float = 0.4,
-    ) -> float:
-        """NEAT-style compatibility distance using innovation IDs.
+    def compatibility_distance(self, other: SphericalAngularDroneGenomeHandler) -> float:
+        """Phenotypic compatibility distance using edit distance.
 
-        ``(c1 * excess / N) + (c2 * disjoint / N) + (c3 * avg_param_diff)``
-        where *N* is the gene count of the larger genome and param diff
-        is normalized by parameter ranges over matching arms.
+        Uses Hungarian-algorithm optimal arm matching on normalised
+        parameters plus an arm-count penalty.  This is permutation-
+        invariant and produces meaningful distances even when all
+        genomes share the same innovation IDs (fixed arm count).
         """
-        innos1 = {int(i) for i in self.genome.innovation_ids if i >= 0}
-        innos2 = {int(i) for i in other.genome.innovation_ids if i >= 0}
+        from airevolve.evolution_tools.evaluators.edit_distance import (
+            compute_edit_distance,
+        )
 
-        if not innos1 and not innos2:
-            return 0.0
-
-        matching = innos1 & innos2
-        only1 = innos1 - innos2
-        only2 = innos2 - innos1
-
-        N = max(len(innos1), len(innos2), 1)
-
-        # Classify disjoint vs excess
-        if innos1 and innos2:
-            max_shared = max(max(innos1), max(innos2))
-            min_max1 = max(innos1) if innos1 else 0
-            min_max2 = max(innos2) if innos2 else 0
-            threshold = min(min_max1, min_max2)
-            excess = sum(1 for i in (only1 | only2) if i > threshold)
-            disjoint = len(only1) + len(only2) - excess
-        else:
-            excess = len(only1) + len(only2)
-            disjoint = 0
-
-        # Average parameter difference over matching genes
-        avg_param_diff = 0.0
-        if matching:
-            ranges = self.parameter_limits[:, 1] - self.parameter_limits[:, 0]
-            ranges = np.where(ranges == 0, 1.0, ranges)
-
-            d1 = {int(i): self.genome.arms[idx]
-                  for idx, i in enumerate(self.genome.innovation_ids) if i >= 0}
-            d2 = {int(i): other.genome.arms[idx]
-                  for idx, i in enumerate(other.genome.innovation_ids) if i >= 0}
-
-            diffs = []
-            for inno in matching:
-                diff = np.abs(d1[inno] - d2[inno]) / ranges
-                diffs.append(float(np.mean(diff)))
-            avg_param_diff = float(np.mean(diffs))
-
-        return (c1 * excess / N) + (c2 * disjoint / N) + (c3 * avg_param_diff)
+        return float(
+            compute_edit_distance(
+                self.genome.arms,
+                other.genome.arms,
+                min_vals=self.parameter_limits[:, 0],
+                max_vals=self.parameter_limits[:, 1],
+            )
+        )
 
     def repair(self) -> None:
         """
