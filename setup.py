@@ -23,6 +23,7 @@ setup(
         "tqdm",
         "bokeh",
         "python-fcl",
+        "dronehover @ git+https://github.com/elijahanghw/drone-hover.git@small_drone",
     ],  # List your dependencies here
     extras_require={
         "vis": ["trimesh"],
