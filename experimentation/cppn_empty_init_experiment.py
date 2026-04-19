@@ -70,12 +70,12 @@ from airevolve.controllers.utils.gate_configs import GATE_CONFIGS
 _N_INPUTS = 2
 _N_OUTPUTS = 7
 
-# Default spherical parameter limits (same as CPPNNeatDroneGenomeHandler)
+# Default parameter limits (shared across all representations)
 _DEFAULT_PARAM_LIMITS = np.array([
     [0.055, 0.17],           # magnitude
     [-np.pi, np.pi],         # arm yaw (azimuth)
-    [-np.pi / 2, np.pi / 2], # arm pitch
-    [-np.pi / 2, np.pi / 2], # motor pitch
+    [-np.pi / 2, np.pi / 2], # arm pitch (elevation)
+    [-np.pi, np.pi],         # motor pitch
     [-np.pi, np.pi],         # motor yaw
     [0, 1],                  # direction
 ])

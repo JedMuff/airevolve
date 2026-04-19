@@ -21,8 +21,12 @@ from airevolve.evolution_tools.genome_handlers.repair_workflow import (
 from airevolve.evolution_tools.genome_handlers.operators.optimization_repair_operator import OptimizationRepairConfig
 
 spherical_params = np.array([
-    [0.055, 0.105], [-np.pi, np.pi], [0, np.pi],
-    [-np.pi, np.pi], [-np.pi, np.pi], [0, 1]
+    [0.055, 0.17],           # magnitude
+    [-np.pi, np.pi],         # arm yaw (azimuth)
+    [-np.pi / 2, np.pi / 2], # arm pitch (elevation)
+    [-np.pi, np.pi],         # motor pitch
+    [-np.pi, np.pi],         # motor yaw
+    [0, 1],                  # direction
 ])
 
 handler_kwargs = {

@@ -59,8 +59,9 @@ from airevolve.evolution_tools.genome_handlers.operators.optimization_repair_ope
     OptimizationRepairConfig,
 )
 from airevolve.evolution_tools.genome_handlers.cppn.network import (
-    CPPNNetwork, NodeGene, NodeType, ActivationFunction,
+    CPPNNetwork, ConnectionGene, NodeGene, NodeType, ActivationFunction,
 )
+from airevolve.evolution_tools.genome_handlers.cppn.innovation import InnovationCounter
 from airevolve.evolution_tools.genome_handlers.hybrid_cppn_genome_handler import (
     HybridGenome,
     _N_CPPN_INPUTS as _N_HYBRID_CPPN_INPUTS,
@@ -116,6 +117,126 @@ def create_empty_cppn():
 
     net.next_node_id = _N_INPUTS + _N_OUTPUTS
     return net
+
+
+# Activation functions for seeded hidden nodes
+_SEED_ACTIVATIONS = [
+    ActivationFunction.SIGMOID,
+    ActivationFunction.TANH,
+    ActivationFunction.GAUSSIAN,
+]
+
+# Shared innovation counter for seeded initial topologies so that identical
+# structural choices across the initial population get the same innovation
+# numbers (consistent with NEAT's homology tracking).
+_seed_innovation_counter = InnovationCounter()
+
+
+def _seed_cppn_topology(
+    net: CPPNNetwork,
+    n_inputs: int,
+    n_outputs: int,
+    rng: np.random.Generator,
+) -> None:
+    """Add 2–5 hidden nodes and ~10–20 random feed-forward connections to a CPPN.
+
+    Modifies *net* in place.  Assumes input node IDs are 0..n_inputs-1 and
+    output node IDs are n_inputs..n_inputs+n_outputs-1.
+    """
+    n_hidden = int(rng.integers(2, 6))  # 2–5 hidden nodes
+
+    input_ids = list(range(n_inputs))
+    output_ids = list(range(n_inputs, n_inputs + n_outputs))
+    hidden_ids = []
+
+    for _ in range(n_hidden):
+        nid = net.next_node_id
+        net.next_node_id += 1
+        activation = rng.choice(_SEED_ACTIVATIONS)
+        net.nodes[nid] = NodeGene(
+            node_id=nid,
+            node_type=NodeType.HIDDEN,
+            activation=activation,
+            bias=float(rng.uniform(-1.0, 1.0)),
+        )
+        hidden_ids.append(nid)
+
+    # Build pool of valid feed-forward connections (no output→anything,
+    # no anything→input, no hidden→hidden-with-lower-id to keep it acyclic).
+    # Layers: input(0) → hidden(1) → output(2)
+    possible = []
+    for src in input_ids:
+        for tgt in hidden_ids + output_ids:
+            possible.append((src, tgt))
+    for src in hidden_ids:
+        for tgt in output_ids:
+            possible.append((src, tgt))
+    # Allow connections between hidden nodes (higher id only, keeps DAG)
+    for i, src in enumerate(hidden_ids):
+        for tgt in hidden_ids[i + 1:]:
+            possible.append((src, tgt))
+
+    # Sample 10–20 connections (clamped to available)
+    n_target = int(rng.integers(10, 21))
+    n_conns = min(n_target, len(possible))
+    chosen_indices = rng.choice(len(possible), size=n_conns, replace=False)
+
+    for idx in chosen_indices:
+        src, tgt = possible[idx]
+        inn = _seed_innovation_counter.get_innovation(src, tgt)
+        net.connections[inn] = ConnectionGene(
+            innovation_number=inn,
+            source_id=src,
+            target_id=tgt,
+            weight=float(rng.uniform(-1.0, 1.0)),
+            enabled=True,
+        )
+
+
+def create_seeded_cppn(rng: np.random.Generator | None = None) -> CPPNNetwork:
+    """Create a CPPN with 2–5 hidden nodes and ~10–20 random connections."""
+    if rng is None:
+        rng = np.random.default_rng()
+    net = create_empty_cppn()
+    _seed_cppn_topology(net, _N_INPUTS, _N_OUTPUTS, rng)
+    return net
+
+
+def create_seeded_hybrid_genome(
+    narms: int = 6,
+    rng: np.random.Generator | None = None,
+) -> HybridGenome:
+    """Create a HybridGenome with random direct params and a seeded CPPN."""
+    if rng is None:
+        rng = np.random.default_rng()
+    direct = np.empty((narms, 3))
+    direct[:, 0] = rng.uniform(0.055, 0.17, size=narms)
+    direct[:, 1] = rng.uniform(-np.pi, np.pi, size=narms)
+    direct[:, 2] = np.arcsin(rng.uniform(-1.0, 1.0, size=narms))
+
+    # Build seeded CPPN
+    net = CPPNNetwork()
+    for i in range(_N_HYBRID_CPPN_INPUTS):
+        net.nodes[i] = NodeGene(
+            node_id=i,
+            node_type=NodeType.INPUT,
+            activation=ActivationFunction.IDENTITY,
+            bias=0.0,
+            input_label=_HYBRID_INPUT_LABELS[i],
+        )
+    for j in range(_N_HYBRID_CPPN_OUTPUTS):
+        nid = _N_HYBRID_CPPN_INPUTS + j
+        net.nodes[nid] = NodeGene(
+            node_id=nid,
+            node_type=NodeType.OUTPUT,
+            activation=ActivationFunction.TANH,
+            bias=0.0,
+            output_index=j,
+        )
+    net.next_node_id = _N_HYBRID_CPPN_INPUTS + _N_HYBRID_CPPN_OUTPUTS
+    _seed_cppn_topology(net, _N_HYBRID_CPPN_INPUTS, _N_HYBRID_CPPN_OUTPUTS, rng)
+
+    return HybridGenome(direct=direct, cppn=net)
 
 
 def create_empty_hybrid_genome(narms=6):
@@ -449,6 +570,10 @@ def parse_arguments():
                        help='Number of CPPN evaluation segments (default: 8, CPPN only)')
     parser.add_argument('--initial-hidden-nodes', type=int, default=0,
                        help='Initial hidden nodes in CPPN topology (default: 0, CPPN only)')
+    parser.add_argument('--init-topology', choices=['empty', 'seeded'], default='empty',
+                       help='Initial CPPN topology: empty (no connections) or seeded '
+                            '(2-5 hidden nodes, ~10-20 connections with sigmoid/tanh/gaussian). '
+                            'Default: empty. Only affects cppn and hybrid-cppn handlers.')
 
     return parser.parse_args()
 
@@ -478,7 +603,7 @@ def main():
     print(f"Pop: {args.population_size}, Gens: {args.generations}, "
           f"Mutate: {args.num_mutate}, Strategy: {args.strategy_type}")
     print(f"Gate: {args.gate_cfg}, CMA-ES evals: {args.max_evals}, Workers: {args.num_workers}")
-    print(f"Initial population: empty CPPNs (no connections)")
+    print(f"Init topology: {args.init_topology}")
     print("Fitness = hover_fitness [0,3] + gates_passed [0,N]")
     print("=" * 80)
     print()
@@ -488,6 +613,7 @@ def main():
         args.genome_handler, args.min_narms, args.max_narms,
         num_segments=args.num_segments,
         initial_hidden_nodes=args.initial_hidden_nodes,
+        init_topology=args.init_topology,
     )
 
     # Create combined fitness function
@@ -508,17 +634,29 @@ def main():
     # Create genome handler wrapper
     WrappedHandler = create_genome_handler_wrapper(config['handler_class'], config['handler_kwargs'])
 
-    # Generate initial population of empty CPPNs / hybrid genomes
+    # Generate initial population of CPPNs / hybrid genomes
+    use_seeded = args.init_topology == 'seeded'
     if args.genome_handler == 'hybrid-cppn':
-        initial_population = [create_empty_hybrid_genome(narms=args.min_narms)
-                              for _ in range(args.population_size)]
-        print(f"Generated {len(initial_population)} empty hybrid genomes "
-              f"({args.min_narms} arms, {_N_HYBRID_CPPN_INPUTS} CPPN inputs, "
-              f"{_N_HYBRID_CPPN_OUTPUTS} CPPN outputs, 0 connections)")
+        if use_seeded:
+            initial_population = [create_seeded_hybrid_genome(narms=args.min_narms)
+                                  for _ in range(args.population_size)]
+            print(f"Generated {len(initial_population)} seeded hybrid genomes "
+                  f"({args.min_narms} arms, 2-5 hidden nodes, ~10-20 connections)")
+        else:
+            initial_population = [create_empty_hybrid_genome(narms=args.min_narms)
+                                  for _ in range(args.population_size)]
+            print(f"Generated {len(initial_population)} empty hybrid genomes "
+                  f"({args.min_narms} arms, {_N_HYBRID_CPPN_INPUTS} CPPN inputs, "
+                  f"{_N_HYBRID_CPPN_OUTPUTS} CPPN outputs, 0 connections)")
     elif args.genome_handler == 'cppn':
-        initial_population = [create_empty_cppn() for _ in range(args.population_size)]
-        print(f"Generated {len(initial_population)} empty CPPNs "
-              f"({_N_INPUTS} inputs, {_N_OUTPUTS} outputs, 0 connections)")
+        if use_seeded:
+            initial_population = [create_seeded_cppn() for _ in range(args.population_size)]
+            print(f"Generated {len(initial_population)} seeded CPPNs "
+                  f"({_N_INPUTS} inputs, {_N_OUTPUTS} outputs, 2-5 hidden, ~10-20 conns)")
+        else:
+            initial_population = [create_empty_cppn() for _ in range(args.population_size)]
+            print(f"Generated {len(initial_population)} empty CPPNs "
+                  f"({_N_INPUTS} inputs, {_N_OUTPUTS} outputs, 0 connections)")
     else:
         # For direct encodings, just use random genomes
         handler = WrappedHandler()

@@ -688,21 +688,23 @@ def generate_initial_pop_parallel(genotype, pop_size, coordinate_system='spheric
 
 
 def get_genome_handler_config(handler_type, min_narms=6, max_narms=6,
-                              num_segments=8, initial_hidden_nodes=0):
+                              num_segments=8, initial_hidden_nodes=0,
+                              init_topology="empty"):
     """
     Get genome handler class and configuration based on type.
 
     Note: Symmetry is NOT supported (always None).
     Note: Built-in repair is DISABLED (repair=False) - we use external repair workflow.
     """
-    # Spherical parameter limits: [r, theta, phi, pitch, yaw, direction]
-    spherical_params = np.array([
-        [0.055, 0.105],
-        [-np.pi, np.pi],
-        [0, np.pi],
-        [-np.pi, np.pi],
-        [-np.pi, np.pi],
-        [0, 1]
+    # Shared parameter limits for all representations:
+    # [magnitude, arm_yaw, arm_pitch, motor_pitch, motor_yaw, direction]
+    shared_params = np.array([
+        [0.055, 0.17],           # magnitude
+        [-np.pi, np.pi],         # arm yaw (azimuth)
+        [-np.pi / 2, np.pi / 2], # arm pitch (elevation)
+        [-np.pi, np.pi],         # motor pitch
+        [-np.pi, np.pi],         # motor yaw
+        [0, 1],                  # direction
     ])
 
     append_arm_chance = 0.0 if min_narms == max_narms else 0.5
@@ -713,11 +715,11 @@ def get_genome_handler_config(handler_type, min_narms=6, max_narms=6,
             'handler_kwargs': {
                 'min_max_narms': (min_narms, max_narms),
                 'append_arm_chance': append_arm_chance,
-                'parameter_limits': spherical_params,
+                'parameter_limits': shared_params,
                 'bilateral_plane_for_symmetry': None,
                 'repair': False
             },
-            'param_limits': spherical_params,
+            'param_limits': shared_params,
             'coordinate_system': 'spherical'
         }
     elif handler_type == 'cartesian':
@@ -729,7 +731,7 @@ def get_genome_handler_config(handler_type, min_narms=6, max_narms=6,
                 'bilateral_plane_for_symmetry': None,
                 'repair': False
             },
-            'param_limits': spherical_params,
+            'param_limits': shared_params,
             'coordinate_system': 'cartesian'
         }
     elif handler_type == 'cppn':
@@ -739,9 +741,11 @@ def get_genome_handler_config(handler_type, min_narms=6, max_narms=6,
                 'num_segments': num_segments,
                 'min_max_narms': (min_narms, max_narms),
                 'initial_hidden_nodes': initial_hidden_nodes,
+                'init_topology': init_topology,
+                'parameter_limits': shared_params,
                 'repair': False,
             },
-            'param_limits': None,
+            'param_limits': shared_params,
             'coordinate_system': 'cppn'
         }
     elif handler_type == 'hybrid-cppn':
@@ -750,9 +754,11 @@ def get_genome_handler_config(handler_type, min_narms=6, max_narms=6,
             'handler_kwargs': {
                 'min_max_narms': (min_narms, max_narms),
                 'initial_hidden_nodes': initial_hidden_nodes,
+                'init_topology': init_topology,
+                'parameter_limits': shared_params,
                 'repair': False,
             },
-            'param_limits': None,
+            'param_limits': shared_params,
             'coordinate_system': 'hybrid-cppn'
         }
     else:

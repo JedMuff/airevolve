@@ -59,6 +59,8 @@ from experimentation.run_combined_hover_gate_evolution import (
     _CombinedHoverGateFitness,
     create_empty_cppn,
     create_empty_hybrid_genome,
+    create_seeded_cppn,
+    create_seeded_hybrid_genome,
     _N_INPUTS,
     _N_OUTPUTS,
 )
@@ -146,6 +148,10 @@ def parse_arguments():
                        help='Number of CPPN evaluation segments (default: 8, CPPN only)')
     parser.add_argument('--initial-hidden-nodes', type=int, default=0,
                        help='Initial hidden nodes in CPPN topology (default: 0, CPPN only)')
+    parser.add_argument('--init-topology', choices=['empty', 'seeded'], default='empty',
+                       help='Initial CPPN topology: empty (no connections) or seeded '
+                            '(2-5 hidden nodes, ~10-20 connections with sigmoid/tanh/gaussian). '
+                            'Default: empty. Only affects cppn and hybrid-cppn handlers.')
 
     return parser.parse_args()
 
@@ -176,7 +182,7 @@ def main():
     print(f"Crossover rate: {args.crossover_rate}, Compat threshold: {args.compatibility_threshold}")
     print(f"Target species: {args.target_species_count}, Stagnation limit: {args.stagnation_limit}")
     print(f"Gate: {args.gate_cfg}, CMA-ES evals: {args.max_evals}, Workers: {args.num_workers}")
-    print(f"Initial population: empty CPPNs (no connections)")
+    print(f"Init topology: {args.init_topology}")
     print("Fitness = hover_fitness [0,3] + gates_passed [0,N]")
     print("=" * 80)
     print()
@@ -186,6 +192,7 @@ def main():
         args.genome_handler, args.min_narms, args.max_narms,
         num_segments=args.num_segments,
         initial_hidden_nodes=args.initial_hidden_nodes,
+        init_topology=args.init_topology,
     )
 
     # Create combined fitness function
@@ -206,17 +213,29 @@ def main():
     # Create genome handler wrapper
     WrappedHandler = create_genome_handler_wrapper(config['handler_class'], config['handler_kwargs'])
 
-    # Generate initial population of empty CPPNs / hybrid genomes
+    # Generate initial population of CPPNs / hybrid genomes
+    use_seeded = args.init_topology == 'seeded'
     if args.genome_handler == 'hybrid-cppn':
-        initial_population = [create_empty_hybrid_genome(narms=args.min_narms)
-                              for _ in range(args.population_size)]
-        print(f"Generated {len(initial_population)} empty hybrid genomes "
-              f"({args.min_narms} arms, {_N_HYBRID_CPPN_INPUTS} CPPN inputs, "
-              f"{_N_HYBRID_CPPN_OUTPUTS} CPPN outputs, 0 connections)")
+        if use_seeded:
+            initial_population = [create_seeded_hybrid_genome(narms=args.min_narms)
+                                  for _ in range(args.population_size)]
+            print(f"Generated {len(initial_population)} seeded hybrid genomes "
+                  f"({args.min_narms} arms, 2-5 hidden nodes, ~10-20 connections)")
+        else:
+            initial_population = [create_empty_hybrid_genome(narms=args.min_narms)
+                                  for _ in range(args.population_size)]
+            print(f"Generated {len(initial_population)} empty hybrid genomes "
+                  f"({args.min_narms} arms, {_N_HYBRID_CPPN_INPUTS} CPPN inputs, "
+                  f"{_N_HYBRID_CPPN_OUTPUTS} CPPN outputs, 0 connections)")
     elif args.genome_handler == 'cppn':
-        initial_population = [create_empty_cppn() for _ in range(args.population_size)]
-        print(f"Generated {len(initial_population)} empty CPPNs "
-              f"({_N_INPUTS} inputs, {_N_OUTPUTS} outputs, 0 connections)")
+        if use_seeded:
+            initial_population = [create_seeded_cppn() for _ in range(args.population_size)]
+            print(f"Generated {len(initial_population)} seeded CPPNs "
+                  f"({_N_INPUTS} inputs, {_N_OUTPUTS} outputs, 2-5 hidden, ~10-20 conns)")
+        else:
+            initial_population = [create_empty_cppn() for _ in range(args.population_size)]
+            print(f"Generated {len(initial_population)} empty CPPNs "
+                  f"({_N_INPUTS} inputs, {_N_OUTPUTS} outputs, 0 connections)")
     else:
         # For direct encodings, generate random genomes via the handler
         handler = WrappedHandler()
