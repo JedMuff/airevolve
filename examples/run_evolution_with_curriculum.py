@@ -306,10 +306,16 @@ def get_genome_handler_config(handler_type, min_narms=6, max_narms=6):
     Note: Built-in repair is DISABLED (repair=False) - we use external repair workflow.
     """
 
-    # Spherical coordinate parameters: [magnitude, arm_rotation, arm_pitch, motor_rotation, motor_pitch, direction]
-    # Spherical parameter limits: [r, theta, phi, pitch, yaw, direction]
-    # phi: [0, π] for full sphere coverage with uniform spatial sampling
-    spherical_params = np.array([[0.055,0.105], [-np.pi, np.pi], [0, np.pi], [-np.pi, np.pi], [-np.pi, np.pi], [0,1]])
+    # Shared parameter limits for all representations:
+    # [magnitude, arm_yaw, arm_pitch, motor_pitch, motor_yaw, direction]
+    spherical_params = np.array([
+        [0.055, 0.17],           # magnitude
+        [-np.pi, np.pi],         # arm yaw (azimuth)
+        [-np.pi / 2, np.pi / 2], # arm pitch (elevation)
+        [-np.pi, np.pi],         # motor pitch
+        [-np.pi, np.pi],         # motor yaw
+        [0, 1],                  # direction
+    ])
 
     append_arm_chance = 0.0 if min_narms == max_narms else 0.5
 

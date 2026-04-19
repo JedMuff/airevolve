@@ -64,9 +64,9 @@ echo "Temporary data directory: $TMP_DIR"
 # --- Build genotype-specific flags ---
 EXTRA_ARGS=""
 if [ "$GENOTYPE" = "cppn" ]; then
-    EXTRA_ARGS="--num-segments 8 --initial-hidden-nodes 0"
+    EXTRA_ARGS="--num-segments 8 --initial-hidden-nodes 0 --init-topology seeded"
 elif [ "$GENOTYPE" = "hybrid-cppn" ]; then
-    EXTRA_ARGS="--initial-hidden-nodes 0"
+    EXTRA_ARGS="--initial-hidden-nodes 0 --init-topology seeded"
 fi
 
 # --- Run NEAT Combined Hover + Gate Evolution ---

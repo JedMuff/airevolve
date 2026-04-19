@@ -129,12 +129,12 @@ def create_target_drone(narms: int) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 SPHERICAL_PARAMS = np.array([
-    [0.055, 0.11 + 0.06],   # magnitude
-    [-np.pi, np.pi],        # azimuth
-    [-np.pi / 2, np.pi / 2],  # pitch
-    [-np.pi, np.pi],        # motor_yaw
-    [-np.pi / 2, np.pi / 2],  # motor_pitch
-    [0, 1],                 # direction
+    [0.055, 0.17],           # magnitude
+    [-np.pi, np.pi],         # arm yaw (azimuth)
+    [-np.pi / 2, np.pi / 2], # arm pitch (elevation)
+    [-np.pi, np.pi],         # motor pitch
+    [-np.pi, np.pi],         # motor yaw
+    [0, 1],                  # direction
 ])
 
 
