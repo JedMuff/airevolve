@@ -77,6 +77,13 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
         ActivationFunction.ABS,
     ]
 
+    # Activation functions used when seeding initial hidden nodes
+    _SEED_ACTIVATIONS = [
+        ActivationFunction.SIGMOID,
+        ActivationFunction.TANH,
+        ActivationFunction.GAUSSIAN,
+    ]
+
     def __init__(
         self,
         genome: Optional[HybridGenome] = None,
@@ -95,6 +102,7 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
         prob_toggle_connection: float = 0.02,
         # Initial topology complexity
         initial_hidden_nodes: int = 0,
+        init_topology: str = "empty",  # "empty" or "seeded"
         # Weight / bias mutation parameters
         weight_perturb_std: float = 0.5,
         weight_replace_prob: float = 0.1,
@@ -127,8 +135,8 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
             self.parameter_limits = np.array([
                 [0.055, 0.17],           # magnitude
                 [-np.pi, np.pi],         # arm yaw (azimuth)
-                [-np.pi / 2, np.pi / 2], # arm pitch
-                [-np.pi / 2, np.pi / 2], # motor pitch
+                [-np.pi / 2, np.pi / 2], # arm pitch (elevation)
+                [-np.pi, np.pi],         # motor pitch
                 [-np.pi, np.pi],         # motor yaw
                 [0, 1],                  # direction
             ])
@@ -141,6 +149,7 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
 
         # Initial topology
         self.initial_hidden_nodes = initial_hidden_nodes
+        self.init_topology = init_topology
 
         # CPPN mutation hyperparameters
         self.prob_add_node = prob_add_node
@@ -232,12 +241,12 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
         return HybridGenome(direct=direct, cppn=cppn)
 
     def _create_initial_cppn(self) -> CPPNNetwork:
-        """Build a 4-input, 3-output CPPN with no connections.
+        """Build a 4-input, 3-output CPPN.
 
-        The network starts empty — structure is grown from scratch through
-        add-connection and add-node mutations during evolution.  Each output
-        node receives a random bias so the network starts with varied base
-        values.
+        If ``init_topology == "seeded"``, adds 2–5 hidden nodes with
+        sigmoid/tanh/gaussian activations and ~10–20 random feed-forward
+        connections.  Otherwise the network starts empty (classic NEAT
+        complexification).
         """
         net = CPPNNetwork()
 
@@ -264,7 +273,58 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
 
         net.next_node_id = _N_CPPN_INPUTS + _N_CPPN_OUTPUTS
 
+        if self.init_topology == "seeded":
+            self._seed_topology(net, _N_CPPN_INPUTS, _N_CPPN_OUTPUTS)
+
         return net
+
+    def _seed_topology(
+        self, net: CPPNNetwork, n_inputs: int, n_outputs: int,
+    ) -> None:
+        """Add 2–5 hidden nodes and ~10–20 random feed-forward connections."""
+        n_hidden = int(self.rng.integers(2, 6))
+
+        input_ids = list(range(n_inputs))
+        output_ids = list(range(n_inputs, n_inputs + n_outputs))
+        hidden_ids = []
+
+        for _ in range(n_hidden):
+            nid = net.next_node_id
+            net.next_node_id += 1
+            activation = self.rng.choice(self._SEED_ACTIVATIONS)
+            net.nodes[nid] = NodeGene(
+                node_id=nid,
+                node_type=NodeType.HIDDEN,
+                activation=activation,
+                bias=float(self.rng.uniform(-1.0, 1.0)),
+            )
+            hidden_ids.append(nid)
+
+        possible = []
+        for src in input_ids:
+            for tgt in hidden_ids + output_ids:
+                possible.append((src, tgt))
+        for src in hidden_ids:
+            for tgt in output_ids:
+                possible.append((src, tgt))
+        for i, src in enumerate(hidden_ids):
+            for tgt in hidden_ids[i + 1:]:
+                possible.append((src, tgt))
+
+        n_target = int(self.rng.integers(10, 21))
+        n_conns = min(n_target, len(possible))
+        chosen = self.rng.choice(len(possible), size=n_conns, replace=False)
+
+        for idx in chosen:
+            src, tgt = possible[idx]
+            inn = self._innovation_counter.get_innovation(src, tgt)
+            net.connections[inn] = ConnectionGene(
+                innovation_number=inn,
+                source_id=src,
+                target_id=tgt,
+                weight=float(self.rng.uniform(-1.0, 1.0)),
+                enabled=True,
+            )
 
     # ------------------------------------------------------------------
     # Phenotype decoding
@@ -390,6 +450,7 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
                 prob_mutate_direct=self.prob_mutate_direct,
                 direct_mutation_scale_pct=self.direct_mutation_scale_pct,
                 initial_hidden_nodes=self.initial_hidden_nodes,
+                init_topology=self.init_topology,
                 prob_add_node=self.prob_add_node,
                 prob_add_connection=self.prob_add_connection,
                 prob_remove_node=self.prob_remove_node,
@@ -453,6 +514,7 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
             prob_mutate_direct=self.prob_mutate_direct,
             direct_mutation_scale_pct=self.direct_mutation_scale_pct,
             initial_hidden_nodes=self.initial_hidden_nodes,
+            init_topology=self.init_topology,
             prob_add_node=self.prob_add_node,
             prob_add_connection=self.prob_add_connection,
             prob_remove_node=self.prob_remove_node,
@@ -494,6 +556,7 @@ class HybridCPPNDroneGenomeHandler(GenomeHandler):
             prob_mutate_direct=self.prob_mutate_direct,
             direct_mutation_scale_pct=self.direct_mutation_scale_pct,
             initial_hidden_nodes=self.initial_hidden_nodes,
+            init_topology=self.init_topology,
             prob_add_node=self.prob_add_node,
             prob_add_connection=self.prob_add_connection,
             prob_remove_node=self.prob_remove_node,

@@ -148,14 +148,18 @@ def drone_info(individual):
 def max_thrust_to_weight(individual_or_population):
     if len(individual_or_population.shape) == 4:
         ngens, pop_size, max_num_arms, nparams = individual_or_population.shape
-        max_thrust_to_weight = np.zeros((ngens, pop_size))
+        result = np.zeros((ngens, pop_size))
         for g in range(ngens):
             for i in range(pop_size):
-                hover_type, max_thrust_to_weight[g,i], input_cost, rank_controlability, controlability = drone_info(individual_or_population[g,i])
+                hover_type, result[g,i], input_cost, rank_controlability, controlability = drone_info(individual_or_population[g,i])
+        return result
     if len(individual_or_population.shape) == 3:
-        hover_type, max_thrust_to_weight, input_cost, rank_controlability, controlability = drone_info(individual_or_population)
-    
-    return max_thrust_to_weight
+        hover_type, result, input_cost, rank_controlability, controlability = drone_info(individual_or_population)
+        return result
+    if len(individual_or_population.shape) == 2:
+        hover_type, result, input_cost, rank_controlability, controlability = drone_info(individual_or_population)
+        return result
+    return np.nan
 
 def input_cost(individual_or_population):
     if len(individual_or_population.shape) == 4:
@@ -193,19 +197,20 @@ def rank_controlability(individual_or_population):
 def controlability(individual_or_population):
     if len(individual_or_population.shape) == 4:
         ngens, pop_size, max_num_arms, nparams = individual_or_population.shape
-        controlability = np.zeros((ngens, pop_size))
+        result = np.zeros((ngens, pop_size))
         for g in range(ngens):
             for i in range(pop_size):
-                hover_type, max_thrust_to_weight, input_cost, rank_controlability, controlability[g,i] = drone_info(individual_or_population[g,i])
-    elif len(individual_or_population.shape) == 3:
-        controlability = np.zeros((individual_or_population.shape[0]))
+                hover_type, mtw, ic, rc, result[g,i] = drone_info(individual_or_population[g,i])
+        return result
+    if len(individual_or_population.shape) == 3:
+        result = np.zeros((individual_or_population.shape[0]))
         for i in range(individual_or_population.shape[0]):
-            hover_type, max_thrust_to_weight, input_cost, rank_controlability, controlability[i] = drone_info(individual_or_population[i])
-    
+            hover_type, mtw, ic, rc, result[i] = drone_info(individual_or_population[i])
+        return result
     if len(individual_or_population.shape) == 2:
-        hover_type, max_thrust_to_weight, input_cost, rank_controlability, controlability = drone_info(individual_or_population)
-    
-    return controlability
+        hover_type, mtw, ic, rc, result = drone_info(individual_or_population)
+        return result
+    return np.nan
 
 def compute_hovering_info(individual_or_population):
     

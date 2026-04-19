@@ -28,7 +28,7 @@ THRUST_SCALE = 0.2
 ZOOM_FACTOR = 1.05
 GATE_SIZE = 1.5
 GRID_SIZE = 20
-DRONE_BOX_SIZE = [0.1, 0.1, 0.1]
+DRONE_BOX_SIZE = [0.02, 0.02, 0.02]
 PROP_RADIUS = 0.0254  # 2-inch propeller radius in meters
 PATH_SUBSAMPLE = 5
 
