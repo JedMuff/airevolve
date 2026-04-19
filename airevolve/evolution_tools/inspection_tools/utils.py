@@ -377,6 +377,29 @@ def evolution_dataframe_to_fitness_array(evolution_df, population_size: int = No
     return fitness_array
 
 
+def get_points(individual: npt.NDArray) -> npt.NDArray:
+    """Convert a phenotype array to 3D Cartesian points.
+
+    Args:
+        individual: Array with shape (n_arms, 6) containing
+                   [magnitude, azimuth, pitch, motor_pitch, motor_yaw, direction].
+                   Rows that are all-NaN are skipped.
+
+    Returns:
+        Array of shape (n_valid_arms, 3) with Cartesian [x, y, z] coordinates.
+    """
+    valid_mask = ~np.isnan(individual).any(axis=1)
+    valid = individual[valid_mask]
+
+    points = []
+    for arm in valid:
+        mag, azimuth, pitch = arm[0], arm[1], arm[2]
+        x, y, z = convert_to_cartesian(mag, azimuth, pitch)
+        points.append([x, y, z])
+
+    return np.array(points) if points else np.empty((0, 3))
+
+
 def ENU_to_NED(x, y, z):
     """
     Convert Earth-Centered, Earth-Fixed (ENU) coordinates to North-East-Down (NED) coordinates.

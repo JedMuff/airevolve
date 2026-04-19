@@ -103,14 +103,14 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
         # Setup parameter limits
         if parameter_limits is None:
             # Default limits: [magnitude, arm_rotation, arm_pitch, motor_rotation, motor_pitch, direction]
-            # arm_pitch and motor_pitch use elevation convention: 0 = horizontal,
+            # arm_pitch uses elevation convention: 0 = horizontal,
             # +π/2 = straight up, −π/2 = straight down.
             self.parameter_limits = np.array([
-                [0.055, 0.17],           # magnitude (0.055 to 0.11+0.06)
+                [0.055, 0.17],           # magnitude
                 [-np.pi, np.pi],         # arm rotation (azimuth)
                 [-np.pi/2, np.pi/2],     # arm pitch (elevation)
                 [-np.pi, np.pi],         # motor rotation (azimuth)
-                [-np.pi/2, np.pi/2],     # motor pitch (elevation)
+                [-np.pi, np.pi],         # motor pitch
                 [0, 1]                   # direction
             ])
         else:
