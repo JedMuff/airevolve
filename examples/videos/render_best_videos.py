@@ -8,19 +8,19 @@ For each (task, genotype) in the config, selects:
 
 Only individuals whose hover_breakdown.json status == "full_evaluation" are
 eligible — they're the ones with `tuning_results.json` (required by
-examples/make_lee_video.py).
+examples/videos/make_lee_video.py).
 
 Usage:
     # Dry run: print the plan, no rendering
-    python -m experimentation.render_best_videos \
+    python examples/videos/render_best_videos.py \
         --config experimentation/experiment_config_neat.yaml --dry-run
 
     # Render one (top of first task/geno) to verify the pipeline
-    python -m experimentation.render_best_videos \
+    python examples/videos/render_best_videos.py \
         --config experimentation/experiment_config_neat.yaml --test-one
 
     # Full batch
-    python -m experimentation.render_best_videos \
+    python examples/videos/render_best_videos.py \
         --config experimentation/experiment_config_neat.yaml
 """
 
@@ -33,12 +33,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
 
 from experimentation.config import load_config
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-MAKE_VIDEO_SCRIPT = REPO_ROOT / "examples" / "make_lee_video.py"
+MAKE_VIDEO_SCRIPT = REPO_ROOT / "examples" / "videos" / "make_lee_video.py"
 
 _REP_RE = re.compile(r"^rep(\d+)$")
 

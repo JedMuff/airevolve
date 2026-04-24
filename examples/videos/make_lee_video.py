@@ -2,7 +2,7 @@
 Create combined video visualisation for a Lee-controller-tuned drone individual.
 
 Usage:
-    python examples/make_lee_video.py \
+    python examples/videos/make_lee_video.py \
         .data/lee_tuning_figure8_6arms_20260226_110350/generation_49/individual_1210 \
         --gate-cfg figure8
 """

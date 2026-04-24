@@ -72,7 +72,7 @@ fi
 # --- Run Evolution with Lee Tuning ---
 cd "$PROJECT_DIR"
 
-srun python3 examples/run_evolution_with_lee_tuning.py \
+srun python3 examples/evolution/run_evolution_with_lee_tuning.py \
     --genome-handler "$GENOTYPE" \
     --gate-cfg "$TASK" \
     --population-size 16 \

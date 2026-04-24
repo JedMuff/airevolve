@@ -36,25 +36,31 @@ pip install -e ".[vis]"
 Run a complete evolution experiment:
 
 ```bash
-python examples/run_evolution.py --genome-handler spherical --population-size 50 --generations 100 --gate-cfg figure8
+python examples/evolution/run_evolution.py --genome-handler spherical --population-size 50 --generations 100 --gate-cfg figure8
 ```
 ## Examples
 
-The `examples/` directory contains several demonstration scripts:
+The `examples/` directory is organised by purpose:
 
-- `run_evolution.py`: Complete evolution pipeline with gate training
-- `run_evolution_with_curriculum.py`: Evolution with curriculum learning
-- `run_evolution_with_optimization_repair.py`: Evolution with optimization-based repair
-- `run_hover_learning.py`: Hover learning for evolved individuals
-- `run_curriculum_learning.py`: Curriculum learning experiment runner
-- `run_learning_evaluation.py`: Evaluate learned policies
-- `genome_visualizer_demo.py`: Visualize drone morphologies
-- `sample_genomes.py`: Generate and analyze random drone designs
-- `make_video.py`: Create animations of drone flight behavior
-- `make_hover_video.py`: Create hover behavior animations
-- `generate_drone_stl_from_genome.py`: Export evolved drone to printable STL/STEP files
-- `optimization_repair_demo.py`: Demonstrate genome repair via optimization
-- `draw_blueprint.py`: Render a blueprint-style top-down view of a drone design
+- `examples/evolution/` — end-to-end evolution runners (`run_evolution.py`,
+  `run_evolution_with_curriculum.py`, `run_evolution_with_lee_tuning.py`,
+  `run_evolution_with_optimization_repair.py`, plus edit-distance comparisons,
+  flyability experiments, hover / curriculum learning, NEAT runners).
+- `examples/simulation/` — single-drone simulation demos
+  (`run_3D_simulation_lee_ctrl.py`, `benchmark_evaluation.py`).
+- `examples/tuning/` — controller and repair tuning
+  (`tune_lee_controller_gates.py`, `tune_lee_controller_gates_matched.py`,
+  `optimization_repair_demo.py`).
+- `examples/videos/` — render flight videos
+  (`make_video.py`, `make_hover_video.py`, `make_lee_video.py`,
+  `render_best_videos.py`).
+- `examples/visualization/` — morphology / genome visualisation
+  (`genome_visualizer_demo.py`, `sample_genomes.py`, `draw_blueprint.py`,
+  `visualize_cppn_genome.py`, `visualize_initial_bspline.py`,
+  `visualize_curriculum_gate_policy.py`,
+  `generate_drone_stl_from_genome.py`, `illustrate_typical_mutation.py`).
+- `examples/plotting/` — result plotting utilities
+  (`plot_flyability_results.py`, `plot_reward_curves.py`).
 
 ## Architecture
 

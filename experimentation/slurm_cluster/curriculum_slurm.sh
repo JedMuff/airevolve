@@ -51,7 +51,7 @@ echo "Temporary data directory: $TMP_DIR"
 # --- Run Evolution with Curriculum ---
 cd "$PROJECT_DIR"
 
-srun python3 examples/run_evolution_with_curriculum.py \
+srun python3 examples/evolution/run_evolution_with_curriculum.py \
     --num-workers 24 \
     --min-narms $NARMS \
     --max-narms $NARMS \

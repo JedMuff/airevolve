@@ -8,15 +8,15 @@ tuning.
 
 Usage:
     # Quick smoke test
-    python examples/run_evolution_edit_distance_comparison.py \
+    python examples/evolution/run_evolution_edit_distance_comparison.py \
         --handlers spherical --generations 5 --population-size 5
 
     # Full comparison (all three representations)
-    python examples/run_evolution_edit_distance_comparison.py \
+    python examples/evolution/run_evolution_edit_distance_comparison.py \
         --generations 50 --population-size 20
 
     # CPPN only with more segments
-    python examples/run_evolution_edit_distance_comparison.py \
+    python examples/evolution/run_evolution_edit_distance_comparison.py \
         --handlers cppn --num-segments 12 --generations 100
 """
 

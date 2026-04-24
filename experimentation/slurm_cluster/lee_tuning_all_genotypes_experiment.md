@@ -1,7 +1,7 @@
 # Lee Tuning All Genotypes Experiment
 
 **Script:** `experimentation/slurm_cluster/lee_tuning_all_genotypes_slurm.sh`
-**Entry point:** `examples/run_evolution_with_lee_tuning.py`
+**Entry point:** `examples/evolution/run_evolution_with_lee_tuning.py`
 
 ## Experiment Overview
 

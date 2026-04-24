@@ -11,18 +11,18 @@ Secondary use: Standalone testing with default B-spline trajectory
 
 Usage:
     # Visualize tuned controller (primary use)
-    python examples/run_3D_simulation_lee_ctrl.py \\
+    python examples/simulation/run_3D_simulation_lee_ctrl.py \\
         --bspline-config tuning_results_gates/stage3_best.json \\
         --gates figure8 \\
         --time 20
 
     # Standalone with defaults
-    python examples/run_3D_simulation_lee_ctrl.py \\
+    python examples/simulation/run_3D_simulation_lee_ctrl.py \\
         --gates circle \\
         --time 15
 
     # Headless (no visualization)
-    python examples/run_3D_simulation_lee_ctrl.py \\
+    python examples/simulation/run_3D_simulation_lee_ctrl.py \\
         --bspline-config results.json --gates figure8 --no-viz
 """
 
@@ -42,8 +42,9 @@ from airevolve.controllers.utils.wind_model import Wind
 from airevolve.controllers.utils.gate_configs import GATE_CONFIGS
 import airevolve.controllers.utils as utils
 
-# Import GateChecker from tuning script
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Import GateChecker from the tuning example, which lives as a sibling
+# directory (examples/tuning/) after the examples/ reorg.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tuning'))
 try:
     from tune_lee_controller_gates import GateChecker, ARM_LENGTH, PROP_SIZE, create_2inch_quad
 except ImportError:

@@ -13,14 +13,14 @@ Key Features:
 
 Usage:
     # Basic evolution with Lee tuning
-    python examples/run_evolution_with_lee_tuning.py \\
+    python examples/evolution/run_evolution_with_lee_tuning.py \\
         --gate-cfg circle \\
         --population-size 20 \\
         --generations 10 \\
         --max-evals 100
 
     # Parallel CMA-ES workers for faster tuning
-    python examples/run_evolution_with_lee_tuning.py \\
+    python examples/evolution/run_evolution_with_lee_tuning.py \\
         --gate-cfg figure8 \\
         --population-size 30 \\
         --generations 20 \\
@@ -28,7 +28,7 @@ Usage:
         --cma-workers 8
 
     # Quick test run
-    python examples/run_evolution_with_lee_tuning.py \\
+    python examples/evolution/run_evolution_with_lee_tuning.py \\
         --gate-cfg circle \\
         --population-size 10 \\
         --generations 5 \\
