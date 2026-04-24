@@ -32,7 +32,9 @@ def animate_lee_individual(genome, tuning_results_path, gate_cfg,
                            view_type='top', follow=True,
                            draw_forces=False, draw_path=True,
                            auto_play=True, record=True,
-                           motor_colors=None, fps=100):
+                           motor_colors=None, fps=100,
+                           overlay_text_position='lower right',
+                           overlay_text_scale=0.7):
     """
     Pre-record a Lee-controller flight and replay it via view().
 
@@ -66,6 +68,13 @@ def animate_lee_individual(genome, tuning_results_path, gate_cfg,
     bspline_timing = tuning.get('bspline_timing', None)
     gate_offsets = tuning.get('gate_offsets', None)
 
+    # Legacy tuning_results.json files saved Stage-1 winners with
+    # gate_offsets=[0.0]*N, but Stage 1 actually ran against the B-spline's
+    # tension-based defaults (it passed gate_offsets=None). Remap all-zeros
+    # to None so the trajectory reproduces what CMA-ES evaluated.
+    if gate_offsets is not None and not np.any(np.asarray(gate_offsets)):
+        gate_offsets = None
+
     gate_config = GATE_CONFIGS[gate_cfg]
 
     # Run simulation once with trajectory recording
@@ -87,6 +96,7 @@ def animate_lee_individual(genome, tuning_results_path, gate_cfg,
     positions = traj['positions']
     euler_angles = traj['euler_angles']
     motor_commands = traj['motor_commands']
+    gate_passes = traj['gate_passes']
 
     # Subsample from simulation rate (200 Hz) to playback rate (100 Hz)
     sim_hz = int(round(1.0 / dt))
@@ -94,11 +104,38 @@ def animate_lee_individual(genome, tuning_results_path, gate_cfg,
     positions = positions[::subsample]
     euler_angles = euler_angles[::subsample]
     motor_commands = motor_commands[::subsample]
+    # Build the playback gate counter by taking the cumulative sum at the full
+    # simulation rate and subsampling the cumulative array. This preserves
+    # every pass (a prior implementation collapsed multiple passes within one
+    # playback window via np.any, which silently lost one when two crossings
+    # landed in the same window).
+    gates_cumulative = np.cumsum(gate_passes.astype(int))[::subsample]
+    gates_total = len(gate_config.gate_pos)
+
+    print(f"[animate_lee_individual] sim gates_passed={result['gates_passed']}  "
+          f"sum(gate_passes)={int(gate_passes.sum())}  "
+          f"cumulative_final={int(gates_cumulative[-1])}")
+    pass_steps = np.where(gate_passes)[0]
+    if len(pass_steps) > 0:
+        print(f"[animate_lee_individual] pass sim_steps={pass_steps.tolist()[:20]}"
+              f"{'...' if len(pass_steps) > 20 else ''}  "
+              f"times_s={[round(s * dt, 3) for s in pass_steps[:20].tolist()]}")
 
     # Normalise motor commands for visualisation
     w_max = motor_commands.max()
     if w_max > 0:
         motor_commands = motor_commands / w_max
+
+    # Low-pass the motor commands so the thrust arrows don't jitter frame-to-frame.
+    # Window is in playback frames; ~0.1s of smoothing.
+    smooth_window = max(3, int(0.1 * fps))
+    if motor_commands.shape[0] >= smooth_window:
+        kernel = np.ones(smooth_window) / smooth_window
+        padded = np.pad(motor_commands, ((smooth_window - 1, 0), (0, 0)), mode='edge')
+        motor_commands = np.stack([
+            np.convolve(padded[:, m], kernel, mode='valid')
+            for m in range(motor_commands.shape[1])
+        ], axis=1)
 
     num_motors = genome.shape[0]
     num_frames = len(positions)
@@ -124,6 +161,10 @@ def animate_lee_individual(genome, tuning_results_path, gate_cfg,
         for m in range(num_motors):
             state[f'u{m+1}'] = motor_commands[idx, m]
 
+        if overlay_text_position is not None:
+            state['gates_passed'] = int(gates_cumulative[idx])
+            state['gates_total'] = gates_total
+
         return state
 
     view(
@@ -143,4 +184,6 @@ def animate_lee_individual(genome, tuning_results_path, gate_cfg,
         auto_play=auto_play,
         record=record,
         motor_colors=motor_colors,
+        overlay_text_position=overlay_text_position,
+        overlay_text_scale=overlay_text_scale,
     )
