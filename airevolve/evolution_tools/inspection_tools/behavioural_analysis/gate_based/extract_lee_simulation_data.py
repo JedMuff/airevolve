@@ -37,6 +37,13 @@ def extract_lee_simulation_data(genome, tuning_results_path, gate_cfg,
     bspline_timing = tuning.get('bspline_timing', None)
     gate_offsets = tuning.get('gate_offsets', None)
 
+    # Legacy tuning_results.json files saved Stage-1 winners with
+    # gate_offsets=[0.0]*N, but Stage 1 actually ran against the B-spline's
+    # tension-based defaults (it passed gate_offsets=None). Remap all-zeros
+    # to None so the trajectory reproduces what CMA-ES evaluated.
+    if gate_offsets is not None and not np.any(np.asarray(gate_offsets)):
+        gate_offsets = None
+
     gate_config = GATE_CONFIGS[gate_cfg]
 
     # Run simulation with trajectory recording

@@ -31,6 +31,7 @@ GRID_SIZE = 20
 DRONE_BOX_SIZE = [0.02, 0.02, 0.02]
 PROP_RADIUS = 0.0254  # 2-inch propeller radius in meters
 PATH_SUBSAMPLE = 5
+THRUST_BASE_LEN = 0.0  # Base arrow length so direction is visible at low thrust
 
 # Camera constants
 CAMERA_MATRIX = np.array([[1.e+3, 0., DEFAULT_WIDTH/2], [0., 1.e+3, DEFAULT_HEIGHT/2], [0., 0., 1.]])
@@ -54,6 +55,28 @@ def nothing(x):
     """Placeholder function for OpenCV trackbar callbacks."""
     pass
 
+
+_OVERLAY_POSITIONS = {
+    'upper left', 'upper right', 'lower left', 'lower right',
+    'top left', 'top right', 'bottom left', 'bottom right',
+}
+
+
+def _overlay_anchor(position, text_w, text_h, frame_w, frame_h, pad=15):
+    """Resolve a corner keyword to an (x, y) anchor for cv2.putText.
+
+    cv2.putText's origin is the text's baseline-left, so ``y`` must be below
+    the top of the text box.
+    """
+    position = (position or 'lower right').lower()
+    if position not in _OVERLAY_POSITIONS:
+        position = 'lower right'
+    top = position.startswith('upper') or position.startswith('top')
+    left = position.endswith('left')
+    x = pad if left else (frame_w - text_w - pad)
+    y = (pad + text_h) if top else (frame_h - pad)
+    return x, y
+
 def create_camera(view_type='iso', width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT):
     """
     Create a camera with predefined settings based on view type.
@@ -73,7 +96,7 @@ def create_camera(view_type='iso', width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT):
             cameraMatrix=CAMERA_MATRIX,
             distCoeffs=DIST_COEFFS
         )
-        cam.r = [-8, 0, 0]
+        cam.r = [-3.8, 0, 0]
     elif view_type in ['isometric', 'iso']:
         cam = Camera(
             pos=np.array([0., 0., 0.]),
@@ -81,7 +104,7 @@ def create_camera(view_type='iso', width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT):
             cameraMatrix=CAMERA_MATRIX,
             distCoeffs=DIST_COEFFS
         )
-        cam.r = [-6, 0, 0]
+        cam.r = [-2.6, 0, 0]
     else:
         cam = Camera(
             pos=np.array([0., 0., 0.]),
@@ -165,27 +188,29 @@ def draw_drone_and_forces(drone, forces, pos, ori, u, state, draw_forces, scl, f
     if len(pos.shape) == 1:  # Single drone
         drone.translate(pos-drone.pos)
         drone.rotate(ori)
-        set_thrust(drone, forces, u*scl)
-        drone.draw(frame, cam, color=None, pt=2)
+        set_thrust(drone, forces, u*scl, base_len=THRUST_BASE_LEN)
+        drone.draw(frame, cam, color=COLORS_BGR['black'], pt=2)
 
         if draw_forces:
             for force in forces:
-                force.draw(frame, cam, color=COLORS_BGR['red'], pt=2)
+                c = force.color if force.color is not None else COLORS_BGR['red']
+                force.draw(frame, cam, color=c, pt=2)
     else:  # Multiple drones
         for i in range(pos.shape[0]):
             drone.translate(pos[i]-drone.pos)
             drone.rotate(ori[i])
-            set_thrust(drone, forces, u[i]*scl)
+            set_thrust(drone, forces, u[i]*scl, base_len=THRUST_BASE_LEN)
 
             # Draw drone with custom color if available
             if 'color' in state and len(state['color']) > i:
                 drone.draw(frame, cam, color=state['color'][i], pt=2)
             else:
-                drone.draw(frame, cam, color=None, pt=2)
+                drone.draw(frame, cam, color=COLORS_BGR['black'], pt=2)
 
             if draw_forces:
                 for force in forces:
-                    force.draw(frame, cam, color=COLORS_BGR['red'], pt=2)
+                    c = force.color if force.color is not None else COLORS_BGR['red']
+                    force.draw(frame, cam, color=c, pt=2)
 
 def get_drone_state_zero():
     """
@@ -223,6 +248,8 @@ def view(propellers,
          auto_play=True,
          record=False,
          motor_colors=['red', 'blue', 'green', 'orange', 'purple', 'brown'],
+         overlay_text_position='lower right',
+         overlay_text_scale=6.0,
          ):
     """
     Real-time 3D visualization of drone state with interactive controls.
@@ -359,6 +386,18 @@ def view(propellers,
             gate.rotate([0,0,yaw])
             gate_collision_box.rotate([0,0,yaw])
             gate.draw(frame, cam, color=(0,140,255), pt=4)
+
+        # Gates-passed counter (drawn before the recording write so it appears
+        # in the output file).
+        if 'gates_passed' in state:
+            label = f"{state['gates_passed']}"
+            thickness = max(1, int(round(overlay_text_scale * 3)))
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX,
+                                          overlay_text_scale, thickness)
+            tx, ty = _overlay_anchor(overlay_text_position, tw, th, width, height)
+            cv2.putText(frame, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX,
+                        overlay_text_scale, COLORS_BGR['black'],
+                        thickness=thickness)
 
         # Recording indicator
         if record:

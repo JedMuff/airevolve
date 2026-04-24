@@ -112,11 +112,20 @@ def pick_representatives(valid_by_rep, k=3, min_gates_for_bottom=1):
     return top, middle, bottom
 
 
-def run_make_video(ind_path: Path, task: str, dry_run=False):
+def run_make_video(ind_path: Path, task: str, dry_run=False,
+                   action_smooth_ms: float = 50.0,
+                   overlay_scale: float = 6.0,
+                   iso_overlay_pos: str = "lower right",
+                   draw_forces: bool = True):
     cmd = [
         sys.executable, str(MAKE_VIDEO_SCRIPT),
         str(ind_path), "--gate-cfg", task,
+        "--action-smooth-ms", str(action_smooth_ms),
+        "--overlay-scale", str(overlay_scale),
+        "--iso-overlay-pos", iso_overlay_pos,
     ]
+    if not draw_forces:
+        cmd.append("--no-forces")
     print("    $ " + " ".join(cmd))
     if dry_run:
         return 0
@@ -148,7 +157,7 @@ def main():
     parser.add_argument("--config", required=True,
                         help="Path to experiment YAML config")
     parser.add_argument("--k", type=int, default=1,
-                        help="Number of representatives per bucket (default 3)")
+                        help="Number of representatives per bucket (default 1)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print the plan without rendering")
     parser.add_argument("--test-one", action="store_true",
@@ -161,6 +170,9 @@ def main():
                         help="Only process the TOP bucket (skip MID and BOT)")
     parser.add_argument("--collate-only", action="store_true",
                         help="Skip rendering; only copy existing combined_output.mp4 files")
+    parser.add_argument("--skip-existing", action="store_true",
+                        help="Skip rendering when combined_output.mp4 already exists "
+                             "(still collates it). Lets you resume an interrupted run.")
     args = parser.parse_args()
 
     collated_dir = Path(args.collated_dir)
@@ -213,7 +225,11 @@ def main():
                     continue
                 for rep, fit, gates, path in group:
                     print(f"    [{label}] {rep} fitness={fit:7.2f} gates={gates} path={path}")
-                    if not args.collate_only:
+                    already_rendered = (path / "videos" / "combined_output.mp4").exists()
+                    if args.collate_only or (args.skip_existing and already_rendered):
+                        if args.skip_existing and already_rendered and not args.collate_only:
+                            print("    (skip-existing) combined_output.mp4 present, skipping render")
+                    else:
                         run_make_video(path, task, dry_run=args.dry_run)
                     collate_video(path, collated_dir, task, geno, label, rep,
                                   fit, dry_run=args.dry_run)

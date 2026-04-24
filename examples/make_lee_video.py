@@ -24,7 +24,11 @@ def process_lee_individual(individual_dir, gate_cfg="figure8", sim_time=20.0,
                            dt=0.005, fps=100, width=864, height=700, dpi=200,
                            gate_label_ylevel=11.0, fontsize=7, pad=0.05,
                            offset_val=0.5, gate_line_alpha=0.5, alpha=1.0,
-                           motor_colors=None, color='blue'):
+                           motor_colors=None, color='blue',
+                           iso_overlay_position='lower right',
+                           overlay_text_scale=0.7,
+                           action_smooth_ms=0.0,
+                           draw_forces=False):
     """
     Process a Lee-controller-tuned individual to create visualisation videos.
 
@@ -119,6 +123,19 @@ def process_lee_individual(individual_dir, gate_cfg="figure8", sim_time=20.0,
     plot_timesteps = np.arange(len(plot_speed))
     plot_actions = ind_actions[::subsample]
 
+    # Optional cosmetic smoothing on the action plot. Defaults to 0 (raw
+    # motor commands) so the plot stays honest about controller chatter.
+    # Pass e.g. action_smooth_ms=100 for a 0.1s causal moving average.
+    if action_smooth_ms and action_smooth_ms > 0:
+        window = max(3, int(round(action_smooth_ms * fps / 1000.0)))
+        if plot_actions.shape[0] >= window:
+            kernel = np.ones(window) / window
+            padded = np.pad(plot_actions, ((window - 1, 0), (0, 0)), mode='edge')
+            plot_actions = np.stack([
+                np.convolve(padded[:, m], kernel, mode='valid')
+                for m in range(plot_actions.shape[1])
+            ], axis=1)
+
     # Gate passes are sparse booleans — point-sampling would miss events
     # that land on skipped timesteps. Use a rolling OR over each window.
     n = len(ind_gate_passes)
@@ -163,9 +180,11 @@ def process_lee_individual(individual_dir, gate_cfg="figure8", sim_time=20.0,
             file_name="/top_view.mp4",
             sim_time=sim_time, dt=dt,
             view_type='top', follow=True,
-            draw_forces=False, draw_path=True,
+            draw_forces=draw_forces, draw_path=True,
             auto_play=True, record=True,
             motor_colors=motor_colors, fps=fps,
+            overlay_text_position=None,  # no gates counter on the top view
+            overlay_text_scale=overlay_text_scale,
         )
 
         animate_lee_individual(
@@ -176,9 +195,11 @@ def process_lee_individual(individual_dir, gate_cfg="figure8", sim_time=20.0,
             file_name="/iso_view.mp4",
             sim_time=sim_time, dt=dt,
             view_type='iso', follow=True,
-            draw_forces=False, draw_path=True,
+            draw_forces=draw_forces, draw_path=True,
             auto_play=True, record=True,
             motor_colors=motor_colors, fps=fps,
+            overlay_text_position=iso_overlay_position,
+            overlay_text_scale=overlay_text_scale,
         )
 
         print("Animations created successfully!")
@@ -227,6 +248,17 @@ def parse_args():
                         help="Video height in pixels")
     parser.add_argument("--color", default="blue",
                         help="Primary colour for plots")
+    parser.add_argument("--iso-overlay-pos",
+                        choices=["upper left", "upper right", "lower left", "lower right"],
+                        default="lower right",
+                        help="Corner for the gates-passed counter on the iso panel")
+    parser.add_argument("--overlay-scale", type=float, default=0.7,
+                        help="Font scale for the gates-passed counter")
+    parser.add_argument("--action-smooth-ms", type=float, default=0.0,
+                        help="Cosmetic moving-average window (ms) for the action "
+                             "plot. 0 = raw motor commands (honest).")
+    parser.add_argument("--no-forces", action="store_true",
+                        help="Hide per-motor thrust direction arrows in both views")
 
     return parser.parse_args()
 
@@ -245,6 +277,10 @@ def main():
             width=args.width,
             height=args.height,
             color=args.color,
+            iso_overlay_position=args.iso_overlay_pos,
+            overlay_text_scale=args.overlay_scale,
+            action_smooth_ms=args.action_smooth_ms,
+            draw_forces=not args.no_forces,
         )
         print("Processing completed successfully!")
         return stats
