@@ -4,8 +4,8 @@ Flyability Results Plotter
 Loads stored results from a flyability experiment and generates visualizations.
 
 Usage:
-    python examples/plot_flyability_results.py .data/flyability/<experiment_dir> --show
-    python examples/plot_flyability_results.py .data/flyability/<experiment_dir> --dpi 150
+    python examples/plotting/plot_flyability_results.py .data/flyability/<experiment_dir> --show
+    python examples/plotting/plot_flyability_results.py .data/flyability/<experiment_dir> --dpi 150
 """
 
 import argparse

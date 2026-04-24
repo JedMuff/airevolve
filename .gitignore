@@ -130,6 +130,9 @@ cython_debug/
 # Experiment results
 .data/
 
+# Local archive of experiment artifacts, logs, and ad-hoc scripts
+archive/
+
 # Claude Code
 .claude/
 

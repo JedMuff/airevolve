@@ -873,7 +873,7 @@ class CurriculumTuner:
         else:
             print("TO VISUALIZE FINAL RESULT:")
             print(f"{'='*70}")
-            print(f"python examples/run_3D_simulation_lee_ctrl.py \\")
+            print(f"python examples/simulation/run_3D_simulation_lee_ctrl.py \\")
             print(f"    --bspline-config {config_file} \\")
             print(f"    --gates [gate_config] \\")
             print(f"    --time {self.sim_time:.1f}")
@@ -1027,7 +1027,7 @@ def main():
         print(f"Stage 3 (Full Optimization):  {tuner3.best_score:.2f} fitness")
         print(f"\nFinal config saved to: {args.output}/stage3_best.json")
         print("\nTo visualize the result:")
-        print(f"python examples/run_3D_simulation_lee_ctrl.py \\")
+        print(f"python examples/simulation/run_3D_simulation_lee_ctrl.py \\")
         print(f"    --bspline-config {args.output}/stage3_best.json \\")
         print(f"    --gates {args.gates} \\")
         print(f"    --time {args.time:.1f}")

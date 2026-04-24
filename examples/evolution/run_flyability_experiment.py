@@ -9,13 +9,13 @@ This is a pure sampling + measurement experiment — no evolution involved.
 
 Usage:
     # Quick test run
-    python examples/run_flyability_experiment.py --n-drones 50 --max-evals 30 --cma-workers 2
+    python examples/evolution/run_flyability_experiment.py --n-drones 50 --max-evals 30 --cma-workers 2
 
     # Full experiment
-    python examples/run_flyability_experiment.py --n-drones 1000 --max-evals 200 --cma-workers 4
+    python examples/evolution/run_flyability_experiment.py --n-drones 1000 --max-evals 200 --cma-workers 4
 
     # Custom gate config and arm count
-    python examples/run_flyability_experiment.py --n-drones 500 --gate-cfg circle --min-narms 4 --max-narms 8
+    python examples/evolution/run_flyability_experiment.py --n-drones 500 --gate-cfg circle --min-narms 4 --max-narms 8
 """
 
 import sys

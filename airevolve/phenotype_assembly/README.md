@@ -15,7 +15,7 @@ result = generate_stl_files(handler, output_dir="./my_drone")
 print(result.assembly_file)   # Path to full_drone_assembly.stl
 ```
 
-See `examples/generate_drone_stl_from_genome.py` for complete worked examples.
+See `examples/visualization/generate_drone_stl_from_genome.py` for complete worked examples.
 
 ---
 

@@ -8,10 +8,10 @@ the best individual.
 
 Usage:
     # Quick smoke test
-    python examples/run_neat_edit_distance.py --handler spherical --generations 5 --population-size 10
+    python examples/evolution/run_neat_edit_distance.py --handler spherical --generations 5 --population-size 10
 
     # Full run
-    python examples/run_neat_edit_distance.py --handler spherical --generations 50 --population-size 30
+    python examples/evolution/run_neat_edit_distance.py --handler spherical --generations 50 --population-size 30
 """
 
 import sys
