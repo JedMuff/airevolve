@@ -410,8 +410,8 @@ if __name__ == "__main__":
         os.makedirs(save_dir)
 
     # Load data for two individuals
-    individual1_dir =  "/home/jed/workspaces/airevolve/data_backup/asym_slalom/asym_slalom4evo_logs_20250320_095329/gen40/ind964/"
-    individual2_dir = "/home/jed/workspaces/airevolve/logs/hex_slalom/rep1/"
+    individual1_dir =  "/home/user/workspace/airevolve/data_backup/asym_slalom/asym_slalom4evo_logs_20250320_095329/gen40/ind964/"
+    individual2_dir = "/home/user/workspace/airevolve/logs/hex_slalom/rep1/"
     ind1_policy_file = individual1_dir + "/policy.zip"
     ind2_policy_file = individual2_dir + "/policy.zip"
     individual1_body = individual1_dir + "/individual.npy"

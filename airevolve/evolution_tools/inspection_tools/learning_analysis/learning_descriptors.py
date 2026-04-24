@@ -468,7 +468,7 @@ if __name__ == '__main__':
         print("Asymptotic performance: ", ap)
         print("Stability of learning: ", sl)
 
-        # Create plot /home/jed/workspaces/airevolve/data_backup/asym_circle/asym_circle4evo_logs_20250320_095305/gen15/ind364/figure.png
+        # Create plot /home/user/workspace/airevolve/data_backup/asym_circle/asym_circle4evo_logs_20250320_095305/gen15/ind364/figure.png
         plt.figure(figsize=(12, 8))
         plt.plot(time_steps, episode_rewards, label='Episode rewards', color='gray', alpha=0.5)
         plt.plot(time_steps, smoothed_rewards_median, label='Smoothed rewards median', linewidth=5)
@@ -557,7 +557,7 @@ if __name__ == '__main__':
     #
     # Multiple directories data collection (auto-detects population sizes):
     # python airevolve/inspection_tools/learning_descriptors.py --mode collect --data_path /path/to/data1 /path/to/data2 --multiple_experiments
-    # python airevolve/inspection_tools/learning_descriptors.py --mode collect --data_path /media/jed/My\ Passport/asym_figure8/ /media/jed/My\ Passport/asym_slalom/ --multiple_experiments
+    # python airevolve/inspection_tools/learning_descriptors.py --mode collect --data_path /path/to/data/asym_figure8/ /path/to/data/asym_slalom/ --multiple_experiments
     # 
     # Using wildcards (bash will expand):
     # python script.py --mode collect --data_path /path/to/exp_* --num_generations 50

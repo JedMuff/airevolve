@@ -1,6 +1,6 @@
 """
 Sort experiment data from tmp/airevolve_data_180226/ to organized structure
-on the external drive /media/jed/My Passport/airevolve030326/.
+on the external drive /path/to/data/airevolve030326/.
 
 Dry-run by default. Use --execute to actually copy files.
 """
@@ -14,7 +14,7 @@ import shutil
 # Source directory
 SRC_DIR = os.path.expanduser("~/workspaces/airevolve/tmp/combined_hg/")
 # Target directory on external drive
-DST_DIR = "/media/jed/My Passport/airevolve030326"
+DST_DIR = "/path/to/data/airevolve030326"
 
 
 def parse_dir_name(name):

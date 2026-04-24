@@ -48,4 +48,4 @@ if __name__ == "__main__":
     # directory = "/path/to/your/videos"
     # For demonstration, using a hardcoded path
     # You should replace this with your actual path
-    combine_videos_from_directory("/home/jed/workspaces/airevolve/plots/example_comparison")
+    combine_videos_from_directory("/home/user/workspace/airevolve/plots/example_comparison")

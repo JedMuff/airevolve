@@ -45,8 +45,8 @@ echo "Running on node: $(hostname)"
 echo "Job started at: $(date)"
 
 # --- Environment Setup ---
-VENV_PATH=/home/jed/workspace/airevolve/.venv
-PROJECT_DIR=/home/jed/workspace/airevolve
+VENV_PATH=/home/user/workspace/airevolve/.venv
+PROJECT_DIR=/home/user/workspace/airevolve
 
 source "$VENV_PATH/bin/activate"
 
@@ -60,7 +60,7 @@ mkdir -p "$PROJECT_DIR/out"
 
 # --- Set up temporary and final output directories ---
 TMP_DIR="/tmp/seeded_cppn_hg_${STRATEGY}_${TASK}_${GENOTYPE}_rep${REP_IDX}_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
-FINAL_DIR="/scratch/jed/airevolve_data_seeded_cppn"
+FINAL_DIR="/scratch/user/airevolve_data_seeded_cppn"
 
 mkdir -p "$TMP_DIR"
 echo "Temporary data directory: $TMP_DIR"

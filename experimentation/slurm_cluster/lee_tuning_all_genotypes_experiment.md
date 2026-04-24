@@ -241,7 +241,7 @@ Optimizes **7 + n_gates * 3 parameters**:
 Results are written to a temporary directory on the compute node, then moved to persistent scratch storage:
 
 ```
-/scratch/jed/airevolve_data_180226/lee_tuning_{task}_{genotype}_rep{rep}_{jobid}_{arrayid}/
+/scratch/user/airevolve_data_180226/lee_tuning_{task}_{genotype}_rep{rep}_{jobid}_{arrayid}/
 ```
 
 Each run's log directory contains the full evolutionary history (per-generation fitness, genomes, and tuning results).

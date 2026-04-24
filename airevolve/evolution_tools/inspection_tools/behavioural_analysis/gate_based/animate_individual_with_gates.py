@@ -123,7 +123,7 @@ def animate_individual(
 # Example usage
 if __name__ == "__main__":
     gate_cfg="slalom"
-    individual_dir="/home/jed/workspaces/airevolve/data_backup/asym_slalom/asym_slalom4evo_logs_20250320_095329/gen40/ind964/"
+    individual_dir="/home/user/workspace/airevolve/data_backup/asym_slalom/asym_slalom4evo_logs_20250320_095329/gen40/ind964/"
     save_dir="./plots/example_comparison/"
     animate_individual(gate_cfg, individual_dir, save_dir, 
                        file_name="top_view.mp4", 

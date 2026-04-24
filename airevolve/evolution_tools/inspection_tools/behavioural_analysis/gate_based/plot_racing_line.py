@@ -147,7 +147,7 @@ def plot_racing_line_speed_segments(ind_speed, ind_positions_2d, save_dir, save_
 if __name__ == "__main__":
     # Example usage
     save_dir = "./plots/example_comparison/"
-    ind_dir =  "/home/jed/workspaces/airevolve/data_backup/asym_slalom/asym_slalom4evo_logs_20250320_095329/gen40/ind964/"
+    ind_dir =  "/home/user/workspace/airevolve/data_backup/asym_slalom/asym_slalom4evo_logs_20250320_095329/gen40/ind964/"
     policy_file = ind_dir + "/policy.zip"
     body = ind_dir + "/individual.npy"
     individual = np.load(body)

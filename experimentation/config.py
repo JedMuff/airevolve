@@ -9,7 +9,7 @@ import yaml
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 
-BASE_DIR = "/media/jed/My Passport/airevolve030326/v2"
+BASE_DIR = "/path/to/data/airevolve030326/v2"
 
 TASKS = ["backandforth", "figure8", "circle", "slalom"]
 TASK_LABELS = {

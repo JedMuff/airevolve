@@ -7,20 +7,20 @@
 #SBATCH --cpus-per-task=5
 #SBATCH --array=15-24
 
-VENV_PATH=/home/jed/workspace/airevolve/.venv
+VENV_PATH=/home/user/workspace/airevolve/.venv
 
 echo "Node: $(hostname)"
 echo "Using Python from: $VENV_PATH"
 
 export PATH="$VENV_PATH/bin:$PATH"
 export PYTHONPATH="$VENV_PATH/lib/python3.10/site-packages:$PYTHONPATH"
-export PYTHONPATH="/home/jed/workspace/drone-hover:$PYTHONPATH"
+export PYTHONPATH="/home/user/workspace/drone-hover:$PYTHONPATH"
 
 which python3
 python3 --version
 # Commands to execute as part of your task
 
-source /home/jed/workspace/airevolve/.venv/bin/activate
+source /home/user/workspace/airevolve/.venv/bin/activate
 
 if (($SLURM_ARRAY_TASK_ID == 0)) ; then
     srun python3 examples/evolution/run_evolution.py --population-size 12 --generations 40 --gate-cfg circle --num-envs 100 --strategy-type plus --symmetry none --log-dir ./logs/
