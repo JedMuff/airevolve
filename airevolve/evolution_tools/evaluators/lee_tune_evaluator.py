@@ -815,9 +815,13 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
         with open(os.path.join(save_dir, "learning_curve.json"), 'w') as f:
             json.dump(learning_curve_data, f, indent=2)
 
-        # Effective bspline_timing
+        # Effective bspline_timing. Default gate_offsets come from the
+        # B-spline's tension-based initialisation — this is what Stage 1
+        # actually runs against (it passes gate_offsets=None to
+        # simulate_with_gains). Saving zeros here would misrepresent the
+        # trajectory Stage 1 winners were evaluated on.
         effective_timing = list(bspline_timing)
-        effective_gate_offsets = [0.0] * n_offset_params
+        effective_gate_offsets = list(default_offsets)
 
         # Enhanced tuning_results.json
         if best_result is not None:
@@ -854,7 +858,7 @@ def optimize_controller_for_morphology(individual, gate_config, max_evaluations=
                 'fitness': 0,
                 'gates_passed': 0,
                 'bspline_timing': list(bspline_timing),
-                'gate_offsets': [0.0] * n_offset_params,
+                'gate_offsets': list(default_offsets),
                 'crashed': True,
                 'success': False,
                 'n_cma_iterations_stage1': len(stage1_fitnesses),
