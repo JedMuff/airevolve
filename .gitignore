@@ -127,6 +127,12 @@ cython_debug/
 # macOS
 .DS_Store
 
+# Experiment results
+.data/
+
+# Local archive of experiment artifacts, logs, and ad-hoc scripts
+archive/
+
 # Claude Code
 .claude/
 

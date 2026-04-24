@@ -5,6 +5,7 @@ This module provides the core drone simulation framework using propeller configu
 for automatic computation of physical properties and allocation matrices.
 """
 
+import warnings
 import numpy as np
 from sympy import *
 from .drone_configuration import DroneConfiguration
@@ -16,18 +17,20 @@ class DroneSimulator:
     Uses propeller configurations for automatic computation of mass, inertia, and allocation matrices.
     """
     
-    def __init__(self, propellers=None, dt=0.01, gravity=9.81):
+    def __init__(self, propellers=None, mountpoints=None, dt=0.005, gravity=9.81):
         """
         Initialize drone simulator from propeller configuration.
-        
+
         Args:
             propellers (list): List of propeller dictionaries, each containing:
                 - "loc": [x, y, z] position in body frame (meters)
-                - "dir": [x, y, z, rotation] thrust direction and spin direction  
+                - "dir": [x, y, z, rotation] thrust direction and spin direction
                 - "propsize": propeller size in inches (4-8)
+            mountpoints (list, optional): Mounting points for each propeller.
+                If None, defaults to origin for all propellers.
             dt (float): Integration time step
             gravity (float): Gravitational acceleration
-            
+
         Example:
             # Standard quadrotor
             propellers = [
@@ -38,13 +41,13 @@ class DroneSimulator:
             ]
             drone = DroneSimulator(propellers=propellers)
         """
-        
+
         # Use default quadrotor if no propellers specified
         if propellers is None:
-            propellers = create_standard_propeller_config("quad", arm_length=0.11, prop_size=5)
-        
+            propellers = create_standard_propeller_config("quad", arm_length=0.11, prop_size=2)
+
         # Create drone configuration and compute physical properties
-        self.config = DroneConfiguration(propellers)
+        self.config = DroneConfiguration(propellers, mountpoints=mountpoints)
         
         # Extract computed properties
         self.Bf, self.Bm = self.config.get_allocation_matrices()
@@ -70,7 +73,7 @@ class DroneSimulator:
         self.control_history = []
     
     @classmethod
-    def create_standard_drone(cls, drone_type="quad", arm_length=0.11, prop_size=5, **kwargs):
+    def create_standard_drone(cls, drone_type="quad", arm_length=0.11, prop_size=2, **kwargs):
         """
         Create standard drone configuration.
         
@@ -114,10 +117,12 @@ class DroneSimulator:
         # Convert allocation matrices to SymPy
         Bf_sym = Matrix(self.Bf)
         Bm_sym = Matrix(self.Bm)
-        
+
         # Forces and moments in body frame
-        F_body = Bf_sym @ U  # [Fx, Fy, Fz] in body frame
-        M_body = Bm_sym @ U  # [Mx, My, Mz] in body frame
+        # Apply quadratic relationship for proper motor physics
+        U_squared = Matrix([u**2 for u in U])
+        F_body = Bf_sym @ U_squared  # [Fx, Fy, Fz] in body frame
+        M_body = Bm_sym @ U_squared  # [Mx, My, Mz] in body frame
         
         # Translational dynamics (Newton's laws)
         d_x = vx
@@ -231,13 +236,16 @@ class DroneSimulator:
             self.set_motor_commands(motor_commands)
         
         # RK4 integration for better numerical stability
-        k1 = self.dt * self.dynamics_func(self.state, self.motor_commands)
-        k2 = self.dt * self.dynamics_func(self.state + 0.5 * k1, self.motor_commands)
-        k3 = self.dt * self.dynamics_func(self.state + 0.5 * k2, self.motor_commands)
-        k4 = self.dt * self.dynamics_func(self.state + k3, self.motor_commands)
-        
-        # Update state using RK4 formula
-        self.state = self.state + (k1 + 2*k2 + 2*k3 + k4) / 6.0
+        with np.errstate(all='ignore'):
+            k1 = self.dt * self.dynamics_func(self.state, self.motor_commands)
+            k2 = self.dt * self.dynamics_func(self.state + 0.5 * k1, self.motor_commands)
+            k3 = self.dt * self.dynamics_func(self.state + 0.5 * k2, self.motor_commands)
+            k4 = self.dt * self.dynamics_func(self.state + k3, self.motor_commands)
+            self.state = self.state + (k1 + 2*k2 + 2*k3 + k4) / 6.0
+
+        # Detect numerical divergence (e.g. Euler angle singularity at ±90° pitch)
+        if np.any(np.isnan(self.state)) or np.any(np.isinf(self.state)):
+            raise RuntimeError("Numerical divergence in drone state (likely Euler angle singularity)")
         
         # Store history
         self.time_history.append(len(self.time_history) * self.dt)
@@ -274,9 +282,74 @@ class DroneSimulator:
         self.state_history = []
         self.control_history = []
 
+    def _get_actual_motor_speeds(self):
+        """Get actual motor speeds from normalized commands."""
+        motor_speeds = np.zeros(max(4, self.num_motors))
+        for i in range(self.num_motors):
+            prop = self.config.propellers[i]
+            motor_speeds[i] = np.sqrt(self.motor_commands[i]) * prop["wmax"]
+        return motor_speeds[:4]
+
+    def get_params(self):
+        """Get parameters in format compatible with existing controller framework."""
+        Bm_corrected = self.Bm.copy()
+        A_control = np.vstack([-self.Bf[2:3, :], Bm_corrected])
+        mixer_fm = A_control
+        first_prop = self.config.propellers[0]
+        k_f, k_m = first_prop["constants"]
+        w_max = first_prop["wmax"]
+        hover_thrust_per_motor = (self.mass * self.g) / self.num_motors
+        w_hover = np.sqrt(hover_thrust_per_motor / k_f)
+
+        return {
+            "mB": self.mass, "g": self.g, "IB": self.inertia, "invI": np.linalg.inv(self.inertia),
+            "dxm": np.mean([abs(p["loc"][0]) for p in self.config.propellers if p["loc"][0] != 0]),
+            "dym": np.mean([abs(p["loc"][1]) for p in self.config.propellers if p["loc"][1] != 0]),
+            "dzm": 0.05, "kTh": k_f, "kTo": k_m, "w_hover": w_hover, "thr_hover": hover_thrust_per_motor,
+            "mixerFM": mixer_fm, "mixerFMinv": np.linalg.pinv(mixer_fm),
+            "minThr": 0.1 * self.num_motors, "maxThr": k_f * w_max**2 * self.num_motors,
+            "minWmotor": 75, "maxWmotor": w_max, "tau": 0.015, "kp": 1.0, "damp": 1.0,
+            "motorc1": 8.49, "motorc0": 74.7, "motordeadband": 1, "Cd": 0.1, "IRzz": 2.7e-5,
+            "useIntergral": False, "FF": (w_hover - 74.7) / 8.49
+        }
+
+    def get_drone_state(self):
+        """Get state in format compatible with existing controller interfaces."""
+        phi, theta, psi = self.state[6:9]
+        cy, sy = np.cos(psi * 0.5), np.sin(psi * 0.5)
+        cp, sp = np.cos(theta * 0.5), np.sin(theta * 0.5)
+        cr, sr = np.cos(phi * 0.5), np.sin(phi * 0.5)
+        quat = np.array([cr*cp*cy + sr*sp*sy, sr*cp*cy - cr*sp*sy, cr*sp*cy + sr*cp*sy, cr*cp*sy - sr*sp*cy])
+
+        extended_state = np.zeros(21)
+        extended_state[0:3], extended_state[3:7] = self.state[0:3], quat
+        extended_state[7:10], extended_state[10:13] = self.state[3:6], self.state[9:12]
+        for i in range(min(4, self.num_motors)):
+            extended_state[13 + i*2] = np.sqrt(self.motor_commands[i]) * self.config.propellers[i]["wmax"]
+
+        return {
+            'state': extended_state, 'pos': self.state[0:3], 'vel': self.state[3:6], 'quat': quat,
+            'omega': self.state[9:12], 'euler': np.array([0, 0, 0]), 'wMotor': self._get_actual_motor_speeds(),
+            'vel_dot': np.zeros(3), 'omega_dot': np.zeros(3), 'acc': np.zeros(3),
+            'thr': self.motor_commands[:4] if self.num_motors >= 4 else np.pad(self.motor_commands, (0, 4-self.num_motors)),
+            'tor': self.motor_commands[:4] if self.num_motors >= 4 else np.pad(self.motor_commands, (0, 4-self.num_motors)),
+            'dcm': np.eye(3)
+        }
+
+    def update_from_controller(self, t, Ts, w_cmd, wind=None):
+        """Update simulation using commands from controller framework."""
+        full_w_cmd = self.w_cmd_full if hasattr(self, 'w_cmd_full') and self.w_cmd_full is not None else w_cmd
+        propeller_w_max = [prop["wmax"] for prop in self.config.propellers]
+        motor_commands = np.zeros(self.num_motors)
+        for i in range(min(len(full_w_cmd), self.num_motors)):
+            w_max = propeller_w_max[i] if i < len(propeller_w_max) else propeller_w_max[0]
+            motor_commands[i] = np.clip(full_w_cmd[i] / w_max, 0, 1)
+        self.step(motor_commands)
+        return t + Ts
+
 
 # Factory functions for easy drone creation
-def create_quadrotor(arm_length=0.11, prop_size=5, **kwargs):
+def create_quadrotor(arm_length=0.11, prop_size=2, **kwargs):
     """Create standard quadrotor configuration."""
     return DroneSimulator.create_standard_drone("quad", arm_length, prop_size, **kwargs)
 

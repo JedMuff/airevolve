@@ -1,5 +1,5 @@
 import numpy as np
-import evolution_tools.inspection_tools.utils as u
+import airevolve.evolution_tools.inspection_tools.utils as u
 
 def calculate_proportionality(individual):
     # Remove rows with all NaNs

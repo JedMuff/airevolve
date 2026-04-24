@@ -11,6 +11,11 @@ import numpy as np
 
 # Propeller library with specifications for different sizes
 PROPELLER_LIBRARY = {
+    "prop2": {
+        "constants": [8.12e-08, 6.40e-10],  # [k_f, k_m] force and moment constants
+        "wmax": 5000,                       # Maximum angular velocity (rad/s)
+        "mass": 0.0046                      # Propeller + motor mass (kg)
+    },
     "prop4": {
         "constants": [7.24e-07, 8.20e-09],  # [k_f, k_m] force and moment constants
         "wmax": 3927,                       # Maximum angular velocity (rad/s)
@@ -35,6 +40,11 @@ PROPELLER_LIBRARY = {
         "constants": [7.60e-06, 1.14e-07],
         "wmax": 1963,
         "mass": 0.056
+    },
+    "matched": {
+        "constants": [1.076e-05, 1.61e-07],  # Matched to original framework (kTh = 1.076e-5)
+        "wmax": 1963,
+        "mass": 0.300  # Increased to match original 1.2kg total mass exactly
     }
 }
 
@@ -42,28 +52,34 @@ PROPELLER_LIBRARY = {
 GRAVITY = 9.81  # m/s^2
 
 # Material properties for mass/inertia calculations
-CONTROLLER_MASS = 0.250  # kg, based on 4S 2200mAh LiPo + flight controller
-BEAM_DENSITY = 1500 * 0.005 * 0.01  # kg/m, carbon fiber: density * thickness * width
+# Updated to match drone-hover small drone configuration
+CONTROLLER_MASS = 0.0136  # kg, speedybee f405 aio flight controller
+BATTERY_MASS = 0.043  # kg, 3s 450mah lipo battery
+BEAM_DENSITY = 0.034  # kg/m, carbon fiber tube: 8mm outer diameter, 6mm inner diameter
 
 def get_propeller_specs(prop_size):
     """
     Get propeller specifications for a given size.
-    
+
     Args:
-        prop_size (int): Propeller size in inches (4-8)
-        
+        prop_size (int or str): Propeller size in inches (4-8) or "matched"
+
     Returns:
         dict: Propeller specifications including constants, wmax, and mass
-        
+
     Raises:
         ValueError: If propeller size is not available
     """
-    prop_key = f"prop{prop_size}"
+    if prop_size == "matched":
+        prop_key = "matched"
+    else:
+        prop_key = f"prop{prop_size}"
+
     if prop_key not in PROPELLER_LIBRARY:
-        available_sizes = [int(key[4:]) for key in PROPELLER_LIBRARY.keys()]
+        available_sizes = [int(key[4:]) if key.startswith('prop') else key for key in PROPELLER_LIBRARY.keys()]
         raise ValueError(f"Propeller size {prop_size} not available. "
                         f"Available sizes: {available_sizes}")
-    
+
     return PROPELLER_LIBRARY[prop_key].copy()
 
 def validate_propeller_config(props):
@@ -86,9 +102,9 @@ def validate_propeller_config(props):
                 raise KeyError(f"'{key}' is missing in propeller {i}")
         
         # Validate propeller size
-        if prop["propsize"] not in [4, 5, 6, 7, 8]:
+        if prop["propsize"] not in [2, 4, 5, 6, 7, 8, "matched"]:
             raise ValueError(f"Invalid propeller size {prop['propsize']} in propeller {i}. "
-                           f"Available sizes: [4, 5, 6, 7, 8]")
+                           f"Available sizes: [2, 4, 5, 6, 7, 8, 'matched']")
         
         # Validate direction format
         if len(prop["dir"]) != 4:
@@ -102,7 +118,7 @@ def validate_propeller_config(props):
         if len(prop["loc"]) != 3:
             raise ValueError(f"Location must have 3 elements [x, y, z] for propeller {i}")
 
-def create_standard_propeller_config(config_type, arm_length=0.11, prop_size=5):
+def create_standard_propeller_config(config_type, arm_length=0.11, prop_size=2):
     """
     Create standard propeller configurations for common drone types.
     

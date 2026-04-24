@@ -28,7 +28,7 @@ class RepairConfig:
         self,
         apply_symmetry: bool = True,
         enable_collision_repair: bool = True,
-        propeller_radius: float = 0.0762,
+        propeller_radius: float = 0.0254,  # 2-inch propeller radius in meters
         inner_boundary_radius: float = 0.09,
         outer_boundary_radius: float = 0.4,
         max_repair_iterations: int = 50,
@@ -37,11 +37,11 @@ class RepairConfig:
     ):
         """
         Initialize repair configuration.
-        
+
         Args:
             apply_symmetry: Whether to apply symmetry after repair
             enable_collision_repair: Whether to enable collision detection and repair
-            propeller_radius: Radius of propellers for collision detection
+            propeller_radius: Radius of propellers for collision detection (default: 0.0254m = 2-inch props)
             inner_boundary_radius: Minimum distance from origin
             outer_boundary_radius: Maximum distance from origin
             max_repair_iterations: Maximum iterations for collision repair

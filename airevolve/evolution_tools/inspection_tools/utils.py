@@ -197,7 +197,7 @@ def extract_polar_genome_data(genome_array: npt.NDArray) -> dict:
     
     Args:
         genome_array: Array with shape (n_arms, 6) containing
-                     [magnitude, azimuth, pitch, motor_yaw, motor_pitch, direction]
+                     [magnitude, azimuth, pitch, motor_pitch, motor_yaw, direction]
         
     Returns:
         Dictionary with converted data for visualization
@@ -211,7 +211,7 @@ def extract_polar_genome_data(genome_array: npt.NDArray) -> dict:
     directions = []
     
     for arm in valid_genome:
-        mag, azimuth, pitch, motor_yaw, motor_pitch, direction = arm[:6]
+        mag, azimuth, pitch, motor_pitch, motor_yaw, direction = arm[:6]
         
         # Convert position to Cartesian
         x, y, z = convert_to_cartesian(mag, azimuth, pitch)
@@ -375,6 +375,29 @@ def evolution_dataframe_to_fitness_array(evolution_df, population_size: int = No
         fitness_array[gen_idx, :n_individuals] = fitness_values[:n_individuals]
     
     return fitness_array
+
+
+def get_points(individual: npt.NDArray) -> npt.NDArray:
+    """Convert a phenotype array to 3D Cartesian points.
+
+    Args:
+        individual: Array with shape (n_arms, 6) containing
+                   [magnitude, azimuth, pitch, motor_pitch, motor_yaw, direction].
+                   Rows that are all-NaN are skipped.
+
+    Returns:
+        Array of shape (n_valid_arms, 3) with Cartesian [x, y, z] coordinates.
+    """
+    valid_mask = ~np.isnan(individual).any(axis=1)
+    valid = individual[valid_mask]
+
+    points = []
+    for arm in valid:
+        mag, azimuth, pitch = arm[0], arm[1], arm[2]
+        x, y, z = convert_to_cartesian(mag, azimuth, pitch)
+        points.append([x, y, z])
+
+    return np.array(points) if points else np.empty((0, 3))
 
 
 def ENU_to_NED(x, y, z):

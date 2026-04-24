@@ -9,19 +9,25 @@ setup(
     url="https://github.com/yourusername/airevolve",
     packages=find_packages(),  # Automatically find packages in your project
     install_requires=[
-        "numpy",
+        "numpy>=1.20",
         "pandas",
         "scipy",
-        "trimesh",
-        "torch>=1.9.0",
+        "torch>=1.13.0",
         "sympy>=1.8.0",
         "gymnasium>=0.26.0",
         "stable-baselines3>=2.0.0",
         "matplotlib>=3.5.0",
         "opencv-python>=4.5.0",
-        "tensorboard",
-        "moviepy",
+        "moviepy>=2.0.0",
+        "Pillow",
+        "tqdm",
+        "bokeh",
+        "python-fcl",
+        "dronehover @ git+https://github.com/elijahanghw/drone-hover.git@small_drone",
     ],  # List your dependencies here
+    extras_require={
+        "vis": ["trimesh"],
+    },
     python_requires=">=3.7",  # Specify the Python version requirement
     classifiers=[
         "Programming Language :: Python :: 3",

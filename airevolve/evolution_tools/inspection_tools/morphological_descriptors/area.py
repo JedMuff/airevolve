@@ -1,7 +1,7 @@
 import numpy as np
 import scipy
 
-import evolution_tools.inspection_tools.utils as u
+import airevolve.evolution_tools.inspection_tools.utils as u
 
 def compute_area_for_individual(individual, perimeter=False):
     

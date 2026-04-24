@@ -1,70 +1,79 @@
-import copy
+"""
+Inertia Calculation using Drone-Hover Physics
+
+Computes realistic inertia matrix components using parallel axis theorem
+and beam contributions. Integrates with drone-hover package for physics-based
+inertia calculation with automatic mounting point assignment.
+"""
+
 import numpy as np
-
-from airevolve.evolution_tools.inspection_tools import utils as u
-from airevolve.simulator.simulation.drone_configuration import DroneConfiguration
-
-
-def _euler_to_rotation_matrix(roll, pitch, yaw):
-    """Converts Euler angles (roll, pitch, yaw) to a rotation matrix."""
-    R_z = np.array(
-        [
-            [np.cos(yaw), -np.sin(yaw), 0],
-            [np.sin(yaw), np.cos(yaw), 0],
-            [0, 0, 1],
-        ]
-    )
-    R_y = np.array(
-        [
-            [np.cos(pitch), 0, np.sin(pitch)],
-            [0, 1, 0],
-            [-np.sin(pitch), 0, np.cos(pitch)],
-        ]
-    )
-    R_x = np.array(
-        [
-            [1, 0, 0],
-            [0, np.cos(roll), -np.sin(roll)],
-            [0, np.sin(roll), np.cos(roll)],
-        ]
-    )
-    return R_z @ R_y @ R_x
+from numpy.linalg import norm
+from dronehover.bodies.custom_bodies import Custombody
+from airevolve.evolution_tools.genome_handlers.mounting_points import (
+    generate_disc_mounting_points,
+    assign_nearest_mounting_point
+)
+import airevolve.evolution_tools.inspection_tools.utils as u
 
 
-def _orientation_to_unit_vector(roll, pitch, yaw):
-    """Converts roll, pitch, and yaw to a unit vector where the negative z-axis is pointing up."""
-    default_rotation = np.array([0, 0, -1])
-    R = _euler_to_rotation_matrix(roll, pitch, yaw)
-    transform_from_ENU_to_NED = np.array([[0, 1, 0], [1, 0, 0], [0, 0, -1]])
-    R = transform_from_ENU_to_NED @ R
-    transformed_vector = R @ default_rotation
-    return transformed_vector / np.linalg.norm(transformed_vector)
-
-
-def inertia(individual, motor_template=None):
-    """Compute inertia components using DroneConfiguration.
-
-    Returns: Ix, Iy, Iz, Ixy, Ixz, Iyz
+def inertia(individual):
     """
-    if motor_template is None:
-        motor_template = {"propsize": 5}
+    Compute inertia matrix components for an individual drone.
 
+    Uses drone-hover's physics-based inertia calculation with automatic
+    mounting point assignment from an 8-point disc (60mm diameter).
+
+    Args:
+        individual (np.ndarray): Genome array with shape (n_arms, 6)
+            Columns: [magnitude, arm_yaw, arm_pitch, mot_pitch, mot_yaw, direction]
+
+    Returns:
+        tuple: (Ix, Iy, Iz, Ixy, Ixz, Iyz) inertia components in kg*m^2
+    """
+    # Remove rows with NaN values
     individual = individual[~np.isnan(individual).any(axis=1)]
 
+    if len(individual) == 0:
+        # No valid arms, return default minimal inertia
+        return [0.01, 0.01, 0.01, 0, 0, 0]
+
+    # Convert genome to propeller locations
     props = []
-    mypypd = individual[:, :6]  # [mag, arm_yaw, arm_pitch, mot_yaw, mot_pitch, dir]
-    for mag, arm_yaw, arm_pitch, mot_yaw, mot_pitch, dir in mypypd:
+    propeller_positions = []
+
+    for mag, arm_yaw, arm_pitch, mot_pitch, mot_yaw, direction in individual:
+        # Convert spherical to Cartesian (ENU frame)
         global_x, global_y, global_z = u.convert_to_cartesian(mag, arm_yaw, arm_pitch)
+
+        # Convert to NED frame (required by drone-hover)
         x, y, z = u.ENU_to_NED(global_x, global_y, global_z)
 
-        tmp = copy.deepcopy(motor_template)
-        tmp.update({"loc": [float(x), float(y), float(z)]})
-        d = "ccw" if dir == 0 else "cw"
+        propeller_positions.append([float(x), float(y), float(z)])
 
-        unit_vector = _orientation_to_unit_vector(0, mot_pitch, mot_yaw)
-        tmp.update({"dir": [float(unit_vector[0]), float(unit_vector[1]), float(unit_vector[2]), d]})
+        # Determine rotation direction
+        rotation = "cw" if direction > 0.5 else "ccw"
 
-        props.append(tmp)
+        # Motor thrust direction (simplified - mostly downward)
+        # In NED frame, motors typically point downward (positive Z)
+        props.append({
+            "loc": [float(x), float(y), float(z)],
+            "dir": [0, 0, -1, rotation],  # Downward thrust in NED
+            "propsize": 2  # Default 2-inch propeller
+        })
 
-    config = DroneConfiguration(props)
-    return [config.Ix, config.Iy, config.Iz, config.Ixy, config.Ixz, config.Iyz]
+    # Generate 8 mounting points on 60mm diameter disc
+    disc_mounting_points = generate_disc_mounting_points(num_points=8, diameter=0.060)
+
+    # Assign each propeller to nearest mounting point
+    mounting_points = assign_nearest_mounting_point(propeller_positions, disc_mounting_points)
+
+    try:
+        # Use drone-hover's Custombody with mounting points for physics-based calculation
+        drone = Custombody(props, mountpoints=mounting_points)
+
+        return [drone.Ix, drone.Iy, drone.Iz, drone.Ixy, drone.Ixz, drone.Iyz]
+
+    except Exception as e:
+        # Fallback to minimal inertia if calculation fails
+        print(f"Warning: Inertia calculation failed: {e}. Using default values.")
+        return [0.01, 0.01, 0.01, 0, 0, 0]

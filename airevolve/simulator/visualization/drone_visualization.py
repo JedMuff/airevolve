@@ -144,13 +144,13 @@ def create_path(vertices, loop=False):
 def create_circle(r, px, py, pz, num=20, angle_x=0, angle_y=0, angle_z=0):
     """
     Create a circular mesh (used for propellers).
-    
+
     Args:
         r: Radius of circle
         px, py, pz: Center position
         num: Number of vertices around circle
         angle_x, angle_y, angle_z: Rotation angles
-        
+
     Returns:
         Mesh object representing the circle
     """
@@ -159,13 +159,46 @@ def create_circle(r, px, py, pz, num=20, angle_x=0, angle_y=0, angle_z=0):
         r * np.sin(i * 2 * np.pi / num),
         0
     ] for i in range(num)])
-    
+
     R = euler_to_rotation_matrix(0, angle_y, angle_z)
     transform_from_ENU_to_NED = np.array([[0, 1, 0], [1, 0, 0], [0, 0, -1]])
 
     R = transform_from_ENU_to_NED @ R
 
     vertices = (R @ vertices.T).T
+    vertices += np.array([px, py, pz])
+
+    return create_path(vertices, loop=True)
+
+def create_circle_oriented(r, px, py, pz, normal, num=20):
+    """
+    Create a circular mesh perpendicular to a given normal vector.
+
+    Args:
+        r: Radius of circle
+        px, py, pz: Center position
+        normal: 3-vector; the circle's plane is perpendicular to this (the
+            disk's normal will equal this direction, normalized).
+        num: Number of vertices around circle
+
+    Returns:
+        Mesh object representing the circle
+    """
+    n = np.asarray(normal, dtype=float)
+    nlen = np.linalg.norm(n)
+    if nlen < 1e-9:
+        n = np.array([0.0, 0.0, 1.0])
+    else:
+        n = n / nlen
+
+    # Pick a reference axis that isn't parallel to the normal
+    ref = np.array([0.0, 0.0, 1.0]) if abs(n[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    u = np.cross(ref, n)
+    u /= np.linalg.norm(u)
+    v = np.cross(n, u)
+
+    angles = np.arange(num) * (2 * np.pi / num)
+    vertices = (np.outer(np.cos(angles), u) + np.outer(np.sin(angles), v)) * r
     vertices += np.array([px, py, pz])
 
     return create_path(vertices, loop=True)
@@ -191,7 +224,7 @@ def group(mesh_list):
     ])
     return Mesh(vertices, edges)
 
-def create_drone(propellers, box_size=[0.2,0.2,0.2], prop_radius=0.08, scale=0.5, motor_colors=None):
+def create_drone(propellers, box_size=[0.2,0.2,0.2], prop_radius=0.0254, scale=0.5, motor_colors=None):
     """
     Create a complete drone mesh from propeller configuration.
     
@@ -251,36 +284,21 @@ def create_drone(propellers, box_size=[0.2,0.2,0.2], prop_radius=0.08, scale=0.5
 
     # Start with central body components
     drawings = [bot_box, top_box, box_side_line1, box_side_line2, box_side_line3, box_side_line4]
+    num_body_meshes = len(drawings)
     centres = []
-    
+
     # Create arms and propellers based on propeller configuration
     for prop in propellers:
         # Get propeller location and direction directly
         loc = np.array(prop["loc"]) * scale
         x, y, z = loc[0], loc[1], loc[2]
-        
-        # Get motor direction for propeller orientation
-        motor_dir = np.array(prop["dir"][:3])
-        
-        # motor_dir represents thrust direction in NED frame
-        # For standard downward thrust [0,0,-1], propeller disk should be horizontal
-        # The create_circle function creates a circle in XY plane, then rotates it
-        
-        # Calculate angles for propeller disk orientation (perpendicular to thrust)
-        if np.allclose(motor_dir, [0, 0, -1]):  # Standard downward thrust
-            motor_yaw = 0
-            motor_pitch = 0  # Horizontal disk
-        elif np.allclose(motor_dir, [0, 0, 1]):  # Upward thrust
-            motor_yaw = 0  
-            motor_pitch = np.pi  # Inverted horizontal disk
-        else:
-            # General case: calculate angles for arbitrary thrust direction
-            motor_yaw = np.arctan2(motor_dir[1], motor_dir[0])
-            # Pitch is angle between thrust vector and horizontal plane
-            motor_pitch = np.arcsin(np.clip(-motor_dir[2], -1, 1))
-        
-        # Create propeller circle with motor orientation
-        circle = create_circle(prop_radius, x, y, z, num=20, angle_y=motor_pitch, angle_z=motor_yaw)
+
+        # Motor thrust direction (body frame, NED). The propeller disk's normal
+        # equals this direction, so the disk lies perpendicular to the thrust.
+        motor_dir = np.array(prop["dir"][:3], dtype=float)
+
+        # Create propeller disk perpendicular to thrust direction
+        circle = create_circle_oriented(prop_radius, x, y, z, normal=motor_dir, num=20)
         # Create arm line from center to propeller
         arm_line = create_path(np.array([[0, 0, 0], [x, y, z]]))
 
@@ -290,41 +308,68 @@ def create_drone(propellers, box_size=[0.2,0.2,0.2], prop_radius=0.08, scale=0.5
     
     # Combine all mesh components
     drone = group(drawings)
-    
+
+    # Per-edge colors: body stays default, each propeller's circle + arm get its motor color.
+    # Matches the edge order produced by group() above.
+    if motor_colors is not None:
+        edge_colors = []
+        for m in drawings[:num_body_meshes]:
+            edge_colors.extend([None] * len(m.edges))
+        prop_drawings = drawings[num_body_meshes:]
+        for prop_idx in range(len(propellers)):
+            color = motor_colors[prop_idx % len(motor_colors)]
+            circle = prop_drawings[2 * prop_idx]
+            arm_line = prop_drawings[2 * prop_idx + 1]
+            edge_colors.extend([color] * len(circle.edges))
+            edge_colors.extend([color] * len(arm_line.edges))
+        drone.edge_colors = edge_colors
+
     # Add propeller centers as additional vertices for force attachment
     drone.vertices = np.concatenate([
         drone.vertices,
         np.array(centres)  # centers of the circles
     ])
 
-    # Create force objects at each propeller location
+    # Create force objects at each propeller location. Each force carries the
+    # motor's thrust direction (body frame) and color, so the arrow points the
+    # right way for canted motors and matches the rotor's color.
     forces = []
-    for v in drone.vertices[-len(propellers):]:
-        forces.append(Force(v))
+    for v, prop in zip(drone.vertices[-len(propellers):], propellers):
+        f = Force(v)
+        f.body_dir = np.array(prop["dir"][:3], dtype=float)
+        forces.append(f)
+    if motor_colors is not None:
+        for i, f in enumerate(forces):
+            f.color = motor_colors[i % len(motor_colors)]
 
     return drone, forces
 
-def set_thrust(drone, forces, T):
+def set_thrust(drone, forces, T, base_len=0.0):
     """
-    Update force vectors to represent thrust magnitudes.
-    
+    Update force arrows to represent per-motor thrust direction and magnitude.
+
+    Each Force uses its own body-frame direction if available, so canted motors
+    point correctly. ``base_len`` adds a small always-on length so the direction
+    stays visible even at low thrust.
+
     Args:
         drone: Drone mesh object (for orientation)
         forces: List of Force objects
         T: Array of thrust magnitudes for each motor
+        base_len: Minimum arrow length added to every non-skipped motor
     """
-    # Handle mismatch between number of forces and thrust commands
+    R = rotation_matrix(drone.theta)
     num_forces = len(forces)
     num_thrusts = len(T) if hasattr(T, '__len__') else 1
-    
-    # Use the minimum to avoid index errors
     num_motors = min(num_forces, num_thrusts)
-    
+
     for i in range(num_motors):
-        if i < len(forces) and i < len(T):
-            forces[i].F = - T[i] * rotation_matrix(drone.theta)[:, 2]
-    
-    # If we have more forces than thrust commands, set remaining forces to zero
+        length = T[i] + base_len
+        if forces[i].body_dir is not None:
+            forces[i].F = length * (R @ forces[i].body_dir)
+        else:
+            forces[i].F = -length * R[:, 2]
+
     for i in range(num_motors, num_forces):
         forces[i].F = np.zeros(3)
 

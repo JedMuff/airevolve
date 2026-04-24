@@ -35,9 +35,9 @@ def show_scene(scene_obj):
 @dataclass
 class VisualizationConfig:
     """Configuration for drone visualization styling and display options."""
-    
+
     # Basic display options
-    circle_radius: float = 0.0762
+    circle_radius: float = 0.0254  # 2-inch propeller radius in meters
     scale_factor: float = 1.2
     
     # 3D view options

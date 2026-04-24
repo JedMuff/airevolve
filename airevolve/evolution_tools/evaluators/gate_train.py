@@ -42,20 +42,20 @@ class backandforth():
 
 class figure8():
     gate_pos = np.array([
-        [ -1.5,  1.5,  0.0],
-        [  0.0,  0.0,  0.0],
         [  1.5, -1.5,  0.0],
         [  3.0,  0.0,  0.0],
         [  1.5,  1.5,  0.0],
         [  0.0,  0.0,  0.0],
         [ -1.5, -1.5,  0.0],
         [ -3.0,  0.0,  0.0],
+        [ -1.5,  1.5,  0.0],
+        [  0.0,  0.0,  0.0],
     ], dtype=np.float32)
     gate_yaw = np.array([0,-1,0,1,2,-1,2,1], dtype=np.float32) * np.pi / 2
     x_bounds = np.array([-4, 4], dtype=np.float32)
     y_bounds = np.array([-2.5, 2.5], dtype=np.float32)
     z_bounds = np.array([-1, 1], dtype=np.float32)
-    starting_pos = np.array([-2.0, 1.5, 0.0])
+    starting_pos = np.array([0.0, -1.5, 0.0])
 
 class circle():
     gate_pos = np.array([
@@ -87,7 +87,7 @@ def animate_policy(individual, model, env, deterministic=False, log_times=False,
     env.reset()
     
     # Convert individual to propellers configuration
-    propellers = env._convert_individual_to_propellers(individual)
+    propellers, _ = env._convert_individual_to_propellers(individual)
     
     def get_drone_state():
         actions, _ = model.predict(env.states, deterministic=deterministic)
@@ -241,17 +241,27 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     # custom_logger = configure(save_dir, ["stdout", "csv", "tensorboard"])
 
     # MODEL DEFINITION
-    policy_kwargs = dict(activation_fn=torch.nn.ReLU, net_arch=dict(pi=[64, 64, 64], vf=[64, 64, 64]), log_std_init = 0)
+    policy_kwargs = dict(
+        activation_fn=torch.nn.ReLU,
+        net_arch=dict(pi=[64, 64, 64], vf=[64, 64, 64]),
+        log_std_init=0.041
+    )
     model = PPO(
         "MlpPolicy",
         env,
         policy_kwargs=policy_kwargs,
         verbose=0,
         tensorboard_log=save_dir,
-        n_steps=1000,
-        batch_size=1000,
-        n_epochs=10,
-        gamma=0.999,
+        learning_rate=1.0e-4,
+        n_steps=256,
+        batch_size=128,
+        n_epochs=22,
+        gamma=0.9965,
+        gae_lambda=0.894,
+        clip_range=0.156,
+        ent_coef=0.0044,
+        vf_coef=0.55,
+        max_grad_norm=3.19,
         device=device
     )
     # model.set_logger(custom_logger)

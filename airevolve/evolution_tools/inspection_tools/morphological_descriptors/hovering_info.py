@@ -1,11 +1,14 @@
 import numpy as np
-import copy 
+import copy
 
 from dronehover.bodies.custom_bodies import Custombody
 from dronehover.optimization import Hover
+from airevolve.evolution_tools.genome_handlers.mounting_points import (
+    generate_disc_mounting_points,
+    assign_nearest_mounting_point
+)
 
-
-from airevolve.evolution_tools.inspection_tools import utils as u
+import airevolve.evolution_tools.inspection_tools.utils as u
 from airevolve.evolution_tools.inspection_tools.morphological_descriptors.mass import compute_total_mass
 from airevolve.evolution_tools.inspection_tools.morphological_descriptors.centre_of_gravity import centre_of_gravity
 from airevolve.evolution_tools.inspection_tools.morphological_descriptors.inertia import inertia
@@ -57,21 +60,23 @@ def orientation_to_unit_vector(roll, pitch, yaw):
     
     return unit_vector
 
-def get_sim(individual, motor_template = {"propsize": 5}):
+def get_sim(individual, motor_template = {"propsize": 2}):
     # remove rows with nan values
     individual = individual[~np.isnan(individual).any(axis=1)]
 
-    mass = float(compute_total_mass(individual))
+    mass = compute_total_mass(individual)
     cg = centre_of_gravity(individual)
     Ix, Iy, Iz, Ixy, Ixz, Iyz = inertia(individual)
-    Ix, Iy, Iz, Ixy, Ixz, Iyz = float(Ix), float(Iy), float(Iz), float(Ixy), float(Ixz), float(Iyz)
 
-    
+
     props = []
-    mypypd = individual[:,:6] # [mag, arm_yaw, arm_pitch, mot_yaw, mot_pitch, dir]
-    for mag, arm_yaw, arm_pitch, mot_yaw, mot_pitch, dir in mypypd:
+    propeller_positions = []
+    mypypd = individual[:,:6] # [mag, arm_yaw, arm_pitch, mot_pitch, mot_yaw, dir]
+    for mag, arm_yaw, arm_pitch, mot_pitch, mot_yaw, dir in mypypd:
         global_x,global_y,global_z = u.convert_to_cartesian(mag, arm_yaw, arm_pitch)
         x,y,z = u.ENU_to_NED(global_x,global_y,global_z)
+
+        propeller_positions.append([float(x), float(y), float(z)])
 
         tmp = copy.deepcopy(motor_template)
         tmp.update({"loc": [float(x),float(y),float(z)]})
@@ -85,13 +90,18 @@ def get_sim(individual, motor_template = {"propsize": 5}):
         tmp.update({"dir": [float(unit_vector[0]),float(unit_vector[1]),float(unit_vector[2]), d]})
 
         props.append(tmp)
-    
-    # for p in props:
 
-    #     print(p)
-        drone = Custombody(props, mountpoints=None, mass=mass, cg=cg, Ix=Ix, Iy=Iy, Iz=Iz, Ixy=Ixy, Ixz=Ixz, Iyz=Iyz)
+    # Generate 8 mounting points on 60mm diameter disc
+    disc_mounting_points = generate_disc_mounting_points(num_points=8, diameter=0.060)
 
-    # Define hovpropsering optimizer for drone
+    # Assign each propeller to nearest mounting point
+    mounting_points = assign_nearest_mounting_point(propeller_positions, disc_mounting_points)
+
+    # Create drone with mounting points
+    # Note: We override mass/inertia calculations since we use our own descriptors
+    drone = Custombody(props, mountpoints=mounting_points, mass=mass, cg=cg, Ix=Ix, Iy=Iy, Iz=Iz, Ixy=Ixy, Ixz=Ixz, Iyz=Iyz)
+
+    # Define hovering optimizer for drone
     try:
         sim = Hover(drone)
     except:
@@ -138,14 +148,18 @@ def drone_info(individual):
 def max_thrust_to_weight(individual_or_population):
     if len(individual_or_population.shape) == 4:
         ngens, pop_size, max_num_arms, nparams = individual_or_population.shape
-        max_thrust_to_weight = np.zeros((ngens, pop_size))
+        result = np.zeros((ngens, pop_size))
         for g in range(ngens):
             for i in range(pop_size):
-                hover_type, max_thrust_to_weight[g,i], input_cost, rank_controlability, controlability = drone_info(individual_or_population[g,i])
+                hover_type, result[g,i], input_cost, rank_controlability, controlability = drone_info(individual_or_population[g,i])
+        return result
     if len(individual_or_population.shape) == 3:
-        hover_type, max_thrust_to_weight, input_cost, rank_controlability, controlability = drone_info(individual_or_population)
-    
-    return max_thrust_to_weight
+        hover_type, result, input_cost, rank_controlability, controlability = drone_info(individual_or_population)
+        return result
+    if len(individual_or_population.shape) == 2:
+        hover_type, result, input_cost, rank_controlability, controlability = drone_info(individual_or_population)
+        return result
+    return np.nan
 
 def input_cost(individual_or_population):
     if len(individual_or_population.shape) == 4:
@@ -183,19 +197,20 @@ def rank_controlability(individual_or_population):
 def controlability(individual_or_population):
     if len(individual_or_population.shape) == 4:
         ngens, pop_size, max_num_arms, nparams = individual_or_population.shape
-        controlability = np.zeros((ngens, pop_size))
+        result = np.zeros((ngens, pop_size))
         for g in range(ngens):
             for i in range(pop_size):
-                hover_type, max_thrust_to_weight, input_cost, rank_controlability, controlability[g,i] = drone_info(individual_or_population[g,i])
-    elif len(individual_or_population.shape) == 3:
-        controlability = np.zeros((individual_or_population.shape[0]))
+                hover_type, mtw, ic, rc, result[g,i] = drone_info(individual_or_population[g,i])
+        return result
+    if len(individual_or_population.shape) == 3:
+        result = np.zeros((individual_or_population.shape[0]))
         for i in range(individual_or_population.shape[0]):
-            hover_type, max_thrust_to_weight, input_cost, rank_controlability, controlability[i] = drone_info(individual_or_population[i])
-    
+            hover_type, mtw, ic, rc, result[i] = drone_info(individual_or_population[i])
+        return result
     if len(individual_or_population.shape) == 2:
-        hover_type, max_thrust_to_weight, input_cost, rank_controlability, controlability = drone_info(individual_or_population)
-    
-    return controlability
+        hover_type, mtw, ic, rc, result = drone_info(individual_or_population)
+        return result
+    return np.nan
 
 def compute_hovering_info(individual_or_population):
     

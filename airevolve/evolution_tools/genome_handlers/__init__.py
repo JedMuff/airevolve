@@ -3,6 +3,8 @@
 from .base import GenomeHandler
 from .cartesian_euler_genome_handler import CartesianEulerDroneGenomeHandler
 from .spherical_angular_genome_handler import SphericalAngularDroneGenomeHandler
+from .cppn_neat_genome_handler import CPPNNeatDroneGenomeHandler
+from .hybrid_cppn_genome_handler import HybridCPPNDroneGenomeHandler
 
 # Optional MLP handler (requires PyTorch)
 try:
@@ -14,8 +16,10 @@ except ImportError:
 
 __all__ = [
     'GenomeHandler',
-    'CartesianEulerDroneGenomeHandler', 
-    'SphericalAngularDroneGenomeHandler'
+    'CartesianEulerDroneGenomeHandler',
+    'SphericalAngularDroneGenomeHandler',
+    'CPPNNeatDroneGenomeHandler',
+    'HybridCPPNDroneGenomeHandler',
 ]
 
 if MLP_AVAILABLE:

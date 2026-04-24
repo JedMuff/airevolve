@@ -169,11 +169,12 @@ class Mesh:
         self.edges = edges
         self.pos = np.array([0., 0., 0.])
         self.theta = np.array([0., 0., 0.])
+        self.edge_colors = None
 
     def draw(self, img, cam, color=(100, 100, 100), pt=1, arrow=False):
         """
         Draw mesh to image using camera projection.
-        
+
         Args:
             img: Image to draw on
             cam: Camera object for projection
@@ -182,14 +183,18 @@ class Mesh:
             arrow: Whether to draw as arrows
         """
         pvertices, in_frame = cam.project(self.vertices)
-        for edge in self.edges:
+        edge_colors = self.edge_colors
+        for i, edge in enumerate(self.edges):
             if in_frame[edge[0]] and in_frame[edge[1]]:
                 pt1 = tuple(pvertices[edge[0]][0])
                 pt2 = tuple(pvertices[edge[1]][0])
+                c = color
+                if edge_colors is not None and edge_colors[i] is not None:
+                    c = edge_colors[i]
                 if arrow:
-                    cv2.arrowedLine(img, pt1, pt2, color, pt)
+                    cv2.arrowedLine(img, pt1, pt2, c, pt)
                 else:
-                    cv2.line(img, pt1, pt2, color, pt)
+                    cv2.line(img, pt1, pt2, c, pt)
 
     def translate(self, vector):
         """
@@ -227,12 +232,14 @@ class Force:
     def __init__(self, vertex):
         """
         Initialize force at given position.
-        
+
         Args:
             vertex: 3D position where force is applied
         """
         self.vertex = vertex
         self.F = np.array([0., 0., 0.])
+        self.body_dir = None  # Unit thrust direction in drone body frame
+        self.color = None     # BGR tuple, overrides caller's default draw color
 
     def draw(self, img, cam, color=(0, 0, 255), pt=1):
         """

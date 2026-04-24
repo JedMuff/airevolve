@@ -34,26 +34,51 @@ def evaluate_individual(fitness_function : Callable,
         'fitness': fitness
     }
 
-def evaluate_population(fitness_function : Callable, 
-                        population: np.ndarray, 
-                        ids : List[str],
-                        generation: int, 
-                        all_parent_ids: List[List[str]], 
-                        log_dir_base: str) -> list[float]:
-    
-    evalulated_individuals = []
+def _evaluate_individual_worker(args):
+    """Worker function for multiprocessing Pool."""
+    fitness_function, genome, id, generation, parent_ids, log_dir_base = args
+    return evaluate_individual(fitness_function, genome, id, generation, parent_ids, log_dir_base)
 
-    for i, genome in enumerate(population):
-        individual = evaluate_individual(
-            fitness_function,
-            genome,
-            ids[i],
-            generation,
-            all_parent_ids[i],
-            log_dir_base
-        )
-        evalulated_individuals.append(individual)
-    
-    pop = pd.DataFrame(evalulated_individuals)
+
+def _pool_worker_init():
+    """Limit each spawned worker to 1 thread to avoid oversubscription."""
+    os.environ['OMP_NUM_THREADS'] = '1'
+    os.environ['MKL_NUM_THREADS'] = '1'
+    os.environ['OPENBLAS_NUM_THREADS'] = '1'
+    import torch
+    torch.set_num_threads(1)
+
+
+def evaluate_population(fitness_function : Callable,
+                        population: np.ndarray,
+                        ids : List[str],
+                        generation: int,
+                        all_parent_ids: List[List[str]],
+                        log_dir_base: str,
+                        num_workers: int = 1) -> list[float]:
+
+    if num_workers > 1:
+        import multiprocessing
+        ctx = multiprocessing.get_context('spawn')
+        args_list = [
+            (fitness_function, genome, ids[i], generation, all_parent_ids[i], log_dir_base)
+            for i, genome in enumerate(population)
+        ]
+        with ctx.Pool(processes=min(num_workers, len(population)), initializer=_pool_worker_init) as pool:
+            evaluated_individuals = pool.map(_evaluate_individual_worker, args_list)
+    else:
+        evaluated_individuals = []
+        for i, genome in enumerate(population):
+            individual = evaluate_individual(
+                fitness_function,
+                genome,
+                ids[i],
+                generation,
+                all_parent_ids[i],
+                log_dir_base
+            )
+            evaluated_individuals.append(individual)
+
+    pop = pd.DataFrame(evaluated_individuals)
 
     return pop

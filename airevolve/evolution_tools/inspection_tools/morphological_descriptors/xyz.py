@@ -10,7 +10,7 @@ def get_xyzs(individual):
     ys = np.zeros(len(individual))
     zs = np.zeros(len(individual))
 
-    for i, (arm_length, arm_yaw, arm_pitch, motor_yaw, motor_pitch, direction) in enumerate(individual):
+    for i, (arm_length, arm_yaw, arm_pitch, motor_pitch, motor_yaw, direction) in enumerate(individual):
         # Get the rotation matrix from Euler angles
         R = euler_to_rotation_matrix(0, motor_pitch, motor_yaw)
         transform_from_ENU_to_NED = np.array([[0, 1, 0], [1, 0, 0], [0, 0, -1]])

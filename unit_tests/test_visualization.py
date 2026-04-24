@@ -362,7 +362,7 @@ class TestCartesianEulerVisualization(unittest.TestCase):
         os.makedirs(output_dir, exist_ok=True)
         
         # Test parameters
-        propeller_radius = 0.0762
+        propeller_radius = 0.0254
         inner_boundary_radius = 0.09
         outer_boundary_radius = 0.4
         cylinder_height = 0.3048
