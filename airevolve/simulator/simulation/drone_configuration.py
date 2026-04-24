@@ -9,8 +9,8 @@ for realistic mass, center of gravity, inertia, and control allocation calculati
 import numpy as np
 from numpy.linalg import norm, inv
 from .propeller_data import (
-    get_propeller_specs, validate_propeller_config,
-    GRAVITY, CONTROLLER_MASS, BATTERY_MASS, BEAM_DENSITY
+    get_propeller_specs, validate_propeller_config, 
+    GRAVITY, CONTROLLER_MASS, BEAM_DENSITY
 )
 
 class DroneConfiguration:
@@ -25,50 +25,32 @@ class DroneConfiguration:
     - Moment allocation matrix (Bm) mapping motor commands to body moments
     """
     
-    def __init__(self, propellers, mountpoints=None):
+    def __init__(self, propellers):
         """
         Initialize drone configuration from propeller specifications.
-
+        
         Args:
             propellers (list): List of propeller dictionaries, each containing:
                 - "loc": [x, y, z] position in body frame (meters)
                 - "dir": [x, y, z, rotation] thrust direction and spin direction
                 - "propsize": propeller size in inches (4-8)
-            mountpoints (list, optional): List of np.array mounting points for each propeller.
-                If None, defaults to origin [0,0,0] for all propellers (backward compatible).
-
+                
         Example:
             propellers = [
                 {"loc": [0.11, 0.11, 0], "dir": [0, 0, -1, "ccw"], "propsize": 5},
                 {"loc": [-0.11, 0.11, 0], "dir": [0, 0, -1, "cw"], "propsize": 5},
                 # ... more propellers
             ]
-
-            # Optional: specify mounting points
-            mountpoints = [
-                np.array([0.03, 0.03, 0]),   # Mounting point for propeller 1
-                np.array([-0.03, 0.03, 0]),  # Mounting point for propeller 2
-                # ...
-            ]
         """
         # Validate input format
         validate_propeller_config(propellers)
-
+        
         self.propellers = propellers
         self.num_motors = len(propellers)
-
-        # Set up mounting points
-        self.mountpoints = mountpoints
-        if self.mountpoints is None:
-            self.mountpoints = [np.array([0.0, 0.0, 0.0]) for _ in range(self.num_motors)]
-
-        if len(self.mountpoints) != self.num_motors:
-            raise ValueError(f"Number of mounting points ({len(self.mountpoints)}) "
-                           f"must equal number of propellers ({self.num_motors})")
-
+        
         # Add propeller specifications to each propeller
         self._add_propeller_specs()
-
+        
         # Compute physical properties
         self._compute_mass_and_cg()
         self._compute_inertia()
@@ -84,69 +66,103 @@ class DroneConfiguration:
     
     def _compute_mass_and_cg(self):
         """Compute total mass and center of gravity location."""
-        # Start with controller and battery mass
-        self.mass = CONTROLLER_MASS + BATTERY_MASS
-
+        # Start with controller mass
+        self.mass = CONTROLLER_MASS
+        
         # Add propeller and beam masses
-        for prop, mountpoint in zip(self.propellers, self.mountpoints):
+        for prop in self.propellers:
             prop_mass = prop["mass"]
-            prop_loc = np.array(prop["loc"])
-            beam_length = norm(prop_loc - mountpoint)
+            beam_length = norm(np.array(prop["loc"]))
             beam_mass = BEAM_DENSITY * beam_length
-
+            
             self.mass += prop_mass + beam_mass
-
+        
         # Compute center of gravity
         self.cg = np.zeros(3)
-        for prop, mountpoint in zip(self.propellers, self.mountpoints):
+        for prop in self.propellers:
             prop_mass = prop["mass"]
-            prop_loc = np.array(prop["loc"])
-            beam_length = norm(prop_loc - mountpoint)
+            beam_length = norm(np.array(prop["loc"]))
             beam_mass = BEAM_DENSITY * beam_length
-
+            prop_loc = np.array(prop["loc"])
+            
             # Propeller contributes at its location
             self.cg += (prop_mass / self.mass) * prop_loc
-
+            
             # Beam contributes at its midpoint
-            beam_midpoint = (prop_loc + mountpoint) * 0.5
-            self.cg += (beam_mass / self.mass) * beam_midpoint
+            self.cg += (beam_mass / self.mass) * prop_loc * 0.5
     
     def _compute_inertia(self):
-        """
-        Compute inertia matrix components using drone-hover's Custombody.
-
-        Uses the proven physics-based inertia calculation from the drone-hover package,
-        which accounts for battery, controller, propellers, and beams with mounting points.
-        """
-        from dronehover.bodies.custom_bodies import Custombody
-
-        # Use drone-hover's Custombody to compute inertia
-        # It uses the same physics we had but is battle-tested and doesn't clamp values
-        drone = Custombody(self.propellers, mountpoints=self.mountpoints)
-
-        # Extract computed inertia values
-        self.Ix = drone.Ix
-        self.Iy = drone.Iy
-        self.Iz = drone.Iz
-        self.Ixy = drone.Ixy
-        self.Ixz = drone.Ixz
-        self.Iyz = drone.Iyz
-
-        # Create inertia matrix
+        """Compute inertia matrix components using parallel axis theorem."""
+        # Controller inertia about its own center (approximated as rectangular block)
+        # Typical flight controller dimensions: 105mm x 36mm x 35mm
+        controller_Ix = (1/12) * CONTROLLER_MASS * (0.036**2 + 0.035**2)
+        controller_Iy = (1/12) * CONTROLLER_MASS * (0.105**2 + 0.035**2)
+        controller_Iz = (1/12) * CONTROLLER_MASS * (0.105**2 + 0.036**2)
+        
+        # Translate controller inertia to center of gravity using parallel axis theorem
+        cg_offset_sq = np.dot(self.cg, self.cg)
+        self.Ix = controller_Ix + CONTROLLER_MASS * (self.cg[1]**2 + self.cg[2]**2)
+        self.Iy = controller_Iy + CONTROLLER_MASS * (self.cg[0]**2 + self.cg[2]**2)
+        self.Iz = controller_Iz + CONTROLLER_MASS * (self.cg[0]**2 + self.cg[1]**2)
+        
+        # Initialize products of inertia
+        self.Ixy = -CONTROLLER_MASS * self.cg[0] * self.cg[1]
+        self.Ixz = -CONTROLLER_MASS * self.cg[0] * self.cg[2]
+        self.Iyz = -CONTROLLER_MASS * self.cg[1] * self.cg[2]
+        
+        # Add contributions from propellers and beams
+        for prop in self.propellers:
+            prop_mass = prop["mass"]
+            pos = np.array(prop["loc"])
+            beam_length = norm(pos)
+            beam_mass = BEAM_DENSITY * beam_length
+            
+            # Propeller position relative to CG
+            r_prop = pos - self.cg
+            
+            # Propeller contributions (treated as point mass)
+            self.Ix += prop_mass * (r_prop[1]**2 + r_prop[2]**2)
+            self.Iy += prop_mass * (r_prop[0]**2 + r_prop[2]**2)
+            self.Iz += prop_mass * (r_prop[0]**2 + r_prop[1]**2)
+            self.Ixy -= prop_mass * r_prop[0] * r_prop[1]
+            self.Ixz -= prop_mass * r_prop[0] * r_prop[2]
+            self.Iyz -= prop_mass * r_prop[1] * r_prop[2]
+            
+            # Beam contributions (rod along beam direction)
+            beam_center = pos * 0.5  # Beam center at midpoint
+            r_beam = beam_center - self.cg
+            
+            # For a rod along the beam direction, add both translational and rotational inertia
+            beam_direction = pos / beam_length  # Unit vector along beam
+            
+            # Perpendicular moment of inertia for rod: I_perp = (1/12) * m * L²
+            I_beam_perp = (1/12) * beam_mass * beam_length**2
+            
+            # Add translational inertia (parallel axis theorem)
+            self.Ix += beam_mass * (r_beam[1]**2 + r_beam[2]**2) + I_beam_perp * (beam_direction[1]**2 + beam_direction[2]**2)
+            self.Iy += beam_mass * (r_beam[0]**2 + r_beam[2]**2) + I_beam_perp * (beam_direction[0]**2 + beam_direction[2]**2)
+            self.Iz += beam_mass * (r_beam[0]**2 + r_beam[1]**2) + I_beam_perp * (beam_direction[0]**2 + beam_direction[1]**2)
+            
+            # Add products of inertia
+            self.Ixy -= beam_mass * r_beam[0] * r_beam[1]
+            self.Ixz -= beam_mass * r_beam[0] * r_beam[2]
+            self.Iyz -= beam_mass * r_beam[1] * r_beam[2]
+        
+        # Create inertia matrix with numerical stability improvements
         self.inertia_matrix = np.array([
             [self.Ix, self.Ixy, self.Ixz],
             [self.Ixy, self.Iy, self.Iyz],
             [self.Ixz, self.Iyz, self.Iz]
         ])
-
+        
         # Clean up extremely small values that cause numerical instability
         # Values smaller than 1e-12 are likely numerical noise
         tolerance = 1e-12
         self.inertia_matrix[np.abs(self.inertia_matrix) < tolerance] = 0.0
-
+        
         # Ensure matrix is symmetric (fix any tiny asymmetries from numerical errors)
         self.inertia_matrix = 0.5 * (self.inertia_matrix + self.inertia_matrix.T)
-
+        
         # Ensure positive definite by checking eigenvalues
         eigenvals = np.linalg.eigvals(self.inertia_matrix)
         if np.any(eigenvals <= 0):
@@ -154,8 +170,32 @@ class DroneConfiguration:
             # Add small positive value to diagonal to ensure positive definiteness
             min_eigenval = max(1e-6, -np.min(eigenvals) + 1e-6)
             self.inertia_matrix += min_eigenval * np.eye(3)
+        
+        # Note: Minimum inertia clamping is skipped here to preserve morphological diversity.
+        # Numerical stability is instead handled via method selection in get_inertia_inverse():
+        # - "clamp" method applies min_inertia threshold before standard inversion
+        # - "svd" method uses pseudo-inverse which naturally handles small singular values
 
-        # NO min_inertia clamp - drone-hover computes realistic values for all drone sizes
+    def get_inertia_inverse(self, method: str = "clamp", min_inertia: float = 0.01, rcond: float = 1e-10):
+        """Return a numerically stable inverse of the inertia matrix.
+
+        Args:
+            method: "clamp" to use diagonal clamping then invert,
+                or "svd" to use pseudo-inverse via SVD (does NOT use clamping).
+            min_inertia: Minimum diagonal inertia for the "clamp" method only.
+            rcond: Relative cutoff for singular values in the "svd" method.
+        """
+        if method == "clamp":
+            inertia = self.inertia_matrix.copy()
+            inertia[0, 0] = max(inertia[0, 0], min_inertia)
+            inertia[1, 1] = max(inertia[1, 1], min_inertia)
+            inertia[2, 2] = max(inertia[2, 2], min_inertia)
+            return np.linalg.inv(inertia)
+        elif method == "svd":
+            # SVD-based pseudo-inverse: no clamping, handles singular values via rcond
+            return np.linalg.pinv(self.inertia_matrix, rcond=rcond)
+        else:
+            raise ValueError(f"Unknown inertia inversion method: {method}")
 
     def _compute_allocation_matrices(self):
         """Compute force and moment allocation matrices."""

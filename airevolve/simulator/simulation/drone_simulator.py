@@ -143,7 +143,7 @@ class DroneSimulator:
         # Rotational dynamics using inertia matrix
         # M = I * omega_dot + omega x (I * omega)
         # Simplified version: omega_dot = I^(-1) * M_body
-        I_inv = Matrix(np.linalg.inv(self.inertia))
+        I_inv = Matrix(self.config.get_inertia_inverse(method="svd"))
         omega = Matrix([p, q, r])
         I_omega = Matrix(self.inertia) @ omega
         
