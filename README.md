@@ -42,13 +42,17 @@ python examples/evolution/run_evolution.py --genome-handler spherical --populati
 
 The `examples/` directory is organised by purpose:
 
-- `examples/evolution/` — end-to-end evolution runners (`run_evolution.py`,
-  `run_evolution_with_lee_tuning.py`, `run_evolution_with_optimization_repair.py`).
+- `examples/evolution/` — end-to-end evolution runners and morphology
+  repair demo (`run_evolution.py`, `run_evolution_with_lee_tuning.py`,
+  `run_evolution_with_optimization_repair.py`,
+  `optimization_repair_demo.py`).
+- `examples/learning/` — single-drone reinforcement learning
+  (`run_rl_figure8.py` — PPO trains a canonical 4-motor 2-inch quad on
+  the figure-8 task using `DroneGateEnv` and the reference-form runtime).
 - `examples/simulation/` — single-drone simulation demos
   (`run_3D_simulation_lee_ctrl.py`).
-- `examples/tuning/` — controller and repair tuning
-  (`tune_lee_controller_gates.py`, `tune_lee_controller_gates_matched.py`,
-  `optimization_repair_demo.py`).
+- `examples/tuning/` — controller gain tuning
+  (`tune_lee_controller_gates.py`, `tune_lee_controller_gates_matched.py`).
 - `examples/videos/` — render flight videos
   (`make_video.py`, `make_lee_video.py`).
 - `examples/visualization/` — morphology / genome visualisation
