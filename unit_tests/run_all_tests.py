@@ -85,6 +85,15 @@ class TestRunner:
                 supports_visual=True,
                 requires_deps=['matplotlib']
             ),
+            'dynamics': TestCategory(
+                name='Reference-Form Dynamics',
+                description='Per-step parity (V0) and training smoke for the reference-form runtime simulator (Session 5 migration)',
+                test_files=[
+                    'test_dynamics_parity.py',
+                    'test_dynamics_smoke.py'
+                ],
+                requires_deps=['stable_baselines3']
+            ),
         }
     
     def check_dependencies(self, category: TestCategory) -> Tuple[bool, List[str]]:
