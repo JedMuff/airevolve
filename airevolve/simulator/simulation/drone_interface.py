@@ -96,8 +96,12 @@ class DroneInterface:
 
     def forces(self):
         """Calculate rotor thrusts and torques."""
-        # Get motor commands from drone simulator
-        motor_speeds = np.sqrt(self.drone_sim.motor_commands) * self.params["maxWmotor"]
+        # Read actual motor speeds (rad/s) from sim state. The previous
+        # `sqrt(motor_commands) * maxWmotor` form was for the legacy
+        # action-in-[0,1] convention; under the reference-form dynamics
+        # motor_commands lives in [-1, 1] and `sqrt` of negative values
+        # propagates NaN downstream.
+        motor_speeds = self.drone_sim._get_actual_motor_speeds()
 
         # Calculate thrusts and torques
         self.thr = self.params["kTh"] * motor_speeds * motor_speeds

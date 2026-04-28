@@ -7,8 +7,9 @@ physics simulation, and propeller data.
 
 from .drone_simulator import DroneSimulator, create_quadrotor, create_hexarotor, create_tricopter, create_octorotor
 from .drone_configuration import DroneConfiguration
-from .propeller_data import create_standard_propeller_config, GRAVITY
+from .propeller_data import create_standard_propeller_config, get_extended_prop_params, GRAVITY
 from .drone_interface import DroneInterface
+from .dynamics_params import derive_reference_params, W_MIN_N, W_MAX_N
 
 __all__ = [
     'DroneSimulator',
@@ -19,5 +20,9 @@ __all__ = [
     'create_hexarotor',
     'create_tricopter',
     'create_octorotor',
-    'GRAVITY'
+    'derive_reference_params',
+    'get_extended_prop_params',
+    'GRAVITY',
+    'W_MIN_N',
+    'W_MAX_N',
 ]

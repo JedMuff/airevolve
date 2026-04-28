@@ -9,9 +9,12 @@ for realistic mass, center of gravity, inertia, and control allocation calculati
 import numpy as np
 from numpy.linalg import norm, inv
 from .propeller_data import (
-    get_propeller_specs, validate_propeller_config, 
-    GRAVITY, CONTROLLER_MASS, BEAM_DENSITY
+    get_propeller_specs, validate_propeller_config,
+    GRAVITY, CONTROLLER_MASS, BATTERY_MASS, BEAM_DENSITY,
 )
+
+# Battery mounted under the frame (NED: +z is down).
+BATTERY_POS = np.array([0.0, 0.0, 0.02])
 
 class DroneConfiguration:
     """
@@ -66,29 +69,21 @@ class DroneConfiguration:
     
     def _compute_mass_and_cg(self):
         """Compute total mass and center of gravity location."""
-        # Start with controller mass
-        self.mass = CONTROLLER_MASS
-        
-        # Add propeller and beam masses
+        # Total mass = controller + battery + per-prop (propeller + beam).
+        self.mass = CONTROLLER_MASS + BATTERY_MASS
+        for prop in self.propellers:
+            beam_length = norm(np.array(prop["loc"]))
+            self.mass += prop["mass"] + BEAM_DENSITY * beam_length
+
+        # Center of gravity. Controller sits at origin, battery at BATTERY_POS,
+        # propellers at their loc, beams at their midpoint.
+        self.cg = (BATTERY_MASS / self.mass) * BATTERY_POS
         for prop in self.propellers:
             prop_mass = prop["mass"]
-            beam_length = norm(np.array(prop["loc"]))
-            beam_mass = BEAM_DENSITY * beam_length
-            
-            self.mass += prop_mass + beam_mass
-        
-        # Compute center of gravity
-        self.cg = np.zeros(3)
-        for prop in self.propellers:
-            prop_mass = prop["mass"]
-            beam_length = norm(np.array(prop["loc"]))
-            beam_mass = BEAM_DENSITY * beam_length
             prop_loc = np.array(prop["loc"])
-            
-            # Propeller contributes at its location
+            beam_length = norm(prop_loc)
+            beam_mass = BEAM_DENSITY * beam_length
             self.cg += (prop_mass / self.mass) * prop_loc
-            
-            # Beam contributes at its midpoint
             self.cg += (beam_mass / self.mass) * prop_loc * 0.5
     
     def _compute_inertia(self):
@@ -109,6 +104,15 @@ class DroneConfiguration:
         self.Ixy = -CONTROLLER_MASS * self.cg[0] * self.cg[1]
         self.Ixz = -CONTROLLER_MASS * self.cg[0] * self.cg[2]
         self.Iyz = -CONTROLLER_MASS * self.cg[1] * self.cg[2]
+
+        # Battery contribution (treated as a point mass at BATTERY_POS).
+        r_bat = BATTERY_POS - self.cg
+        self.Ix += BATTERY_MASS * (r_bat[1] ** 2 + r_bat[2] ** 2)
+        self.Iy += BATTERY_MASS * (r_bat[0] ** 2 + r_bat[2] ** 2)
+        self.Iz += BATTERY_MASS * (r_bat[0] ** 2 + r_bat[1] ** 2)
+        self.Ixy -= BATTERY_MASS * r_bat[0] * r_bat[1]
+        self.Ixz -= BATTERY_MASS * r_bat[0] * r_bat[2]
+        self.Iyz -= BATTERY_MASS * r_bat[1] * r_bat[2]
         
         # Add contributions from propellers and beams
         for prop in self.propellers:

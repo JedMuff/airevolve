@@ -184,11 +184,19 @@ def handle_keyboard_input_view(key, cam, auto_play, follow, draw_forces, draw_pa
 def draw_drone_and_forces(drone, forces, pos, ori, u, state, draw_forces, scl, frame, cam):
     """
     Draw drone(s) and force vectors.
+
+    Note: ``u`` here is the policy action in [-1, 1]. Under the reference-form
+    motor model (Session 5 dynamics migration), the physical motor thrust
+    magnitude scales with U = (u + 1) / 2 ∈ [0, 1] (motor never reverses;
+    minimum is the idle speed w_min). We therefore render arrow length using
+    that mapping so arrows point in the actual thrust direction at all
+    throttles, rather than flipping backward whenever u < 0.
     """
     if len(pos.shape) == 1:  # Single drone
         drone.translate(pos-drone.pos)
         drone.rotate(ori)
-        set_thrust(drone, forces, u*scl, base_len=THRUST_BASE_LEN)
+        thrust_magnitude = (np.asarray(u, dtype=float) + 1.0) / 2.0
+        set_thrust(drone, forces, thrust_magnitude * scl, base_len=THRUST_BASE_LEN)
         drone.draw(frame, cam, color=COLORS_BGR['black'], pt=2)
 
         if draw_forces:
@@ -199,7 +207,8 @@ def draw_drone_and_forces(drone, forces, pos, ori, u, state, draw_forces, scl, f
         for i in range(pos.shape[0]):
             drone.translate(pos[i]-drone.pos)
             drone.rotate(ori[i])
-            set_thrust(drone, forces, u[i]*scl, base_len=THRUST_BASE_LEN)
+            thrust_magnitude_i = (np.asarray(u[i], dtype=float) + 1.0) / 2.0
+            set_thrust(drone, forces, thrust_magnitude_i * scl, base_len=THRUST_BASE_LEN)
 
             # Draw drone with custom color if available
             if 'color' in state and len(state['color']) > i:

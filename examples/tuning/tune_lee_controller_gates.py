@@ -49,15 +49,15 @@ from airevolve.simulator.simulation import DroneInterface
 from airevolve.controllers.utils.wind_model import Wind
 from airevolve.controllers.utils.gate_configs import GATE_CONFIGS
 
-# Try to import CMA-ES
+# Try to import CMA-ES. Soft-fail so that other examples that pull
+# helpers (e.g. `create_2inch_quad`, `GateChecker`) from this module via
+# its fallback import path can still run without cma installed.
 try:
     import cma
     CMA_AVAILABLE = True
 except ImportError:
+    cma = None
     CMA_AVAILABLE = False
-    print("ERROR: 'cma' package not found. Install with: pip install cma")
-    import sys
-    sys.exit(1)
 
 
 # ============================================================================

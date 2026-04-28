@@ -26,60 +26,68 @@ from airevolve.evolution_tools.inspection_tools.drone_visualizer import DroneVis
 
 import argparse
 
+# Track configurations.
+# Conventions match optimal_quad_control_RL: NED frame (z+ down), gates set
+# at GATE_ALT m above the ground plane (z=-1.5). Vertical bounds give the
+# policy enough exploration room: ground at z=0, ceiling at z=-7. Horizontal
+# bounds are widened to ±5 m where sensible. The earlier z=0 / z_bounds=[-1,1]
+# layout was too tight for any drone with TWR > ~3 to learn from.
+GATE_ALT = -1.5
+
 class backandforth():
-    # back and forth
     gate_pos = np.array([
-        [  2.0,  0.0,  0.0],
-        [  8.0,  0.0,  0.0],
-        [  8.0,  0.0,  0.0],
-        [  2.0,  0.0,  0.0],
+        [  2.0,  0.0,  GATE_ALT],
+        [  8.0,  0.0,  GATE_ALT],
+        [  8.0,  0.0,  GATE_ALT],
+        [  2.0,  0.0,  GATE_ALT],
     ], dtype=np.float32)
     gate_yaw = np.array([0,0,2,2], dtype=np.float32) * np.pi / 2
-    x_bounds = np.array([-1, 11], dtype=np.float32)
-    y_bounds = np.array([-1, 1], dtype=np.float32)
-    z_bounds = np.array([-1, 1], dtype=np.float32)
-    starting_pos = np.array([0.0, 0.0, 0.0])
+    x_bounds = np.array([-2, 12], dtype=np.float32)
+    y_bounds = np.array([-5, 5], dtype=np.float32)
+    z_bounds = np.array([-7, 0], dtype=np.float32)
+    starting_pos = np.array([0.0, 0.0, GATE_ALT])
 
 class figure8():
     gate_pos = np.array([
-        [  1.5, -1.5,  0.0],
-        [  3.0,  0.0,  0.0],
-        [  1.5,  1.5,  0.0],
-        [  0.0,  0.0,  0.0],
-        [ -1.5, -1.5,  0.0],
-        [ -3.0,  0.0,  0.0],
-        [ -1.5,  1.5,  0.0],
-        [  0.0,  0.0,  0.0],
+        [  1.5, -1.5,  GATE_ALT],
+        [  3.0,  0.0,  GATE_ALT],
+        [  1.5,  1.5,  GATE_ALT],
+        [  0.0,  0.0,  GATE_ALT],
+        [ -1.5, -1.5,  GATE_ALT],
+        [ -3.0,  0.0,  GATE_ALT],
+        [ -1.5,  1.5,  GATE_ALT],
+        [  0.0,  0.0,  GATE_ALT],
     ], dtype=np.float32)
     gate_yaw = np.array([0,-1,0,1,2,-1,2,1], dtype=np.float32) * np.pi / 2
-    x_bounds = np.array([-4, 4], dtype=np.float32)
-    y_bounds = np.array([-2.5, 2.5], dtype=np.float32)
-    z_bounds = np.array([-1, 1], dtype=np.float32)
-    starting_pos = np.array([0.0, -1.5, 0.0])
+    x_bounds = np.array([-5, 5], dtype=np.float32)
+    y_bounds = np.array([-5, 5], dtype=np.float32)
+    z_bounds = np.array([-7, 0], dtype=np.float32)
+    starting_pos = np.array([0.0, -1.5, GATE_ALT])
 
 class circle():
     gate_pos = np.array([
-        [  0.0, -1.5,  0.0],
-        [  1.5,  0.0,  0.0],
-        [  0.0,  1.5,  0.0],
-        [ -1.5,  0.0,  0.0]
+        [  0.0, -1.5,  GATE_ALT],
+        [  1.5,  0.0,  GATE_ALT],
+        [  0.0,  1.5,  GATE_ALT],
+        [ -1.5,  0.0,  GATE_ALT]
     ], dtype=np.float32)
     gate_yaw = np.array([0,1,2,3], dtype=np.float32) * np.pi / 2
-    x_bounds = np.array([-3, 3], dtype=np.float32)
-    y_bounds = np.array([-3, 3], dtype=np.float32)
-    z_bounds = np.array([-1, 1], dtype=np.float32)
-    starting_pos = np.array([-1.5, -1.5, 0.0])
+    x_bounds = np.array([-5, 5], dtype=np.float32)
+    y_bounds = np.array([-5, 5], dtype=np.float32)
+    z_bounds = np.array([-7, 0], dtype=np.float32)
+    starting_pos = np.array([-1.5, -1.5, GATE_ALT])
 
 class slalom():
-
-    gate_pos = np.array([[x, (i % 2) * (1 if i % 4 == 1 else -1), 0] for i, x in enumerate(range(0, 82, 2))], dtype=np.float32)
+    gate_pos = np.array(
+        [[x, (i % 2) * (1 if i % 4 == 1 else -1), GATE_ALT] for i, x in enumerate(range(0, 82, 2))],
+        dtype=np.float32,
+    )
     ng = len(gate_pos)
-    # gate_pos = np.array([[  i*3.0,  0.0,  0.0] for i in range(ng)], dtype=np.float32)
     gate_yaw = np.tile([1, 0, -1, 0], ng) * np.pi / 2
     x_bounds = np.array([-2, 82+1], dtype=np.float32)
-    y_bounds = np.array([-3, 3], dtype=np.float32)
-    z_bounds = np.array([-1, 1], dtype=np.float32)
-    starting_pos = np.array([0, -1, 0])
+    y_bounds = np.array([-5, 5], dtype=np.float32)
+    z_bounds = np.array([-7, 0], dtype=np.float32)
+    starting_pos = np.array([0, -1, GATE_ALT])
     
 # ANIMATION FUNCTION
 def animate_policy(individual, model, env, deterministic=False, log_times=False, print_vel=False, log=None, view_type="top",
@@ -240,11 +248,11 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     env = VecMonitor(env, filename=monitor_file)
     # custom_logger = configure(save_dir, ["stdout", "csv", "tensorboard"])
 
-    # MODEL DEFINITION
+    # MODEL DEFINITION (matches optimal_quad_control_RL/train.py:149-161).
     policy_kwargs = dict(
         activation_fn=torch.nn.ReLU,
-        net_arch=dict(pi=[64, 64, 64], vf=[64, 64, 64]),
-        log_std_init=0.041
+        net_arch=dict(pi=[64, 64], vf=[64, 64]),
+        log_std_init=0.0,
     )
     model = PPO(
         "MlpPolicy",
@@ -252,17 +260,11 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         policy_kwargs=policy_kwargs,
         verbose=0,
         tensorboard_log=save_dir,
-        learning_rate=1.0e-4,
-        n_steps=256,
-        batch_size=128,
-        n_epochs=22,
-        gamma=0.9965,
-        gae_lambda=0.894,
-        clip_range=0.156,
-        ent_coef=0.0044,
-        vf_coef=0.55,
-        max_grad_norm=3.19,
-        device=device
+        n_steps=1000,
+        batch_size=5000,
+        n_epochs=10,
+        gamma=0.999,
+        device=device,
     )
     # model.set_logger(custom_logger)
 

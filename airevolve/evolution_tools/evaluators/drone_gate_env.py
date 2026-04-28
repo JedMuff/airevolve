@@ -58,7 +58,8 @@ class DroneGateEnv(VecEnv):
                  seed=None,
                  render_mode=None,
                  device=None,
-                 dt=0.01
+                 dt=0.01,
+                 action_filter_alpha=1.0,
                  ):
         
         # Set device
@@ -96,8 +97,8 @@ class DroneGateEnv(VecEnv):
 
         num_motors = self.drone_sim.num_motors
 
-        # Motor time constant for first-order dynamics
-        self.motor_tau = 0.01
+        # Motor time constant for first-order dynamics (matches reference 5-inch sysid).
+        self.motor_tau = 0.04
 
         # Define the race track
         self.start_pos = start_pos.astype(np.float32)
@@ -177,6 +178,16 @@ class DroneGateEnv(VecEnv):
         # Define any other environment-specific parameters
         self.max_steps = 1200      # Maximum number of steps in an episode
         self.dt = np.float32(dt)   # Time step duration
+
+        # Action low-pass filter (one-pole IIR) modeling a flight controller's
+        # RC-smoothing / setpoint-shaping stage. alpha=1.0 = pass-through (no
+        # filter, default for backward compat). alpha<1.0 smooths actions:
+        #   filtered_a = alpha · raw_a + (1 - alpha) · prev_filtered_a
+        # At dt=0.01 (100 Hz), alpha=0.3 corresponds to roughly a 6 Hz cutoff,
+        # alpha=0.5 → ~16 Hz, alpha=1.0 → no smoothing (raw policy output).
+        # Real Betaflight RC smoothing typically targets 20-30 Hz cutoff.
+        self.action_filter_alpha = float(action_filter_alpha)
+        self.filtered_actions = np.zeros((num_envs, num_motors), dtype=np.float32)
 
         self.step_counts = np.zeros(num_envs, dtype=int)
         self.actions = np.zeros((num_envs,num_motors), dtype=np.float32)
@@ -340,7 +351,10 @@ class DroneGateEnv(VecEnv):
             q0 = np.random.uniform(-0.1,0.1, size=(num_reset,))
             r0 = np.random.uniform(-0.1,0.1, size=(num_reset,))
 
-            w0 = np.random.uniform(0,1, size=(num_reset,self.num_motors))
+            # Motor speeds w_i are in [-1, 1] (reference-form normalization;
+            # see DroneSimulator state convention). Was [0, 1] under the old
+            # dynamics — see Phase 2.3 in RUNTIME_DYNAMICS_MIGRATION.md.
+            w0 = np.random.uniform(-1, 1, size=(num_reset,self.num_motors))
 
         else: # always start at the first gate, fixed orientation
             # set target gates to 0
@@ -371,6 +385,9 @@ class DroneGateEnv(VecEnv):
 
         self.world_states[dones] = np.concatenate(state_vars + list(w0), axis=1)
         self.step_counts[dones] = np.zeros(num_reset)
+        # Clear the action-filter memory for envs that just reset, so the
+        # next action isn't smoothed against a stale pre-reset action.
+        self.filtered_actions[dones] = 0.0
         
         # update states
         self.update_states()
@@ -384,31 +401,27 @@ class DroneGateEnv(VecEnv):
         self.actions = actions
     
     def step_wait(self):
-        # Convert actions from [-1,1] to [0,1] range for motor commands
-        motor_commands = np.clip((self.actions + 1) / 2, 0, 1)
+        # Reference-form dynamics: dynamics_func takes the full 12+N state
+        # and the action directly. Motor model (sqrt-poly mapping U → Wc,
+        # then first-order lag) is baked into the symbolic equations.
+        # Action is in [-1, 1]; motor state w_i is in [-1, 1].
+        #
+        # Apply the action low-pass filter (FC setpoint shaping) before the
+        # action enters the dynamics. alpha=1.0 is a no-op.
+        if self.action_filter_alpha < 1.0:
+            self.filtered_actions = (
+                self.action_filter_alpha * self.actions
+                + (1.0 - self.action_filter_alpha) * self.filtered_actions
+            ).astype(np.float32)
+            action_for_dynamics = self.filtered_actions
+        else:
+            action_for_dynamics = self.actions
 
-        # Extract base state (12D) and motor RPMs (normalized, not actual RPM)
-        base_state = self.world_states[:, 0:12]
-        motor_rpms = self.world_states[:, 12:12+self.num_motors]
-
-        # Motor RPMs represent normalized motor speeds w in [0,1]
-        # The actual control input to the dynamics is w^2
-        motor_thrust_inputs = motor_rpms**2
-
-        # Compute base state dynamics using the simulator (expects U = w^2)
-        base_state_dot = self.drone_sim.dynamics_func(base_state.T, motor_thrust_inputs.T).T
-
-        # Compute motor dynamics: dw/dt = (sqrt(U_cmd) - w) / tau
-        # where U_cmd is the commanded motor power in [0,1]
-        motor_command_rpm = np.sqrt(motor_commands)  # Target normalized RPM sqrt(U)
-        motor_rpm_dot = (motor_command_rpm - motor_rpms) / self.motor_tau
-
-        # Euler integration
-        new_base_state = base_state + self.dt * base_state_dot
-        new_motor_rpms = motor_rpms + self.dt * motor_rpm_dot
-
-        # Combine back into full state
-        new_states = np.concatenate([new_base_state, new_motor_rpms], axis=1)
+        full_state = self.world_states  # (num_envs, 12+N)
+        full_state_dot = self.drone_sim.dynamics_func(
+            full_state.T, action_for_dynamics.T
+        ).T  # (num_envs, 12+N)
+        new_states = (full_state + self.dt * full_state_dot).astype(np.float32)
 
         # Detect numerical divergence (NaN, Inf, or excessively large finite values)
         diverged = np.any(~np.isfinite(new_states) | (np.abs(new_states) > 1e6), axis=1)
@@ -437,11 +450,16 @@ class DroneGateEnv(VecEnv):
         pos_old_projected = (pos_old[:,0]-pos_gate[:,0])*normal[:,0] + (pos_old[:,1]-pos_gate[:,1])*normal[:,1]
         pos_new_projected = (pos_new[:,0]-pos_gate[:,0])*normal[:,0] + (pos_new[:,1]-pos_gate[:,1])*normal[:,1]
         passed_gate_plane = (pos_old_projected < 0) & (pos_new_projected > 0)
-        gate_size = 1.0
+        gate_size = 1.5
         gate_passed = passed_gate_plane & np.all(np.abs(pos_new - pos_gate)<gate_size/2, axis=1)
 
-        # Add substantial reward for passing through gates
-        rewards[gate_passed] += 10.0
+        # +10 only on the final gate of the lap. Per-gate was tried in
+        # session 2 (10-seed × 10M steps, native fig8) and all 10 seeds
+        # collapsed; final-only is closer to the reference, where the
+        # gate-pass reward path is itself dead code (quad_race_env.py:271,
+        # 479,482 — final_gate_passed is initialized but never updated).
+        final_gate_passed = gate_passed & (self.target_gates == self.num_gates - 1)
+        rewards[final_gate_passed] += 10.0
 
         # Check out of bounds
         x_bounds_broken = np.logical_or(new_states[:,0] < self.x_bounds[0], new_states[:,0] > self.x_bounds[1])
@@ -449,8 +467,8 @@ class DroneGateEnv(VecEnv):
         z_bounds_broken = np.logical_or(new_states[:,2] < self.z_bounds[0], new_states[:,2] > self.z_bounds[1])
         out_of_bounds = x_bounds_broken | y_bounds_broken | z_bounds_broken
 
-        rewards[out_of_bounds] = -20
-        rewards[diverged] = -20
+        rewards[out_of_bounds] = -10
+        rewards[diverged] = -10
 
         # Check number of steps
         max_steps_reached = self.step_counts >= self.max_steps

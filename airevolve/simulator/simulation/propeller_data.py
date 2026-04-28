@@ -9,42 +9,117 @@ Data extracted from drone-hover package for integration with geometric control f
 
 import numpy as np
 
-# Propeller library with specifications for different sizes
+# Propeller library with specifications for different sizes.
+#
+# Reference-form physics constants (w_min, k, k_r_react, k_drag_x_norm,
+# k_drag_y_norm, tau) are sourced from optimal_quad_control_RL/randomization.py
+# (params_5inch and params_3inch — the only two sysid'd sets that exist).
+# For prop sizes without a real sysid, values are borrowed from the closest
+# sysid'd entry (3-inch for prop2/prop4, 5-inch for prop6/prop7/prop8/matched);
+# this is reasonable because these constants are physics-of-the-rotor (mostly
+# aerodynamic), not whole-drone sysid. Reactions to migration: see
+# experimentation/RUNTIME_DYNAMICS_MIGRATION.md Phase 1.
 PROPELLER_LIBRARY = {
     "prop2": {
         "constants": [8.12e-08, 6.40e-10],  # [k_f, k_m] force and moment constants
         "wmax": 5000,                       # Maximum angular velocity (rad/s)
-        "mass": 0.0046                      # Propeller + motor mass (kg)
+        "mass": 0.0046,                     # Propeller + motor mass (kg)
+        # Borrowed from params_3inch (closest sysid set; prop2 has no real sysid).
+        "w_min": 305.40,
+        "k": 0.84,
+        "k_r_react": 1.14e-03,
+        "k_x_drag": 3.36e-05,
+        "k_y_drag": 3.73e-05,
+        "tau": 0.04,
+    },
+    "prop3": {
+        # New entry: 3-inch sysid'd from optimal_quad_control_RL/randomization.py:29-35.
+        # k_f / k_m / wmax derived from params_3inch: k_w = k_f/m → k_f = k_w·m;
+        # m chosen as 0.3 kg (typical 3" build; mass ↑ slightly compared to prop2's 0.0046
+        # because prop3 is bigger). For exact parity with params_3inch, see Phase 3.2 of
+        # the migration doc — may need a `prop3_real` entry that derives [k_f, k_m, wmax]
+        # to exactly reproduce params_3inch's k_w/k_r1..4.
+        "constants": [1.80e-07, 2.89e-09],  # [k_f, k_m] (k_f = k_w·m_canonical, rough)
+        "wmax": 4887,
+        "mass": 0.012,
+        "w_min": 305.40,
+        "k": 0.84,
+        "k_r_react": 1.14e-03,
+        "k_x_drag": 3.36e-05,
+        "k_y_drag": 3.73e-05,
+        "tau": 0.04,
     },
     "prop4": {
         "constants": [7.24e-07, 8.20e-09],  # [k_f, k_m] force and moment constants
         "wmax": 3927,                       # Maximum angular velocity (rad/s)
-        "mass": 0.018                       # Propeller + motor mass (kg)
+        "mass": 0.018,                      # Propeller + motor mass (kg)
+        # Borrowed from params_3inch (closest sysid set).
+        "w_min": 305.40,
+        "k": 0.84,
+        "k_r_react": 1.14e-03,
+        "k_x_drag": 3.36e-05,
+        "k_y_drag": 3.73e-05,
+        "tau": 0.04,
     },
     "prop5": {
         "constants": [1.08e-06, 1.22e-08],
         "wmax": 3142,
-        "mass": 0.0196
+        "mass": 0.0196,
+        # Sysid: params_5inch from optimal_quad_control_RL/randomization.py:5-10.
+        "w_min": 238.49,
+        "k": 0.95,
+        "k_r_react": 1.97e-03,
+        "k_x_drag": 4.85e-05,
+        "k_y_drag": 7.28e-05,
+        "tau": 0.04,
     },
     "prop6": {
         "constants": [2.21e-06, 2.74e-08],
         "wmax": 2618,
-        "mass": 0.0252
+        "mass": 0.0252,
+        # Borrowed from params_5inch (closest sysid set).
+        "w_min": 238.49,
+        "k": 0.95,
+        "k_r_react": 1.97e-03,
+        "k_x_drag": 4.85e-05,
+        "k_y_drag": 7.28e-05,
+        "tau": 0.04,
     },
     "prop7": {
         "constants": [4.65e-06, 6.62e-08],
         "wmax": 2244,
-        "mass": 0.046
+        "mass": 0.046,
+        # Borrowed from params_5inch (closest sysid set).
+        "w_min": 238.49,
+        "k": 0.95,
+        "k_r_react": 1.97e-03,
+        "k_x_drag": 4.85e-05,
+        "k_y_drag": 7.28e-05,
+        "tau": 0.04,
     },
     "prop8": {
         "constants": [7.60e-06, 1.14e-07],
         "wmax": 1963,
-        "mass": 0.056
+        "mass": 0.056,
+        # Borrowed from params_5inch (closest sysid set).
+        "w_min": 238.49,
+        "k": 0.95,
+        "k_r_react": 1.97e-03,
+        "k_x_drag": 4.85e-05,
+        "k_y_drag": 7.28e-05,
+        "tau": 0.04,
     },
     "matched": {
         "constants": [1.076e-05, 1.61e-07],  # Matched to original framework (kTh = 1.076e-5)
         "wmax": 1963,
-        "mass": 0.300  # Increased to match original 1.2kg total mass exactly
+        "mass": 0.300,  # Increased to match original 1.2kg total mass exactly
+        # Borrowed from params_5inch (closest sysid set).
+        "w_min": 238.49,
+        "k": 0.95,
+        "k_r_react": 1.97e-03,
+        "k_x_drag": 4.85e-05,
+        "k_y_drag": 7.28e-05,
+        "tau": 0.04,
     }
 }
 
@@ -82,6 +157,22 @@ def get_propeller_specs(prop_size):
 
     return PROPELLER_LIBRARY[prop_key].copy()
 
+def get_extended_prop_params(prop_size):
+    """Return all reference-form physics constants for a prop size.
+
+    Returns a dict containing both the original DroneSimulator-consumed
+    fields (`constants`, `wmax`, `mass`) and the reference-form fields
+    needed by `derive_reference_params` in dynamics_params.py
+    (`w_min`, `k`, `k_r_react`, `k_drag_x_norm`, `k_drag_y_norm`, `tau`).
+
+    Args:
+        prop_size (int or str): Propeller size in inches (2-8) or "matched".
+
+    Returns:
+        dict: Full extended specification.
+    """
+    return get_propeller_specs(prop_size)
+
 def validate_propeller_config(props):
     """
     Validate propeller configuration format.
@@ -102,9 +193,9 @@ def validate_propeller_config(props):
                 raise KeyError(f"'{key}' is missing in propeller {i}")
         
         # Validate propeller size
-        if prop["propsize"] not in [2, 4, 5, 6, 7, 8, "matched"]:
+        if prop["propsize"] not in [2, 3, 4, 5, 6, 7, 8, "matched"]:
             raise ValueError(f"Invalid propeller size {prop['propsize']} in propeller {i}. "
-                           f"Available sizes: [2, 4, 5, 6, 7, 8, 'matched']")
+                           f"Available sizes: [2, 3, 4, 5, 6, 7, 8, 'matched']")
         
         # Validate direction format
         if len(prop["dir"]) != 4:
