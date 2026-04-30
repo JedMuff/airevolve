@@ -6,6 +6,8 @@ license: MIT
 Please feel free to use and modify this, but keep the above information. Thanks!
 """
 
+import os
+from datetime import datetime
 import numpy as np
 from numpy import pi
 import matplotlib.pyplot as plt
@@ -16,7 +18,7 @@ from . import rotation_conversion, quaternion_functions
 
 numFrames = 8
 
-def sameAxisAnimation(t_all, waypoints, pos_all, quat_all, sDes_tr_all, Ts, params, xyzType, yawType, ifsave, orient="NED", gate_pos=None, gate_yaw=None, gate_size=1.0, bspline_traj=None):
+def sameAxisAnimation(t_all, waypoints, pos_all, quat_all, sDes_tr_all, Ts, params, xyzType, yawType, ifsave, orient="NED", gate_pos=None, gate_yaw=None, gate_size=1.0, bspline_traj=None, save_path=None):
 
     x = pos_all[:,0]
     y = pos_all[:,1]
@@ -237,7 +239,13 @@ def sameAxisAnimation(t_all, waypoints, pos_all, quat_all, sDes_tr_all, Ts, para
     line_ani = animation.FuncAnimation(fig, updateLines, init_func=ini_plot, frames=len(t_all[0:-2:numFrames]), interval=(Ts*1000*numFrames), blit=False)
     
     if (ifsave):
-        line_ani.save('Gifs/Raw/animation_{0:.0f}_{1:.0f}.gif'.format(xyzType,yawType), dpi=80, writer='imagemagick', fps=25)
-        
+        if save_path is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            save_path = '__data__/animations/animation_{0:.0f}_{1:.0f}_{2}.mp4'.format(
+                xyzType, yawType, timestamp)
+        os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
+        line_ani.save(save_path, dpi=80, writer='ffmpeg', fps=25)
+        print(f"Animation saved to: {save_path}")
+
     plt.show()
     return line_ani
