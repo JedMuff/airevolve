@@ -129,6 +129,9 @@ cython_debug/
 
 # Experiment results
 .data/
+__data__/
+.smoke_test/
+rl_logs/
 
 # Local archive of experiment artifacts, logs, and ad-hoc scripts
 archive/
