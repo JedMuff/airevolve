@@ -152,8 +152,12 @@ class BaseLeeController:
         inertia_angvel = self.robot_inertia @ self.robot_body_angvel
         feed_forward_body_rates = np.cross(self.robot_body_angvel, inertia_angvel)
 
+        # Lee geometric control on SO(3): M = -K_R·e_R - K_omega·e_omega + ω×J·ω.
+        # `rotation_error` already equals Lee's e_R (sign convention from
+        # `0.5·vee(R_d^T R - R^T R_d)`), and `angvel_error` equals e_omega, so all
+        # three terms emit body torque in physical N·m with no downstream negation.
         torque = (
-            +self.K_rot_current * rotation_error
+            -self.K_rot_current * rotation_error
             - self.K_angvel_current * angvel_error
             + feed_forward_body_rates
         )

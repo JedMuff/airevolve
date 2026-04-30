@@ -251,19 +251,13 @@ class LeeGeometricControl:
             # In ENU: Z component is already positive for upward
             thrust_command = force_command[2]
         
-        # CRITICAL: Negate moments to match control allocation sign convention
-        #
-        # Lee geometric control computes torques using SO(3) Lie algebra (vee map of rotation error).
-        # However, PX4's cascade control (attitude → rate → torque) implicitly inverts the sign.
-        # The control allocation matrix expects PX4-style sign convention, so we must negate.
-        #
-        # Root cause analysis showed: Issue was NOT sign, but GAIN MAGNITUDE (Lee uses direct control
-        # with gains 20x higher than PX4's cascaded approach). With properly scaled gains AND negation,
-        # the controller matches PX4 performance.
-        torque_scale = -1.0
-        roll_torque = moment_command[0] * torque_scale
-        pitch_torque = moment_command[1] * torque_scale
-        yaw_torque = moment_command[2] * torque_scale
+        # `compute_body_torque` already emits Lee's M_des in physical body N·m,
+        # and the mixerFM rows are physical (T per W², τ per W²), so we pass the
+        # moment through directly. (The earlier `torque_scale=-1.0` predated the
+        # base-controller sign fix and reversed angular-rate damping.)
+        roll_torque = moment_command[0]
+        pitch_torque = moment_command[1]
+        yaw_torque = moment_command[2]
 
         # Create command vector [thrust, roll_torque, pitch_torque, yaw_torque]
         t = np.array([thrust_command, roll_torque, pitch_torque, yaw_torque])
