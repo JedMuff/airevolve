@@ -341,10 +341,16 @@ def main():
         gate_size = gate_config.gate_size
         bspline_traj = traj.bspline_trajectory
 
+        save_path = None
+        if ifsave:
+            timestamp = time.strftime('%Y%m%d_%H%M%S')
+            run_name = f'lee_ctrl_{args.gates}_{timestamp}'
+            save_path = f'__data__/lee_sim/{run_name}/lee_ctrl.mp4'
+
         ani = utils.sameAxisAnimation(t_all, traj.wps, pos_all, quat_all, sDes_traj_all,
                                      Ts, quad.params, traj.xyzType, traj.yawType, ifsave, 'NED',
                                      gate_pos=gate_pos, gate_yaw=gate_yaw, gate_size=gate_size,
-                                     bspline_traj=bspline_traj)
+                                     bspline_traj=bspline_traj, save_path=save_path)
         plt.show()
     else:
         print("\nVisualization disabled (--no-viz flag)")

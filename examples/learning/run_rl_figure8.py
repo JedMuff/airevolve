@@ -17,7 +17,8 @@ Usage:
     python examples/learning/run_rl_figure8.py --total-steps 5e6 --seed 1
 
 Outputs a tensorboard log, a `window_metrics.csv` (gate_passes / 100k
-steps), and a saved policy under `--save-dir` (default `./rl_logs/`).
+steps), a saved policy, and (by default) an mp4 rollout of the trained
+policy under `--save-dir` (default `__data__/rl/`).
 """
 from __future__ import annotations
 
@@ -26,21 +27,25 @@ import os
 import time
 from datetime import datetime
 
+import numpy as np
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import VecMonitor
 
-from airevolve.evolution_tools.evaluators.drone_gate_env import DroneGateEnv
+from airevolve.evolution_tools.evaluators.drone_gate_env import (
+    DroneGateEnv, gate_pos as DEFAULT_GATE_POS, gate_yaw as DEFAULT_GATE_YAW,
+)
 from airevolve.simulator.simulation.propeller_data import (
     create_standard_propeller_config,
 )
+import airevolve.controllers.utils as ctrl_utils
 
 from window_metrics_callback import WindowMetricsCallback
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
-    p.add_argument("--total-steps", type=float, default=5e6,
+    p.add_argument("--total-steps", type=float, default=5e6, # 50_000_000 works
                    help="total PPO timesteps (default 5e6)")
     p.add_argument("--num-envs", type=int, default=100,
                    help="parallel environments (default 100)")
@@ -50,13 +55,68 @@ def parse_args() -> argparse.Namespace:
                    help="propeller size (default 2-inch)")
     p.add_argument("--arm-length", type=float, default=0.11,
                    help="arm length in metres (default 0.11)")
-    p.add_argument("--save-dir", default="./rl_logs",
-                   help="output dir for tensorboard logs and saved policy")
+    p.add_argument("--save-dir", default="__data__/rl",
+                   help="output dir for tensorboard logs, saved policy, and rollout video (default __data__/rl)")
     p.add_argument("--device", default="cuda:0",
                    help="torch device (default cuda:0; pass cpu for portability)")
     p.add_argument("--tag", default="",
                    help="extra tag appended to the run name")
+    p.add_argument("--no-video", action="store_true",
+                   help="skip the post-training rollout video (default: save mp4 to --save-dir)")
+    p.add_argument("--video-seconds", type=float, default=20.0,
+                   help="rollout duration in seconds for the video (default 20)")
     return p.parse_args()
+
+
+def record_rollout(model, propellers, dt, save_path, duration_s, device):
+    """Roll out the trained policy in a deterministic single-env and save mp4.
+
+    Uses the same `sameAxisAnimation` renderer as the Lee-controller example
+    so the figure-8 gates and trajectory are drawn consistently.
+    """
+    env = DroneGateEnv(
+        num_envs=1,
+        propellers=propellers,
+        gates_ahead=1,
+        num_state_history=0,
+        num_action_history=0,
+        history_step_size=1,
+        render_mode=None,
+        device=device,
+        dt=dt,
+        initialize_at_random_gates=False,
+        seed=0,
+    )
+    obs = env.reset()
+
+    n_steps = int(duration_s / dt)
+    pos_all = np.zeros((n_steps, 3))
+    quat_all = np.zeros((n_steps, 4))
+    t_all = np.arange(n_steps) * dt
+
+    for i in range(n_steps):
+        action, _ = model.predict(obs, deterministic=True)
+        env.step_async(action)
+        obs, _, _, _ = env.step_wait()
+        state = env.world_states[0]
+        pos_all[i] = state[0:3]
+        phi, theta, psi = state[6], state[7], state[8]
+        quat_all[i] = ctrl_utils.YPRToQuat(psi, theta, phi)
+
+    # Stub setpoint trajectory (the renderer expects a (T, ≥3) array; RL
+    # training has no explicit reference trajectory, so we draw the actual
+    # position as the "desired" line — the gates carry the racing intent).
+    sDes_traj_all = np.zeros((n_steps, 16))
+    sDes_traj_all[:, 0:3] = pos_all
+    waypoints = DEFAULT_GATE_POS.astype(float)
+
+    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+    ctrl_utils.sameAxisAnimation(
+        t_all, waypoints, pos_all, quat_all, sDes_traj_all, dt,
+        env.drone_sim.get_params(), 15, 3, 1, 'NED',
+        gate_pos=DEFAULT_GATE_POS, gate_yaw=DEFAULT_GATE_YAW, gate_size=1.5,
+        save_path=save_path,
+    )
 
 
 def main() -> None:
@@ -149,6 +209,14 @@ def main() -> None:
         flush=True,
     )
     print(f"window-metrics CSV: {csv_path}", flush=True)
+
+    if not args.no_video:
+        video_path = os.path.join(save_dir, run_name + ".mp4")
+        print(f"recording rollout video → {video_path}", flush=True)
+        record_rollout(
+            model, propellers, dt=0.01, save_path=video_path,
+            duration_s=args.video_seconds, device=args.device,
+        )
 
 
 if __name__ == "__main__":
