@@ -30,7 +30,7 @@ def _sample_limit_trajectories(gate_config, bspline_traj, n_random=30,
 
     Creates trajectories where each gate's control point offset is randomly set to
     its maximum or minimum bound (corners of the offset hypercube), matching the
-    bounds used by the 2-stage CMA-ES in run_evolution_with_lee_tuning.py.
+    bounds used by the 2-stage CMA-ES in run_evolution.py (--brain lee).
 
     Args:
         gate_config: Gate configuration
@@ -361,7 +361,7 @@ def main():
     parser.add_argument('--show-limits', action='store_true',
                        help='Show envelope of extreme gate-offset trajectories '
                             '(offset bounds match the 2-stage CMA-ES in '
-                            'run_evolution_with_lee_tuning.py)')
+                            'run_evolution.py --brain lee)')
     parser.add_argument('--gate-offset-scale', type=float, default=0.5,
                        help='Gate offset scale factor for limit trajectories '
                             '(default: 0.5, matches evolution pipeline)')

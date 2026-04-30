@@ -36,16 +36,16 @@ pip install -e ".[vis]"
 Run a complete evolution experiment:
 
 ```bash
-python examples/evolution/run_evolution.py --genome-handler spherical --population-size 50 --generations 100 --gate-cfg figure8
+python examples/evolution/run_evolution.py --brain lee --genome spherical --fitness gate --population-size 50 --generations 100 --gate-cfg figure8
 ```
 ## Examples
 
 The `examples/` directory is organised by purpose:
 
-- `examples/evolution/` — end-to-end evolution runners and morphology
-  repair demo (`run_evolution.py`, `run_evolution_with_lee_tuning.py`,
-  `run_evolution_with_optimization_repair.py`,
-  `optimization_repair_demo.py`).
+- `examples/evolution/` — end-to-end evolution runner and morphology
+  repair demo (`run_evolution.py`, `optimization_repair_demo.py`). The
+  unified runner picks brain (RL or Lee), genome encoding, fitness mode,
+  and init-pop strategy via CLI flags — see `--help`.
 - `examples/learning/` — single-drone reinforcement learning
   (`run_rl_figure8.py` — PPO trains a canonical 4-motor 2-inch quad on
   the figure-8 task using `DroneGateEnv` and the reference-form runtime).
