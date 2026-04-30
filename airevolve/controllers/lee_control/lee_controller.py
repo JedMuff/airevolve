@@ -34,11 +34,15 @@ class LeeGeometricControl:
     """
     
     def __init__(self, quad, yawType, orient="NED",
-                 # Lee control gains - Tuned for direct SO(3) control (not cascaded like PX4)
-                 pos_P_gain=np.array([2.0, 2.0, 3.0]),      # Position gains [kx, ky, kz]
-                 vel_P_gain=np.array([3.0, 3.0, 4.0]),      # Velocity gains [kvx, kvy, kvz]
-                 att_P_gain=np.array([0.3, 0.3, 0.1]),      # Attitude gains [kR_roll, kR_pitch, kR_yaw] - scaled for direct control
-                 rate_P_gain=np.array([0.05, 0.05, 0.03]),  # Angular rate gains
+                 # Lee control gains - Tuned for direct SO(3) control (not cascaded like PX4).
+                 # Defaults are calibrated for a heavier ~1 kg drone; pass auto_scale_gains=True
+                 # (or override att/rate gains) for small drones where the legacy defaults
+                 # demand torques exceeding motor allocation capacity.
+                 pos_P_gain=None,                           # Position gains [kx, ky, kz]
+                 vel_P_gain=None,                           # Velocity gains [kvx, kvy, kvz]
+                 att_P_gain=None,                           # Attitude gains [kR_roll, kR_pitch, kR_yaw]
+                 rate_P_gain=None,                          # Angular rate gains
+                 auto_scale_gains=False,                    # Scale att/rate gains by inertia
                  # Interface compatibility (unused parameters for compatibility with PID controllers)
                  **kwargs):                                 # Catches vel_D_gain, vel_I_gain, rate_D_gain, tilt_max, rate_max, vel_max, etc.
         """
@@ -52,11 +56,16 @@ class LeeGeometricControl:
             yawType: Yaw control type (0=disabled, 1=enabled)
             orient: Coordinate frame ("NED" or "ENU")
 
-            # Lee Control Gains (the core parameters)
+            # Lee Control Gains (the core parameters; pass None for built-in defaults)
             pos_P_gain: Position control gains [kx, ky, kz]
             vel_P_gain: Velocity control gains [kvx, kvy, kvz]
             att_P_gain: Attitude control gains [kR_roll, kR_pitch, kR_yaw]
             rate_P_gain: Angular rate gains [komega_roll, komega_pitch, komega_yaw]
+            auto_scale_gains: If True and att/rate gains are not user-provided,
+                derive them from the drone's inertia (K_rot = I·ω_n², K_angvel = 2·I·ω_n
+                for a critically damped second-order attitude response). Required for
+                small drones (e.g. 2-inch quads, Izz ≈ 1e-4) where the heavy-drone
+                defaults saturate the motor allocation immediately.
 
             **kwargs: Unused PID parameters (vel_D_gain, vel_I_gain, rate_D_gain,
                      tilt_max, rate_max, vel_max, aggressiveness, etc.) kept for interface compatibility
@@ -66,12 +75,33 @@ class LeeGeometricControl:
         self.drone_config = quad.drone_sim.config
         self.num_motors = self.drone_config.num_motors
         self.orient = orient
-        
+
+        # Built-in defaults (calibrated for ~1 kg drone with heavy inertia).
+        if pos_P_gain is None:
+            pos_P_gain = np.array([2.0, 2.0, 3.0])
+        if vel_P_gain is None:
+            vel_P_gain = np.array([3.0, 3.0, 4.0])
+
+        # Auto-scale att/rate gains from inertia. The Lee controller emits torques
+        # directly (N·m), so K_rot must scale with inertia to give a consistent
+        # closed-loop bandwidth. Underlying second-order shape:
+        #   I·θ̈ + K_angvel·θ̇ + K_rot·θ = 0  →  K_rot = I·ω_n², K_angvel = 2·I·ω_n.
+        if auto_scale_gains and att_P_gain is None and rate_P_gain is None:
+            I_diag = np.diag(np.asarray(quad.params["IB"]))
+            omega_n_att = 12.0  # rad/s; closed-loop attitude natural frequency
+            att_P_gain = I_diag * omega_n_att ** 2
+            rate_P_gain = 2.0 * I_diag * omega_n_att
+
+        if att_P_gain is None:
+            att_P_gain = np.array([0.3, 0.3, 0.1])
+        if rate_P_gain is None:
+            rate_P_gain = np.array([0.05, 0.05, 0.03])
+
         # Store control gains (Lee control uses different structure than PID)
-        self.pos_P_gain = pos_P_gain.copy()
-        self.vel_P_gain = vel_P_gain.copy()
-        self.att_P_gain = att_P_gain.copy()
-        self.rate_P_gain = rate_P_gain.copy()
+        self.pos_P_gain = np.asarray(pos_P_gain, dtype=float).copy()
+        self.vel_P_gain = np.asarray(vel_P_gain, dtype=float).copy()
+        self.att_P_gain = np.asarray(att_P_gain, dtype=float).copy()
+        self.rate_P_gain = np.asarray(rate_P_gain, dtype=float).copy()
 
         # Extract unused parameters from kwargs for interface compatibility (not enforced)
         self.tilt_max = kwargs.get('tilt_max', 50.0*deg2rad)  # Only used for reporting
