@@ -122,9 +122,16 @@ class Trajectory:
             self.desEul[2] = 0.0
 
         elif self.yawType == 3:
-            # Yaw follows velocity direction
-            if t == 0:
-                self.desEul[2] = 0.0
+            # Yaw follows velocity direction. At t=0 the spline has zero velocity
+            # (quintic startup ramp), so peek forward 0.05s to recover the heading
+            # — keeps the yaw setpoint aligned with the drone's initial yaw and
+            # avoids a spurious large yaw error on the first controller step.
+            if np.linalg.norm(self.desVel[:2]) < 1e-6:
+                _, future_vel, _ = self.bspline_trajectory.evaluate(t + 0.05)
+                if np.linalg.norm(future_vel[:2]) > 1e-6:
+                    self.desEul[2] = np.arctan2(future_vel[1], future_vel[0])
+                else:
+                    self.desEul[2] = self.current_heading
             else:
                 # Calculate desired yaw from velocity vector
                 self.desEul[2] = np.arctan2(self.desVel[1], self.desVel[0])
