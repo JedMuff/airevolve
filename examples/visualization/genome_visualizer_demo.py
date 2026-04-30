@@ -19,6 +19,10 @@ from airevolve.evolution_tools.inspection_tools.drone_visualizer import DroneVis
 from examples.sample_genomes import get_all_sample_genomes
 import airevolve.evolution_tools.inspection_tools.utils as u
 
+OUTPUT_DIR = "__data__/visualizations/genome_demo"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
 def demo_basic_visualization():
     """Demo basic 2D and 3D visualization with the new interface."""
     print("=== Basic Visualization Demo ===")
@@ -37,7 +41,7 @@ def demo_basic_visualization():
         fitness=0.95,
         generation=100
     )
-    plt.savefig('demo_3d_quadcopter.png', dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(OUTPUT_DIR, 'demo_3d_quadcopter.png'), dpi=150, bbox_inches='tight')
     plt.show()
     
     # Demo 2: Simple 2D plot
@@ -48,7 +52,7 @@ def demo_basic_visualization():
         fitness=0.87,
         generation=200
     )
-    plt.savefig('demo_2d_hexacopter.png', dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(OUTPUT_DIR, 'demo_2d_hexacopter.png'), dpi=150, bbox_inches='tight')
     plt.show()
 
 
@@ -77,7 +81,7 @@ def demo_coordinate_systems():
     )
     
     plt.tight_layout()
-    plt.savefig('demo_coordinate_systems.png', dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(OUTPUT_DIR, 'demo_coordinate_systems.png'), dpi=150, bbox_inches='tight')
     plt.show()
 
 
@@ -94,7 +98,7 @@ def demo_blueprint_views():
         samples['tilted_motors_cartesian'],
         title="Tilted Motors Drone - Blueprint Views"
     )
-    plt.savefig('demo_blueprint.png', dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(OUTPUT_DIR, 'demo_blueprint.png'), dpi=150, bbox_inches='tight')
     plt.show()
 
 
@@ -139,7 +143,7 @@ def demo_styling_options():
         )
     
     plt.tight_layout()
-    plt.savefig('demo_styling.png', dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(OUTPUT_DIR, 'demo_styling.png'), dpi=150, bbox_inches='tight')
     plt.show()
 
 
@@ -171,7 +175,7 @@ def demo_complex_geometries():
         )
     
     plt.tight_layout()
-    plt.savefig('demo_complex_geometries.png', dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(OUTPUT_DIR, 'demo_complex_geometries.png'), dpi=150, bbox_inches='tight')
     plt.show()
 
 def demo_evolution_progression():
@@ -208,7 +212,7 @@ def demo_evolution_progression():
     
     fig.suptitle("Evolution Progression Toward Target", fontsize=16)
     plt.tight_layout()
-    plt.savefig('demo_evolution_progression.png', dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(OUTPUT_DIR, 'demo_evolution_progression.png'), dpi=150, bbox_inches='tight')
     plt.show()
 
 
@@ -257,7 +261,7 @@ def demo_interactive_features():
     visualizer.plot_3d(genome, ax=ax6, title="Isometric", elevation=30, azimuth=45)
     
     plt.tight_layout()
-    plt.savefig('demo_interactive_features.png', dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(OUTPUT_DIR, 'demo_interactive_features.png'), dpi=150, bbox_inches='tight')
     plt.show()
 
 

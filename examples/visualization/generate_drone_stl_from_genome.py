@@ -89,7 +89,7 @@ def main():
     # Generate STL files with all options
     result = generate_stl_files(
         genome_handler=handler,
-        output_dir="./example_drone_stls",  # Output directory
+        output_dir="__data__/visualizations/drone_stl/example",  # Output directory
         include_assembly=True,              # Generate full assembly STL
         include_landing_leg=False,          # Not yet implemented
         include_individual_parts=True,      # Generate individual arm STLs
@@ -268,7 +268,7 @@ def example_custom_part_config():
     # Generate with custom config
     result = generate_stl_files(
         genome_handler=handler,
-        output_dir="./custom_drone_stls",
+        output_dir="__data__/visualizations/drone_stl/custom",
         assembly_config=custom_config,
     )
 
@@ -321,8 +321,10 @@ def example_visualization_comparison():
     visualizer.plot_3d(handler, ax=ax6, title="Alternate View", elevation=20, azimuth=60)
 
     plt.tight_layout()
-    plt.savefig("drone_detailed_analysis.png", dpi=150, bbox_inches='tight')
-    print("\n✓ Detailed visualization saved to: drone_detailed_analysis.png")
+    detailed_path = "__data__/visualizations/drone_stl/drone_detailed_analysis.png"
+    os.makedirs(os.path.dirname(detailed_path), exist_ok=True)
+    plt.savefig(detailed_path, dpi=150, bbox_inches='tight')
+    print(f"\n✓ Detailed visualization saved to: {detailed_path}")
     plt.show()
 
 

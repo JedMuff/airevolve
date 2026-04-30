@@ -55,8 +55,8 @@ def main():
     print(f"  Repaired arms: {repaired_arm_count}")
     print()
 
-    # 5. Save outputs to tmp/ directory next to this script
-    tmp_dir = os.path.join(os.path.dirname(__file__), '..', 'tmp')
+    # 5. Save outputs under __data__/visualizations/cppn_genome/ (project convention)
+    tmp_dir = '__data__/visualizations/cppn_genome'
     os.makedirs(tmp_dir, exist_ok=True)
 
     # CPPN network graph

@@ -25,11 +25,11 @@ Usage:
 
     # Stage 2: Tune gains + timing (load stage 1 results)
     python tune_lee_controller_gates.py --stage 2 --gates figure8 \\
-        --load-prev tuning_results_gates/stage1_best.json --max-evals 300
+        --load-prev __data__/lee_tuning/stage1_best.json --max-evals 300
 
     # Stage 3: Tune gains + timing + trajectory (load stage 2 results)
     python tune_lee_controller_gates.py --stage 3 --gates figure8 \\
-        --load-prev tuning_results_gates/stage2_best.json --max-evals 500
+        --load-prev __data__/lee_tuning/stage2_best.json --max-evals 500
 """
 
 import numpy as np
@@ -429,7 +429,7 @@ class CurriculumTuner:
     """Curriculum-based CMA-ES optimization for Lee controller with B-spline trajectories"""
 
     def __init__(self, gate_config, stage, sim_time=20.0, dt=0.005,
-                 output_dir="tuning_results_gates"):
+                 output_dir="__data__/lee_tuning"):
         """
         Initialize curriculum tuner
 
@@ -911,8 +911,8 @@ def main():
                        help='Simulation time in seconds (default: 20.0)')
     parser.add_argument('--dt', type=float, default=0.005,
                        help='Time step in seconds (default: 0.005)')
-    parser.add_argument('--output', type=str, default='tuning_results_gates',
-                       help='Output directory (default: tuning_results_gates)')
+    parser.add_argument('--output', type=str, default='__data__/lee_tuning',
+                       help='Output directory (default: __data__/lee_tuning)')
     parser.add_argument('--timeout', type=float, default=30.0,
                        help='Timeout per evaluation in seconds (default: 30.0)')
 
