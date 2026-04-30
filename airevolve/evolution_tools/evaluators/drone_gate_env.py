@@ -60,6 +60,7 @@ class DroneGateEnv(VecEnv):
                  device=None,
                  dt=0.01,
                  action_filter_alpha=1.0,
+                 max_steps=1200,
                  ):
         
         # Set device
@@ -176,7 +177,7 @@ class DroneGateEnv(VecEnv):
         self.action_hist = np.zeros((num_envs,num_hist,num_motors), dtype=np.float32)
 
         # Define any other environment-specific parameters
-        self.max_steps = 1200      # Maximum number of steps in an episode
+        self.max_steps = int(max_steps)  # Maximum number of steps in an episode
         self.dt = np.float32(dt)   # Time step duration
 
         # Action low-pass filter (one-pole IIR) modeling a flight controller's
