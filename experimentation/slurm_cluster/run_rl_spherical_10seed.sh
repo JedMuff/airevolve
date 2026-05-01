@@ -8,6 +8,8 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=24G
 #SBATCH --array=0-9
+# Exclude sm_61 nodes (gtx1070 / gtx1070ti): venv torch is built for sm_70+.
+#SBATCH --exclude=node01,node03,node04
 
 set -euo pipefail
 
