@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-REPO=/home/jed/workspaces/airevolve
+REPO=/home/jed/workspace/airevolve
 VENV_PATH=$REPO/.venv
 
 # Local scratch for in-flight writes; final location for kept results.
