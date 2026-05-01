@@ -44,7 +44,9 @@ def process_individual(individual_dir, gate_cfg="slalom", device=None, fps=100, 
     
     ind_policy_file = os.path.join(individual_dir, "policy.zip")
     individual_body = os.path.join(individual_dir, "individual.npy")
-    
+    if not os.path.exists(individual_body):
+        individual_body = os.path.join(individual_dir, "genome.npy")
+
     if not os.path.exists(ind_policy_file):
         raise ValueError(f"Policy file not found: {ind_policy_file}")
     if not os.path.exists(individual_body):
@@ -59,7 +61,7 @@ def process_individual(individual_dir, gate_cfg="slalom", device=None, fps=100, 
         os.makedirs(vid_dir)
 
     # Load data for the individual
-    individual = np.load(individual_body)
+    individual = np.load(individual_body, allow_pickle=True)
     
     print(f"Processing individual from: {individual_dir}")
     print(f"Gate configuration: {gate_cfg}")

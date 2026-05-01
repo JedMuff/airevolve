@@ -18,6 +18,12 @@ def extract_simulation_data(individual, policy_file, gate_cfg, device):
     Returns:
         dict: A dictionary containing positions, velocities, angular velocities, gate passes, and actions.
     """
+    # Unwrap genome objects (e.g. SphericalNeatGenome) to the raw arms array
+    if hasattr(individual, "arms"):
+        individual = individual.arms
+    elif isinstance(individual, np.ndarray) and individual.dtype == object:
+        individual = individual.item().arms
+
     # Define the environment based on the gate configuration
     gate_configs = {
         "backandforth": backandforth,

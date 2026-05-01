@@ -31,7 +31,13 @@ def animate_individual(
 
     ind_policy_file = individual_dir + "/policy.zip"
     individual_body = individual_dir + "/individual.npy"
-    individual = np.load(individual_body)
+    if not os.path.exists(individual_body):
+        individual_body = individual_dir + "/genome.npy"
+    individual = np.load(individual_body, allow_pickle=True)
+    if hasattr(individual, "arms"):
+        individual = individual.arms
+    elif isinstance(individual, np.ndarray) and individual.dtype == object:
+        individual = individual.item().arms
 
     # Define the environment
     if gate_cfg == "backandforth":
