@@ -18,7 +18,7 @@ VENV_PATH=$REPO/.venv
 
 # Local scratch for in-flight writes; final location for kept results.
 TMP_DIR=/tmp/${USER}/airevolve_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}
-FINAL_DIR=$REPO/__data__/evolution
+FINAL_DIR=/scratch/jed/airevolve_data_01052026
 
 RUN_TAG=rl_spherical_hover_repair_hg_figure8_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}
 
