@@ -140,4 +140,6 @@ archive/
 .claude/
 
 # VSCode
-.vscode/drone-project/
+.vscode/
+
+drone-project/
