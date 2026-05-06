@@ -7,7 +7,7 @@ import unittest
 import numpy as np
 import numpy.testing as npt
 from airevolve.evolution_tools.genome_handlers.cartesian_euler_genome_handler import CartesianEulerDroneGenomeHandler
-from airevolve.evolution_tools.genome_handlers.spherical_angular_genome_handler import SphericalAngularDroneGenomeHandler
+from airevolve.evolution_tools.genome_handlers.spherical_angular_genome_handler import SphericalAngularDroneGenomeHandler, SphericalNeatGenome
 
 
 class TestCartesianOperatorIntegration(unittest.TestCase):
@@ -106,7 +106,7 @@ class TestCartesianOperatorIntegration(unittest.TestCase):
             append_arm_chance=0.0,
             rnd=self.rng
         )
-        
+    
         child = parent1.crossover(parent2)
         
         # Child should be valid and symmetric
@@ -269,7 +269,7 @@ class TestSphericalOperatorIntegration(unittest.TestCase):
         """Test crossover with operator integration."""
         parent1 = SphericalAngularDroneGenomeHandler(
             genome=None,
-            min_max_narms=(6, 6),
+            min_max_narms=(self.min_narms, self.max_narms),
             parameter_limits=self.parameter_limits,
             bilateral_plane_for_symmetry="xy",
             rnd=self.rng
@@ -277,7 +277,7 @@ class TestSphericalOperatorIntegration(unittest.TestCase):
         
         parent2 = SphericalAngularDroneGenomeHandler(
             genome=None,
-            min_max_narms=(6, 6),
+            min_max_narms=(self.min_narms, self.max_narms),
             parameter_limits=self.parameter_limits,
             bilateral_plane_for_symmetry="xy",
             rnd=self.rng
@@ -287,6 +287,8 @@ class TestSphericalOperatorIntegration(unittest.TestCase):
         # Try multiple times to ensure we get symmetric parents
         parent1.genome = parent1._generate_random_genome()
         parent2.genome = parent2._generate_random_genome()
+
+        parent2.genome.innovation_ids = parent1.genome.innovation_ids.copy()
         
         # Check if parents are symmetric before crossover
         child = parent1.crossover(parent2)
@@ -352,9 +354,11 @@ class TestSphericalOperatorIntegration(unittest.TestCase):
         )
         
         # Start with minimum arms
-        handler.genome = np.full((self.max_narms, 6), np.nan)
+        arms = np.full((self.max_narms, 6), np.nan)
         for i in range(self.min_narms):
-            handler.genome[i] = [0.3, 1.0, 1.0, 1.0, 1.0, 1]
+            arms[i] = [0.3, 1.0, 1.0, 1.0, 1.0, 1]
+            
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1))
             
         original_count = handler.get_arm_count()
         
@@ -380,9 +384,10 @@ class TestSphericalOperatorIntegration(unittest.TestCase):
         )
         
         # Create genome with some valid arms
-        handler.genome = np.full((self.max_narms, 6), np.nan)
-        handler.genome[0] = [0.3, 0.5, 0.8, 1.2, 0.3, 1]
-        handler.genome[2] = [0.3, 1.0, 0.6, 1.8, 0.4, 0]
+        arms = np.full((self.max_narms, 6), np.nan)
+        arms[0] = [0.3, 0.5, 0.8, 1.2, 0.3, 1]
+        arms[2] = [0.3, 1.0, 0.6, 1.8, 0.4, 0]
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1))
         
         # Validate should work with NaN masking
         self.assertTrue(handler.is_valid())
@@ -404,7 +409,7 @@ class TestSphericalOperatorIntegration(unittest.TestCase):
         
         # Test with malformed genome
         original_genome = handler.genome.copy()
-        handler.genome = np.zeros((2, 4))  # Wrong shape
+        handler.genome = SphericalNeatGenome(arms=np.zeros((2, 4)), innovation_ids=np.full(2, -1))  # Wrong shape
         
         is_valid = handler.is_valid()
         self.assertFalse(is_valid)

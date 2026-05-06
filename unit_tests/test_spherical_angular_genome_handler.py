@@ -22,7 +22,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from airevolve.evolution_tools.inspection_tools.drone_visualizer import DroneVisualizer
 
 # The module being tested
-from airevolve.evolution_tools.genome_handlers.spherical_angular_genome_handler import SphericalAngularDroneGenomeHandler
+from airevolve.evolution_tools.genome_handlers.spherical_angular_genome_handler import SphericalAngularDroneGenomeHandler, SphericalNeatGenome
 
 
 class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
@@ -56,7 +56,7 @@ class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
         # Check basic attributes
         self.assertEqual(handler.min_narms, self.min_narms)
         self.assertEqual(handler.max_narms, self.max_narms)
-        self.assertEqual(handler.genome.shape, (self.max_narms, 6))
+        self.assertEqual(handler.genome.arms.shape, (self.max_narms, 6))
         
         # Check that operators are initialized
         self.assertTrue(hasattr(handler, 'symmetry_operator'))
@@ -117,16 +117,16 @@ class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
         genome = handler._generate_random_genome()
         
         # Check shape
-        self.assertEqual(genome.shape, (self.max_narms, 6))
+        self.assertEqual(genome.arms.shape, (self.max_narms, 6))
         
         # Check that some arms are valid (non-NaN)
-        valid_arms_mask = ~np.isnan(genome[:, 0])
+        valid_arms_mask = ~np.isnan(genome.arms[:, 0])
         num_valid_arms = np.sum(valid_arms_mask)
         self.assertGreaterEqual(num_valid_arms, self.min_narms)
         self.assertLessEqual(num_valid_arms, self.max_narms)
         
         # Check parameter bounds for valid arms
-        valid_arms = genome[valid_arms_mask]
+        valid_arms = genome.arms[valid_arms_mask]
         for i in range(6):
             param_values = valid_arms[:, i]
             self.assertTrue(np.all(param_values >= self.parameter_limits[i, 0]))
@@ -175,7 +175,7 @@ class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
         
         # Check child properties
         self.assertIsInstance(child, SphericalAngularDroneGenomeHandler)
-        self.assertEqual(child.genome.shape, (self.max_narms, 6))
+        self.assertEqual(child.genome.arms.shape, (self.max_narms, 6))
         self.assertTrue(child.is_valid())
 
     def test_crossover_invalid_parent_type(self):
@@ -212,7 +212,7 @@ class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
         self.assertTrue(handler.is_valid())
         
         # Check that mutation occurred (might be subtle)
-        self.assertEqual(handler.genome.shape, original_genome.shape)
+        self.assertEqual(handler.genome.arms.shape, original_genome.arms.shape)
 
     def test_copy(self):
         """Test genome handler copying."""
@@ -233,7 +233,7 @@ class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
         npt.assert_array_equal(copy_handler.parameter_limits, handler.parameter_limits)
         
         # Check that genome is copied (not referenced)
-        npt.assert_array_equal(copy_handler.genome, handler.genome)
+        npt.assert_array_equal(copy_handler.genome.arms, handler.genome.arms)
         self.assertIsNot(copy_handler.genome, handler.genome)
 
     def test_is_valid_valid_genome(self):
@@ -259,7 +259,7 @@ class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
         )
         
         # Set invalid shape
-        handler.genome = np.ones((3, 5))  # Wrong number of parameters (should be 6)
+        handler.genome = SphericalNeatGenome(arms=np.ones((3, 5)), innovation_ids=np.full(3, -1))  # Wrong number of parameters (should be 6)
         self.assertFalse(handler.is_valid())
 
     def test_is_valid_invalid_arm_count(self):
@@ -272,8 +272,9 @@ class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
         )
         
         # Set too few arms
-        handler.genome = np.full((self.max_narms, 6), np.nan)
-        handler.genome[0] = [1.0, 1.0, 1.0, 1.0, 1.0, 1]  # Only 1 arm
+        arms = np.full((self.max_narms, 6), np.nan)
+        arms[0] = [1.0, 1.0, 1.0, 1.0, 1.0, 1] # only 1 arm
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1))
         self.assertFalse(handler.is_valid())
 
     def test_is_valid_out_of_bounds_parameters(self):
@@ -286,12 +287,13 @@ class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
         )
         
         # Set valid arm count but invalid parameters
-        handler.genome = np.full((self.max_narms, 6), np.nan)
+        arms = np.full((self.max_narms, 6), np.nan)
         for i in range(self.min_narms):
-            handler.genome[i] = [1.0, 1.0, 1.0, 1.0, 1.0, 1]
+            arms[i] = [1.0, 1.0, 1.0, 1.0, 1.0, 1]
         
         # Make one parameter out of bounds
-        handler.genome[0, 0] = 10.0  # magnitude too high
+        arms[0, 0] = 10.0 # magnitude too high
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1))
         self.assertFalse(handler.is_valid())
 
     def test_repair_functionality(self):
@@ -304,11 +306,13 @@ class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
         )
         
         # Create invalid genome with enough arms
-        handler.genome = np.full((self.max_narms, 6), np.nan)
-        handler.genome[0] = [10.0, 1.0, 1.0, 1.0, 1.0, 0.5]  # Out of bounds magnitude and direction
+        arms = np.full((self.max_narms, 6), np.nan)
+        arms[0] = [10.0, 1.0, 1.0, 1.0, 1.0, 0.5]  # Out of bounds magnitude and direction
         for i in range(1, self.min_narms):
-            handler.genome[i] = [1.5, 1.0, 1.0, 1.0, 1.0, 1]  # Valid arms to meet minimum
-        
+            arms[i] = [1.5, 1.0, 1.0, 1.0, 1.0, 1]  # Valid arms to meet minimum
+
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1))
+
         # Should be invalid
         self.assertFalse(handler.is_valid())
         
@@ -326,16 +330,17 @@ class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
         )
         
         # Set known genome
-        handler.genome = np.full((self.max_narms, 6), np.nan)
-        handler.genome[0] = [1.0, 1.0, 1.0, 1.0, 1.0, 1]
-        handler.genome[2] = [1.5, 2.0, 0.5, 1.5, 0.8, 0]
+        arms = np.full((self.max_narms, 6), np.nan)
+        arms[0] = [1.0, 1.0, 1.0, 1.0, 1.0, 1]
+        arms[2] = [1.5, 2.0, 0.5, 1.5, 0.8, 0]
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1))
         
         valid_arms = handler.get_valid_arms()
         
         # Should have 2 valid arms
         self.assertEqual(len(valid_arms), 2)
-        npt.assert_array_equal(valid_arms[0], handler.genome[0])
-        npt.assert_array_equal(valid_arms[1], handler.genome[2])
+        npt.assert_array_equal(valid_arms[0], handler.genome.arms[0])
+        npt.assert_array_equal(valid_arms[1], handler.genome.arms[2])
 
     def test_get_arm_count(self):
         """Test getting arm count."""
@@ -347,9 +352,10 @@ class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
         )
         
         # Set known genome
-        handler.genome = np.full((self.max_narms, 6), np.nan)
-        handler.genome[0] = [1.0, 1.0, 1.0, 1.0, 1.0, 1]
-        handler.genome[2] = [1.5, 2.0, 0.5, 1.5, 0.8, 0]
+        arms = np.full((self.max_narms, 6), np.nan)
+        arms[0] = [1.0, 1.0, 1.0, 1.0, 1.0, 1]
+        arms[2] = [1.5, 2.0, 0.5, 1.5, 0.8, 0]
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1))
         
         arm_count = handler.get_arm_count()
         self.assertEqual(arm_count, 2)
@@ -373,20 +379,23 @@ class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
         self.assertIsInstance(pairs, list)
         
         # Test applying symmetry with a genome that has space for symmetric arms
-        handler.genome = np.full((self.max_narms, 6), np.nan)
+        arms = np.full((self.max_narms, 6), np.nan)
         # Add just enough arms to ensure symmetry can work (less than max_narms/2)
+        
         num_test_arms = min(2, self.max_narms // 2)
         for i in range(num_test_arms):
-            handler.genome[i] = [1.0, 1.0, 1.0, 1.0, 1.0, 1]
+            arms[i] = [1.0, 1.0, 1.0, 1.0, 1.0, 1]
+
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1))
         
         original_genome = handler.genome.copy()
         handler.apply_symmetry()
         # Apply symmetry should not crash
-        self.assertEqual(handler.genome.shape, original_genome.shape)
+        self.assertEqual(handler.genome.arms.shape, original_genome.arms.shape)
         
         # Test removing symmetry
         handler.unapply_symmetry()
-        self.assertEqual(handler.genome.shape, original_genome.shape)
+        self.assertEqual(handler.genome.arms.shape, original_genome.arms.shape)
 
     def test_add_remove_arms(self):
         """Test arm addition and removal."""
@@ -398,9 +407,11 @@ class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
         )
         
         # Start with minimum arms
-        handler.genome = np.full((self.max_narms, 6), np.nan)
+        arms = np.full((self.max_narms, 6), np.nan)
         for i in range(self.min_narms):
-            handler.genome[i] = [1.0, 1.0, 1.0, 1.0, 1.0, 1]
+            arms[i] = [1.0, 1.0, 1.0, 1.0, 1.0, 1]
+        
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1))
         
         original_count = handler.get_arm_count()
         
@@ -447,12 +458,12 @@ class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
         is_valid_result = handler.is_valid()
         
         # Genome should be unchanged by validation
-        npt.assert_array_equal(handler.genome, original_genome)
+        npt.assert_array_equal(handler.genome.arms, original_genome.arms)
         self.assertIsInstance(is_valid_result, bool)
         
         # Test that repair uses repair operator
         # Make genome invalid
-        handler.genome[0, 0] = 10.0  # Out of bounds
+        handler.genome.arms[0, 0] = 10.0  # Out of bounds
         if handler.get_arm_count() > 0:
             self.assertFalse(handler.is_valid())
             
@@ -476,7 +487,11 @@ class TestSphericalAngularDroneGenomeHandler(unittest.TestCase):
         for i in range(5):
             # Create temporary handler to test validity
             temp_handler = handler.copy()
-            temp_handler.genome = population[i]
+            temp_handler.genome = SphericalNeatGenome(
+                arms=population[i], 
+                innovation_ids=np.full(self.max_narms, -1)
+            )
+            
             self.assertTrue(temp_handler.is_valid())
 
     def test_string_representations(self):

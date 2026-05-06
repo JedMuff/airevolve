@@ -30,17 +30,20 @@ from __future__ import annotations
 import os
 import sys
 
+from pathlib import Path
+
 import numpy as np
 
-EXP_DIR = "/home/jed/workspaces/airevolve/experimentation"
-if EXP_DIR not in sys.path:
-    sys.path.insert(0, EXP_DIR)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from airevolve.simulator.simulation.drone_simulator import DroneSimulator  # noqa: E402
 from airevolve.simulator.simulation.propeller_data import (  # noqa: E402
     create_standard_propeller_config,
 )
-from reference_drone_sim import (  # noqa: E402
+from experimentation.reference_drone_sim import (  # noqa: E402
     ReferenceDroneSim,
     derive_params_2inch_from_airevolve,
 )

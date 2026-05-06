@@ -6,7 +6,7 @@ Unit tests for spherical symmetry functionality in SphericalAngularDroneGenomeHa
 import unittest
 import numpy as np
 import numpy.testing as npt
-from airevolve.evolution_tools.genome_handlers.spherical_angular_genome_handler import SphericalAngularDroneGenomeHandler
+from airevolve.evolution_tools.genome_handlers.spherical_angular_genome_handler import SphericalAngularDroneGenomeHandler, SphericalNeatGenome
 
 
 class TestSphericalSymmetry(unittest.TestCase):
@@ -75,9 +75,10 @@ class TestSphericalSymmetry(unittest.TestCase):
         )
         
         # Create a test genome with known values
-        handler.genome = np.full((self.max_narms, 6), np.nan)
-        handler.genome[0] = [0.3, 0.5, 0.8, 1.2, 0.3, 1]  # First arm
-        handler.genome[1] = [0.3, 1.0, 0.6, 1.8, 0.4, 0]  # Second arm
+        arms = np.full((self.max_narms, 6), np.nan)
+        arms[0] = [0.3, 0.5, 0.8, 1.2, 0.3, 1] # First arm
+        arms[1] = [0.3, 1.0, 0.6, 1.8, 0.4, 0] # Second arm
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1)) 
         
         original_genome = handler.genome.copy()
         
@@ -88,8 +89,8 @@ class TestSphericalSymmetry(unittest.TestCase):
         self.assertTrue(handler.is_valid())
         
         # Check that more arms are now valid (symmetry should add arms)
-        original_valid_count = np.sum(~np.isnan(original_genome[:, 0]))
-        new_valid_count = np.sum(~np.isnan(handler.genome[:, 0]))
+        original_valid_count = np.sum(~np.isnan(original_genome.arms[:, 0]))
+        new_valid_count = np.sum(~np.isnan(handler.genome.arms[:, 0]))
         self.assertGreaterEqual(new_valid_count, original_valid_count)
         
     def test_unapply_symmetry_basic(self):
@@ -103,16 +104,17 @@ class TestSphericalSymmetry(unittest.TestCase):
         )
         
         # Create a symmetric genome
-        handler.genome = np.full((self.max_narms, 6), np.nan)
-        handler.genome[0] = [0.0, 0.5, 0.8, 1.2, 0.3, 1]
-        handler.genome[1] = [0.3, 1.0, 0.6, 1.8, 0.4, 0]
-        handler.genome[2] = [0.0, -0.5, 0.8, 1.2, -0.3, 1]  # Symmetric arm
-        handler.genome[3] = [0.3, -1.0, 0.6, 1.8, -0.4, 0]  # Symmetric arm
+        arms = np.full((self.max_narms, 6), np.nan)
+        arms[0] = [0.0, 0.5, 0.8, 1.2, 0.3, 1]
+        arms[1] = [0.3, 1.0, 0.6, 1.8, 0.4, 0]
+        arms[2] = [0.0, -0.5, 0.8, 1.2, -0.3, 1]
+        arms[3] = [0.3, -1.0, 0.6, 1.8, -0.4, 0]  # Symmetric arm
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1))  # Symmetric arm
         
         handler.apply_symmetry()
         handler.repair()
 
-        symmetric_valid_count = np.sum(~np.isnan(handler.genome[:, 0]))
+        symmetric_valid_count = np.sum(~np.isnan(handler.genome.arms[:, 0]))
 
         # Remove symmetry
         handler.unapply_symmetry()
@@ -121,7 +123,7 @@ class TestSphericalSymmetry(unittest.TestCase):
         self.assertFalse(handler.is_valid())
         
         # Should have fewer valid arms after removing symmetry
-        unsymmetric_valid_count = np.sum(~np.isnan(handler.genome[:, 0]))
+        unsymmetric_valid_count = np.sum(~np.isnan(handler.genome.arms[:, 0]))
         self.assertLessEqual(unsymmetric_valid_count, symmetric_valid_count)
         
     def test_validate_symmetry_symmetric_genome(self):
@@ -135,9 +137,10 @@ class TestSphericalSymmetry(unittest.TestCase):
         )
         
         # Create initial genome
-        handler.genome = np.full((self.max_narms, 6), np.nan)
-        handler.genome[0] = [0.3, 0.5, 0.8, 1.2, 0.3, 1]
-        handler.genome[1] = [0.35, 1.0, 0.6, 1.8, 0.4, 0]
+        arms = np.full((self.max_narms, 6), np.nan)
+        arms[0] = [0.0, 0.5, 0.8, 1.2, 0.3, 1]
+        arms[1] = [0.2, 1.0, 0.6, 1.8, 0.4, 0]
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1)) 
         
         # Apply symmetry
         handler.apply_symmetry()
@@ -156,11 +159,13 @@ class TestSphericalSymmetry(unittest.TestCase):
         )
         
         # Create asymmetric genome
-        handler.genome = np.full((self.max_narms, 6), np.nan)
-        handler.genome[0] = [0.0, 0.5, 0.8, 1.2, 0.3, 1]
-        handler.genome[1] = [0.2, 1.0, 0.6, 1.8, 0.4, 0]
-        handler.genome[2] = [0.3, 1.5, 0.4, 0.9, 0.7, 1]  # Not symmetric
+        arms = np.full((self.max_narms, 6), np.nan)
+        arms[0] = [0.0, 0.5, 0.8, 1.2, 0.3, 1]
+        arms[1] = [0.2, 1.0, 0.6, 1.8, 0.4, 0]
+        arms[2] = [0.3, 1.5, 0.4, 0.9, 0.7, 1]  # Not symmetric
         
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1))
+
         # Should not validate as symmetric
         self.assertFalse(handler.validate_symmetry())
         
@@ -188,9 +193,10 @@ class TestSphericalSymmetry(unittest.TestCase):
         )
         
         # Create genome with some valid arms
-        handler.genome = np.full((self.max_narms, 6), np.nan)
-        handler.genome[0] = [0.0, 0.5, 0.8, 1.2, 0.3, 1]
-        handler.genome[1] = [0.3, 1.0, 0.6, 1.8, 0.4, 0]
+        arms = np.full((self.max_narms, 6), np.nan)
+        arms[0] = [0.3, 0.5, 0.8, 1.2, 0.3, 1]
+        arms[1] = [0.3, 1.0, 0.6, 1.8, 0.4, 0]
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1)) 
         
         pairs = handler.get_symmetry_pairs()
         
@@ -344,10 +350,11 @@ class TestSphericalSymmetry(unittest.TestCase):
         )
         
         # Create invalid genome
-        handler.genome = np.full((self.max_narms, 6), np.nan)
-        handler.genome[0] = [10.0, 0.5, 0.8, 1.2, 0.3, 0]  # Invalid magnitude
-        handler.genome[1] = [1.5, 1.0, 0.6, 1.8, 0.4, 0]
-        handler.genome[2] = [1.0, 0.5, 0.8, 1.2, 0.3, 1]  # Valid arm
+        arms = np.full((self.max_narms, 6), np.nan)
+        arms[0] = [10.0, 0.5, 0.8, 1.2, 0.3, 0]  # Invalid magnitude
+        arms[1] = [1.5, 1.0, 0.6, 1.8, 0.4, 0]
+        arms[2] = [1.0, 0.5, 0.8, 1.2, 0.3, 1]  # Valid arm
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1))
         handler.apply_symmetry()
         
         # Should be invalid
@@ -397,12 +404,12 @@ class TestSphericalSymmetry(unittest.TestCase):
         
         # Test with different numbers of valid arms
         for num_arms in range(handler.min_narms, handler.max_narms + 1):
-            handler.genome = np.full((self.max_narms, 6), np.nan)
+            arms = np.full((self.max_narms, 6), np.nan)
             
             # Add valid arms
             
             for i in range(num_arms // 2):
-                handler.genome[i] = [
+                arms[i] = [
                     0.09 + i * 0.05,  # magnitude
                     i * 0.5,        # arm rotation
                     0.8,            # arm pitch
@@ -410,6 +417,7 @@ class TestSphericalSymmetry(unittest.TestCase):
                     0.3,            # motor pitch
                     i % 2           # direction
                 ]
+            handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1))
             
             # Apply symmetry
             handler.apply_symmetry()
@@ -430,15 +438,17 @@ class TestSphericalSymmetry(unittest.TestCase):
         )
         
         # Test with empty genome (all NaN)
-        handler.genome = np.full((self.max_narms, 6), np.nan)
+        empty_arms = np.full((self.max_narms, 6), np.nan)
+        handler.genome = SphericalNeatGenome(arms=empty_arms, innovation_ids=np.full(self.max_narms, -1))
         
         # Should handle empty genome gracefully
         handler.apply_symmetry()
         self.assertTrue(handler.validate_symmetry())
         
         # Test with single arm
-        handler.genome = np.full((self.max_narms, 6), np.nan)
-        handler.genome[0] = [1.0, 0.5, 0.8, 1.2, 0.3, 1]
+        single_arm = np.full((self.max_narms, 6), np.nan)
+        single_arm[0] = [1.0, 0.5, 0.8, 1.2, 0.3, 1]
+        handler.genome = SphericalNeatGenome(arms=single_arm, innovation_ids=np.full(self.max_narms, -1))
         
         handler.apply_symmetry()
         self.assertTrue(handler.validate_symmetry())
@@ -459,14 +469,15 @@ class TestSphericalSymmetry(unittest.TestCase):
         self.assertTrue(handler.symmetry_operator.config.enabled)
         
         # Test operator methods work
-        handler.genome = np.full((self.max_narms, 6), np.nan)
-        handler.genome[0] = [1.0, 0.5, 0.8, 1.2, 0.3, 1]
+        arms = np.full((self.max_narms, 6), np.nan)
+        arms[0] = [1.0, 0.5, 0.8, 1.2, 0.3, 1]
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1)) 
         
         original_genome = handler.genome.copy()
-        symmetric_genome = handler.symmetry_operator.apply_symmetry(original_genome)
+        symmetric_arms = handler.symmetry_operator.apply_symmetry(original_genome.arms)
+        handler.genome = SphericalNeatGenome(arms=symmetric_arms, innovation_ids=np.full(self.max_narms, -1))
         
         # Should be different (symmetry applied)
-        handler.genome = symmetric_genome
         self.assertTrue(handler.validate_symmetry())
         
     def test_symmetry_parameter_bounds(self):
@@ -481,8 +492,8 @@ class TestSphericalSymmetry(unittest.TestCase):
         )
         
         # Create genome with values near bounds
-        handler.genome = np.full((self.max_narms, 6), np.nan)
-        handler.genome[0] = [
+        arms = np.full((self.max_narms, 6), np.nan)
+        arms[0] = [
             self.parameter_limits[0, 1] - 0.001,  # magnitude near max
             self.parameter_limits[1, 1] - 0.001,  # arm rotation near max
             self.parameter_limits[2, 1] - 0.001,  # arm pitch near max
@@ -490,7 +501,7 @@ class TestSphericalSymmetry(unittest.TestCase):
             self.parameter_limits[4, 1] - 0.001,  # motor pitch near max
             1  # direction
         ]
-        handler.genome[1] = [
+        arms[1] = [
             self.parameter_limits[0, 0] + 0.001,  # magnitude near min
             self.parameter_limits[1, 0] + 0.001,  # arm rotation near min
             self.parameter_limits[2, 0] + 0.001,  # arm pitch near min
@@ -498,6 +509,7 @@ class TestSphericalSymmetry(unittest.TestCase):
             self.parameter_limits[4, 0] + 0.001,  # motor pitch near min
             0  # direction
         ]
+        handler.genome = SphericalNeatGenome(arms=arms, innovation_ids=np.full(self.max_narms, -1))
         
         # Apply symmetry
         handler.apply_symmetry()
@@ -553,8 +565,8 @@ class TestSphericalSymmetry(unittest.TestCase):
         )
         
         # Test with malformed genome
-        original_shape = handler.genome.shape
-        handler.genome = np.zeros((2, 4))  # Wrong shape
+        original_shape = handler.genome.arms.shape
+        handler.genome = SphericalNeatGenome(arms=np.zeros((2, 4)), innovation_ids=np.full(2, -1))  # Wrong shape
         
         # Should handle gracefully
         try:
@@ -564,7 +576,7 @@ class TestSphericalSymmetry(unittest.TestCase):
             self.fail(f"Unexpected exception in validation: {e}")
             
         # Restore shape
-        handler.genome = np.full(original_shape, np.nan)
+        handler.genome = SphericalNeatGenome(arms=np.full(original_shape, np.nan), innovation_ids=np.full(original_shape[0], -1))
 
 
 if __name__ == '__main__':

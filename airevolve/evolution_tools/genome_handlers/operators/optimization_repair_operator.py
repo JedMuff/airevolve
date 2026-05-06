@@ -789,13 +789,17 @@ def optimization_repair_individual(
         Repaired genome
     """
     # Filter valid arms
-    valid_arms = ~np.isnan(individual).any(axis=-1)
+    is_wrapped = hasattr(individual, 'arms')
+    ind_arr = getattr(individual, 'arms', individual)
+
+    # Filter valid arms using the raw array
+    valid_arms = ~np.isnan(ind_arr).any(axis=-1)
     n_valid_arms = np.sum(valid_arms)
 
     if n_valid_arms == 0:
         return individual.copy()
 
-    valid_genome = individual[valid_arms].copy()
+    valid_genome = ind_arr[valid_arms].copy()
 
     # Step 1: Normalize angles if enabled
     if config.normalize_angles:
@@ -953,11 +957,16 @@ def optimization_repair_individual(
     # Reconstruct genome with direction column
     repaired_genome = np.column_stack([x_opt, valid_genome[:, -1]])
 
-    # Insert back into full genome
-    result_individual = individual.copy()
-    result_individual[valid_arms] = repaired_genome
+    # Insert back into full genome array (using the extracted NumPy array)
+    result_arr = ind_arr.copy()
+    result_arr[valid_arms] = repaired_genome
 
-    return result_individual
+    if is_wrapped:
+        result_obj = individual.copy()
+        result_obj.arms = result_arr
+        return result_obj
+
+    return result_arr
 
 
 def _create_bounds(n_arms: int, config: OptimizationRepairConfig, arms_to_cylinders_func: Callable, x0: npt.NDArray[Any] = None) -> Bounds:
@@ -1173,13 +1182,23 @@ class OptimizationBasedRepairOperator(RepairOperator):
         repaired_genome : array-like
             Repaired genome
         """
-        return optimization_repair_individual(
-            genome,
+        is_wrapped = hasattr(genome, 'arms')
+        genome_arr = getattr(genome, 'arms', genome)
+
+        repaired_arr = optimization_repair_individual(
+            genome_arr,
             self.optimization_config,
             self.arms_to_cylinders,
             self.cylinders_to_arms,
             self.verbose
         )
+
+        if is_wrapped:
+            result = genome.copy()
+            result.arms = repaired_arr
+            return result
+            
+        return repaired_arr
 
     def validate(self, genome: npt.NDArray[Any]) -> bool:
         """
@@ -1195,14 +1214,16 @@ class OptimizationBasedRepairOperator(RepairOperator):
         is_valid : bool
             True if genome has no collisions or violations
         """
+        genome_arm = getattr(genome, 'arms', genome)
+
         # Filter valid arms
-        valid_arms = ~np.isnan(genome).any(axis=-1)
+        valid_arms = ~np.isnan(genome_arm).any(axis=-1)
         n_valid_arms = np.sum(valid_arms)
 
         if n_valid_arms == 0:
             return True
 
-        valid_genome = genome[valid_arms]
+        valid_genome = genome_arm[valid_arms]
 
         # Get arm cylinders
         arm_cylinders = genome_to_arm_cylinders_with_disc_base(

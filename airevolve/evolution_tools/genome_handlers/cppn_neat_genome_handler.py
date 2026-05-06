@@ -62,7 +62,7 @@ class CPPNNeatDroneGenomeHandler(GenomeHandler):
         prob_mutate_activation: float = 0.05,
         prob_toggle_connection: float = 0.02,
         # Initial topology complexity
-        initial_hidden_nodes: int = 0,
+        initial_hidden_nodes: int = 3, # 0 was throwing error
         init_topology: str = "empty",  # "empty" or "seeded"
         # Weight / bias mutation parameters
         weight_perturb_std: float = 0.5,
@@ -223,6 +223,24 @@ class CPPNNeatDroneGenomeHandler(GenomeHandler):
 
         if self.init_topology == "seeded":
             self._seed_topology(net, _N_INPUTS, _N_OUTPUTS)
+        else:
+            # Create a fully-connected bipartite base topology
+            for i in range(_N_INPUTS):
+                for j in range(_N_OUTPUTS):
+                    tgt = _N_INPUTS + j
+                    inn = self._innovation_counter.get_innovation(i, tgt)
+                    net.connections[inn] = ConnectionGene(
+                        innovation_number=inn,
+                        source_id=i,
+                        target_id=tgt,
+                        weight=float(self.rng.uniform(-1.0, 1.0)),
+                        enabled=True,
+                    )
+                    
+            if self.initial_hidden_nodes > 0:
+                from .cppn.mutations import _add_node
+                for _ in range(self.initial_hidden_nodes):
+                    _add_node(net, self._innovation_counter, self.rng)
 
         return net
 

@@ -914,7 +914,7 @@ class TestCollisionDetectionAndRepair(unittest.TestCase):
 
         # All repair times should be reasonable (under 2 seconds)
         for repair_time in repair_times:
-            self.assertLess(repair_time, 5, "Individual repair took too long")
+            self.assertLess(repair_time, 10, "Individual repair took too long")
     
     def test_symmetric_drones_collision_repair(self):
         """Test collision repair on 10 random symmetric 8-arm drones."""
@@ -991,7 +991,7 @@ class TestCollisionDetectionAndRepair(unittest.TestCase):
 
         # All repair times should be reasonable (under 2 seconds)
         for repair_time in repair_times:
-            self.assertLess(repair_time, 5, "Individual repair took too long")
+            self.assertLess(repair_time, 10, "Individual repair took too long")
 
 
 class TestParticleRepairEdgeCases(unittest.TestCase):

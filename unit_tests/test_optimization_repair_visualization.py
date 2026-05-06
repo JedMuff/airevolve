@@ -418,7 +418,7 @@ class TestOptimizationRepairVisualization(unittest.TestCase):
         valid_count_after = 0
 
         for idx, genome_handler in enumerate(population[:6]):
-            original_genome = genome_handler.genome
+            original_genome = getattr(genome_handler.genome, 'arms', genome_handler.genome)
 
             # Check validity before
             is_valid_before = repair_op.validate(original_genome)

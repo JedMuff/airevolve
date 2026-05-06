@@ -77,7 +77,7 @@ def count_collisions_optimization(genome_handlers, config):
     """Count how many genomes have collisions using optimization check."""
     collision_count = 0
     for handler in genome_handlers:
-        genome = handler.genome.copy()
+        genome = getattr(handler.genome, 'arms', handler.genome).copy()
         valid_arms = ~np.isnan(genome).any(axis=-1)
         if np.sum(valid_arms) < 2:
             continue
@@ -125,9 +125,12 @@ def calculate_genome_edit_distance(genome_before, genome_after):
     Returns:
         float: Euclidean distance between the genomes
     """
+    arr_before = getattr(genome_before, 'arms', genome_before)
+    arr_after = getattr(genome_after, 'arms', genome_after)
+
     # Find arms that are valid in both genomes
-    valid_before = ~np.isnan(genome_before).any(axis=-1)
-    valid_after = ~np.isnan(genome_after).any(axis=-1)
+    valid_before = ~np.isnan(arr_before).any(axis=-1)
+    valid_after = ~np.isnan(arr_after).any(axis=-1)
     valid_both = valid_before & valid_after
 
     if not np.any(valid_both):
@@ -135,7 +138,7 @@ def calculate_genome_edit_distance(genome_before, genome_after):
         return np.nan
 
     # Calculate Euclidean distance on valid arms
-    diff = genome_before[valid_both] - genome_after[valid_both]
+    diff = arr_before[valid_both] - arr_after[valid_both]
     distance = np.sqrt(np.sum(diff ** 2))
 
     return distance
@@ -236,9 +239,10 @@ class TestOptimizationRepairPerformance(unittest.TestCase):
             edit_distances.append(edit_distance)
 
             # Check if repair was successful
-            valid_arms = ~np.isnan(repaired_genome).any(axis=-1)
+            repaired_arr = getattr(repaired_genome, 'arms', repaired_genome)
+            valid_arms = ~np.isnan(repaired_arr).any(axis=-1)
             if np.sum(valid_arms) >= 2:
-                valid_genome = repaired_genome[valid_arms]
+                valid_genome = repaired_arr[valid_arms]
                 arm_cylinders = genome_to_arm_cylinders_with_disc_base(
                     valid_genome, self.opt_config, ARMS_TO_CYLINDERS_FUNC
                 )
@@ -353,9 +357,10 @@ class TestOptimizationRepairPerformance(unittest.TestCase):
             edit_distances.append(edit_distance)
 
             # Check if repair was successful
-            valid_arms = ~np.isnan(repaired_genome).any(axis=-1)
+            repaired_arr = getattr(repaired_genome, 'arms', repaired_genome)
+            valid_arms = ~np.isnan(repaired_arr).any(axis=-1)
             if np.sum(valid_arms) >= 2:
-                valid_genome = repaired_genome[valid_arms]
+                valid_genome = repaired_arr[valid_arms]
                 arm_cylinders = genome_to_arm_cylinders_with_disc_base(
                     valid_genome, self.opt_config, ARMS_TO_CYLINDERS_FUNC
                 )
@@ -475,6 +480,9 @@ class TestComparisonWithParticleRepair(unittest.TestCase):
         opt_collision_reductions = []
 
         for i, genome in enumerate(test_drones):
+
+            genome = getattr(genome, 'arms', genome)
+            
             # Check initial collisions
             valid_arms = ~np.isnan(genome).any(axis=-1)
             if np.sum(valid_arms) < 2:
@@ -528,19 +536,20 @@ class TestComparisonWithParticleRepair(unittest.TestCase):
         particle_collision_reductions = []
 
         for i, genome in enumerate(test_drones):
+            genome_arm = getattr(genome, 'arms', genome)
             # Check initial collisions
-            valid_arms = ~np.isnan(genome).any(axis=-1)
+            valid_arms = ~np.isnan(genome_arm).any(axis=-1)
             if np.sum(valid_arms) < 2:
                 continue
 
-            valid_genome = genome[valid_arms]
+            valid_genome = genome_arm[valid_arms]
             cylinders_before = ARMS_TO_CYLINDERS_FUNC(valid_genome)
             had_collision = are_there_cylinder_collisions(cylinders_before)
 
             # Repair
             start_time = time.time()
             repaired = particle_repair_individual(
-                genome.copy(),
+                genome_arm.copy(),
                 arms_to_cylinders=ARMS_TO_CYLINDERS_FUNC,
                 cylinders_to_arms=CYLINDERS_TO_ARMS_FUNC,
                 **self.particle_config
@@ -548,7 +557,7 @@ class TestComparisonWithParticleRepair(unittest.TestCase):
             particle_times.append(time.time() - start_time)
 
             # Calculate edit distance
-            edit_distance = calculate_genome_edit_distance(genome, repaired)
+            edit_distance = calculate_genome_edit_distance(genome_arm, repaired)
             particle_edit_distances.append(edit_distance)
 
             # Check final collisions

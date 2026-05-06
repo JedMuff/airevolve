@@ -434,8 +434,9 @@ class TestCartesianEulerVisualization(unittest.TestCase):
                 
         for i, (case_name, genome_handler, conversion_func) in enumerate(test_cases):
 
+            arms_before = getattr(genome_handler.genome, 'arms', genome_handler.genome)
             # Before repair
-            cylinders_before = conversion_func(genome_handler.genome, propeller_radius, cylinder_height)
+            cylinders_before = conversion_func(arms_before, propeller_radius, cylinder_height)
             collisions_before = are_there_cylinder_collisions(cylinders_before)
             
             # Plot before repair (left column)
@@ -446,14 +447,15 @@ class TestCartesianEulerVisualization(unittest.TestCase):
             # Repair process
             start_time = time.time()
             genome_handler.repair()
-            repaired_genome = genome_handler.genome.copy()
 
+            arms_after = getattr(genome_handler.genome, 'arms', genome_handler.genome)
+            
             repair_time = time.time() - start_time
             
             # After repair
-            valid_arms_after = ~np.isnan(repaired_genome).any(axis=-1)
-            if np.sum(valid_arms_after) >= 2:
-                valid_arm_params_after = repaired_genome[valid_arms_after]
+            valid_arms_mask = ~np.isnan(arms_after[:, 0])
+            if np.sum(valid_arms_mask) >= 2:
+                valid_arm_params_after = arms_after[valid_arms_mask]
                 cylinders_after = conversion_func(valid_arm_params_after, propeller_radius, cylinder_height)
                 collisions_after = are_there_cylinder_collisions(cylinders_after)
 

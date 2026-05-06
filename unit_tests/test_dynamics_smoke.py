@@ -25,13 +25,16 @@ import os
 import sys
 import time
 
+from pathlib import Path
+
 import numpy as np
 
 # stable_baselines3 / PPO live in the experimentation env; reuse the
 # experimentation harness for consistency.
-EXP_DIR = "/home/jed/workspaces/airevolve/experimentation"
-if EXP_DIR not in sys.path:
-    sys.path.insert(0, EXP_DIR)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 def main():
@@ -43,7 +46,7 @@ def main():
     from stable_baselines3.common.vec_env import VecMonitor
 
     from airevolve.evolution_tools.evaluators.drone_gate_env import DroneGateEnv
-    from window_metrics_callback import WindowMetricsCallback
+    from experimentation.window_metrics_callback import WindowMetricsCallback
 
     SEEDS = [1, 2, 3]
     TOTAL_STEPS = int(1e6)

@@ -498,9 +498,10 @@ class SphericalAngularDroneGenomeHandler(GenomeHandler):
                 if not self_is_fitter or (equal_fitness and self.rnd.random() < 0.5):
                     child_arms_list.append((inno, d2[inno].copy()))
 
+        max_allowed_arms = self.max_narms // 2 if self.symmetry else self.max_narms
         # Enforce min/max arm constraints
-        if len(child_arms_list) > self.max_narms:
-            child_arms_list = child_arms_list[:self.max_narms]
+        if len(child_arms_list) > max_allowed_arms:
+            child_arms_list = child_arms_list[:max_allowed_arms]
         while len(child_arms_list) < self.min_narms:
             # Fill from fitter parent's genes not yet included
             source = d1 if self_is_fitter or equal_fitness else d2

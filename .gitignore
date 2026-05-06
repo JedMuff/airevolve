@@ -143,3 +143,5 @@ archive/
 .vscode/
 
 drone-project/
+test_output/
+.aider*
