@@ -315,6 +315,21 @@ class PowerAwareDroneEnv(DroneGateEnv):
             infos[i]["battery_energy_j"]       = float(self._ep_terminal_energy_j[i])
             infos[i]["battery_died"]           = bool(just_depleted[i])
 
+            if "terminal_observation" in infos[i]:
+                # Calculate the normalized battery values as they were right before reset
+                term_soc = self._ep_terminal_soc[i]
+                term_v_norm = (self._ep_terminal_voltage[i] - self._V_MIN) / (self._V_MAX - self._V_MIN)
+                term_p_norm = self._batteries[i]._last_power / self._P_MAX
+                
+                # Create the 3-element battery array
+                term_batt_obs = np.array([term_soc, term_v_norm, term_p_norm], dtype=np.float32)
+                
+                # Append it to the base (22,) observation to make it (25,)
+                infos[i]["terminal_observation"] = np.concatenate([
+                    infos[i]["terminal_observation"], 
+                    term_batt_obs
+                ])
+
         # ── 6. Extend observations ────────────────────────────────────────────
         # Use self.states (authoritative post-all-resets gate-relative obs).
         # For done envs this is the fresh reset state; for active envs it is
