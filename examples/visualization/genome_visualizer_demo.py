@@ -16,7 +16,7 @@ from typing import Dict, Any
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from airevolve.evolution_tools.inspection_tools.drone_visualizer import DroneVisualizer, VisualizationConfig
-from examples.sample_genomes import get_all_sample_genomes
+from examples.visualization.sample_genomes import get_all_sample_genomes
 import airevolve.evolution_tools.inspection_tools.utils as u
 
 OUTPUT_DIR = "__data__/visualizations/genome_demo"

@@ -129,7 +129,7 @@ GRAVITY = 9.81  # m/s^2
 # Material properties for mass/inertia calculations
 # Updated to match drone-hover small drone configuration
 CONTROLLER_MASS = 0.0136  # kg, speedybee f405 aio flight controller
-BATTERY_MASS = 0.043  # kg, 3s 450mah lipo battery
+BATTERY_MASS = 0.082  # kg, Tattu R-Line 750mAh 14.8V 95C 4S ; # BATTERY_MASS = 0.055 kg Tattu 450mAh 14.8V 75C 4S
 BEAM_DENSITY = 0.034  # kg/m, carbon fiber tube: 8mm outer diameter, 6mm inner diameter
 
 def get_propeller_specs(prop_size):

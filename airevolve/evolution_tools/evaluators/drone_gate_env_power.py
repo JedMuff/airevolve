@@ -1,0 +1,325 @@
+"""
+drone_gate_env_power.py — PowerAwareDroneEnv
+
+DroneGateEnv extended with ECM LiPo battery dynamics and three
+power-aware PPO reward-shaping strategies.
+
+Class hierarchy
+---------------
+VecEnv (SB3 abstract)
+└── DroneGateEnv          (existing env — physics, gates, base reward)
+    └── PowerAwareDroneEnv  (this file — battery, power rewards, domain rand.)
+
+Additions over the base env
+----------------------------
+Battery (per env)
+  • One LiPoBatteryModel instance per parallel environment.
+  • Stepped every tick using the drone's NED kinematic state via _classify_mode().
+  • Episode terminates when battery.is_depleted  (SoC < 15% OR V < 13.2V).
+
+Observation extension (always the LAST 3 dims of the obs vector)
+  obs[−3] = SoC                ∈ [0, 1]
+  obs[−2] = V_norm             ∈ [0, 1]   (V − 12.8) / (16.8 − 12.8)
+  obs[−1] = P_norm             ∈ [0, 1]   P / P_max  (P_max ≈ 302.4 W)
+
+Domain randomisation
+  • reset_random()           → force SoC ∈ [0.3, 1.0] for this call only
+  • randomize_soc=True       → randomise every episode reset automatically
+
+Reward shaping  (experiment_type / penalty_weights)
+  1  Dense  : −dense_weight  × P_instant          every step
+  2  Sparse : −sparse_weight × E_episode_J         at episode end
+  3  Hybrid : −dense_weight  × P_instant           every step
+              +sparse_bonus  × SoC_final_%          at episode end
+                                                   (only if battery survived)
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+from gymnasium import spaces
+
+# ── Repo-root bootstrap (works from any CWD on macOS or Linux) ────────────────
+_ROOT = next(
+    (p for p in [Path(__file__).resolve(), *Path(__file__).resolve().parents]
+     if (p / "setup.py").exists()),
+    Path(__file__).resolve().parents[3],
+)
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from airevolve.evolution_tools.evaluators.drone_gate_env import DroneGateEnv
+from airevolve.simulator.simulation.battery_model import LiPoBatteryModel
+
+
+class PowerAwareDroneEnv(DroneGateEnv):
+    """
+    DroneGateEnv + ECM battery + power-aware reward shaping.
+
+    Parameters
+    ----------
+    experiment_type : int
+        1 = Dense, 2 = Sparse, 3 = Hybrid  (see module docstring)
+    penalty_weights : dict | None
+        Exp 1 : {"dense_weight":  float}
+        Exp 2 : {"sparse_weight": float}
+        Exp 3 : {"dense_weight":  float, "sparse_bonus": float}
+        Missing keys default to 0.0 (baseline = no penalty).
+    randomize_soc : bool
+        If True, every episode reset draws starting SoC ~ Uniform[0.3, 1.0].
+        Enables curriculum / domain randomisation without code changes.
+    **kwargs
+        Forwarded verbatim to DroneGateEnv.__init__().
+    """
+
+    # ── Battery observation normalisation constants ────────────────────────────
+    # Tight bounds mean the policy sees the full [0,1] range across real flights.
+    _V_MIN: float = LiPoBatteryModel.VOLTAGE_DEPLETED          # 12.8 V
+    _V_MAX: float = LiPoBatteryModel.VOLTAGE_FULL              # 16.8 V
+    # Maximum power: Takeoff current at full voltage ≈ 302.4 W
+    _P_MAX: float = (
+        LiPoBatteryModel.FLIGHT_MODE_CURRENTS["Takeoff"]
+        * LiPoBatteryModel.VOLTAGE_FULL
+    )
+
+    def __init__(
+        self,
+        experiment_type: int = 1,
+        penalty_weights: dict | None = None,
+        randomize_soc: bool = True,
+        **kwargs,
+    ) -> None:
+        if experiment_type not in (1, 2, 3):
+            raise ValueError(f"experiment_type must be 1, 2, or 3 — got {experiment_type!r}")
+
+        # Parent sets up drone physics, world_states, obs/action spaces, etc.
+        super().__init__(**kwargs)
+
+        self.experiment_type   = experiment_type
+        self._randomize_soc    = randomize_soc
+        self._default_rand_soc = randomize_soc  # preserve for reset_random()
+
+        pw = penalty_weights or {}
+        self._dense_weight  = float(pw.get("dense_weight",  0.0))
+        self._sparse_weight = float(pw.get("sparse_weight", 0.0))
+        self._sparse_bonus  = float(pw.get("sparse_bonus",  0.0))
+
+        # ── Battery array — one instance per parallel environment ──────────────
+        self._batteries: list[LiPoBatteryModel] = [
+            LiPoBatteryModel() for _ in range(self.num_envs)
+        ]
+
+        # ── Terminal-state buffers (written by reset_(), read by step_wait()) ──
+        # reset_() is called BEFORE physics reset, so these capture the genuine
+        # end-of-episode values — not the fresh post-reset values.
+        self._ep_terminal_energy_j = np.zeros(self.num_envs, dtype=np.float64)
+        self._ep_terminal_soc      = np.ones(self.num_envs,  dtype=np.float64)
+        self._ep_terminal_voltage  = np.full(
+            self.num_envs, LiPoBatteryModel.VOLTAGE_FULL, dtype=np.float64
+        )
+
+        # ── Per-env battery observation buffer ────────────────────────────────
+        self._batt_obs = np.zeros((self.num_envs, 3), dtype=np.float32)
+        self._update_batt_obs()
+
+        # ── Extend observation space by 3 battery dims ────────────────────────
+        n_ext = self.obs_len + 3
+        self.observation_space = spaces.Box(
+            low=np.full(n_ext, -np.inf, dtype=np.float64),
+            high=np.full(n_ext,  np.inf, dtype=np.float64),
+            dtype=np.float64,
+        )
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Internal helpers
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def _update_batt_obs(self) -> None:
+        """Recompute the (num_envs, 3) battery observation from current battery states."""
+        for i, bat in enumerate(self._batteries):
+            self._batt_obs[i, 0] = bat.soc
+            self._batt_obs[i, 1] = (bat.voltage - self._V_MIN) / (self._V_MAX - self._V_MIN)
+            self._batt_obs[i, 2] = bat._last_power / self._P_MAX
+
+    def _reset_single_battery(self, i: int) -> None:
+        """
+        Reset battery i.  If randomize_soc is active, draw a random starting
+        SoC ∈ [0.3, 1.0] after resetting to force the policy to generalise
+        across different charge levels (domain randomisation).
+        """
+        bat = self._batteries[i]
+        bat.reset()
+        if self._randomize_soc:
+            soc = float(np.random.uniform(0.3, 1.0))
+            bat._soc                   = soc
+            bat._capacity_remaining_ah = soc * bat.CAPACITY_AH
+            bat._last_voltage          = bat._compute_ecm_voltage(soc, 0.0)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Public API — battery domain randomisation
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def reset_random(self) -> np.ndarray:
+        """
+        Reset all environments with randomised starting SoC ∈ [0.3, 1.0].
+
+        Temporarily enables SoC randomisation regardless of the randomize_soc
+        constructor flag, making it safe to call from a training loop that
+        normally uses full-charge resets for eval but random resets for training:
+
+            train_obs = env.reset_random()   # stochastic SoC for PPO rollouts
+            eval_obs  = env.reset()          # full charge for deterministic eval
+        """
+        prev = self._randomize_soc
+        self._randomize_soc = True
+        obs = self.reset()          # → reset_() for all envs, batteries randomised
+        self._randomize_soc = prev
+        return obs
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Overridden DroneGateEnv methods
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def reset_(self, dones: np.ndarray) -> np.ndarray:
+        """
+        Extended reset hook called by the parent for every environment that
+        finishes an episode.
+
+        The method runs in two phases:
+        1. PRE-RESET  — capture terminal battery state into _ep_terminal_*
+                        buffers so step_wait() can apply the sparse reward.
+        2. PHYSICS RESET — delegate to DroneGateEnv.reset_() (resets kinematics).
+        3. POST-RESET — reset batteries (optionally with random SoC), refresh
+                        battery obs, and return the extended observation.
+
+        NOTE: The return value is used when reset() is called externally.
+              When called internally by step_wait(), the return value is
+              discarded — self.states is what step_wait() ultimately returns.
+        """
+        # Phase 1: capture terminal state BEFORE any battery reset
+        for i in np.where(dones)[0]:
+            bat = self._batteries[i]
+            self._ep_terminal_energy_j[i] = bat.get_total_energy_consumed()
+            self._ep_terminal_soc[i]      = bat.soc
+            self._ep_terminal_voltage[i]  = bat.voltage
+
+        # Phase 2: parent resets kinematic state, world_states, step_counts
+        base_obs = super().reset_(dones)    # → self.states updated here
+
+        # Phase 3: reset batteries for done envs
+        for i in np.where(dones)[0]:
+            self._reset_single_battery(int(i))
+
+        self._update_batt_obs()
+        return np.concatenate([base_obs, self._batt_obs], axis=1)
+
+    def reset(self) -> np.ndarray:
+        """
+        Full environment reset — delegates to reset_() for all envs.
+        Returns the extended observation (std obs ++ battery obs).
+        """
+        obs = super().reset()
+        # reset_() already updated _batt_obs; obs was extended there
+        return obs
+
+    def step_wait(self) -> tuple:
+        """
+        Extended step:
+
+        1. Step batteries with current (pre-physics) kinematic states.
+        2. Run parent step_wait() — physics, base rewards, base dones.
+           Internally, parent calls reset_(base_dones) → our override fires,
+           saving terminal state and resetting batteries for physics-done envs.
+        3. Terminate any envs whose battery just depleted (not caught by parent).
+        4. Apply power-aware reward shaping (dense / sparse / hybrid).
+        5. Augment info dicts with battery telemetry for done episodes.
+        6. Append battery observations to the returned obs.
+
+        Returns
+        -------
+        obs_ext   : (num_envs, obs_len+3) float32
+        rewards   : (num_envs,)
+        dones     : (num_envs,) bool
+        infos     : list of dicts — each done env includes battery telemetry
+        """
+        # ── 1. Battery step (pre-physics kinematic state) ─────────────────────
+        # Using the current world_states (state at time t, from which the
+        # policy computed the current action) is physically accurate: current
+        # draw during step t depends on the flight mode at time t.
+        pre_depleted = np.array([b.is_depleted for b in self._batteries])
+
+        for i in range(self.num_envs):
+            if not pre_depleted[i]:
+                # Modal call: passes full kinematic state; _classify_mode()
+                # reads z_NED (altitude) and velocity to determine the flight mode.
+                self._batteries[i].step(float(self.dt), self.world_states[i])
+
+        # Detect envs that crossed the depletion threshold THIS step
+        post_depleted  = np.array([b.is_depleted for b in self._batteries])
+        just_depleted  = post_depleted & ~pre_depleted
+
+        # ── 2. Parent physics step ────────────────────────────────────────────
+        # Inside super().step_wait():
+        #   • dynamics computed → world_states updated
+        #   • base_dones determined (max_steps | OOB | diverged)
+        #   • self.reset_(base_dones) called → our override:
+        #       – saves _ep_terminal_* for base_dones envs  ✓
+        #       – resets batteries (optionally random SoC)   ✓
+        #   • self.states updated to post-reset gate-relative obs
+        _obs, rewards, base_dones, infos = super().step_wait()
+        # Note: _obs is self.states (may be stale for batt_dones envs below).
+        # We rebuild obs from self.states at the end.
+
+        # ── 3. Battery-depletion terminations ─────────────────────────────────
+        # Envs that just depleted but were NOT already terminated by the parent.
+        batt_dones = just_depleted & ~base_dones
+        if np.any(batt_dones):
+            # reset_() saves terminal state, resets batteries, updates self.states
+            self.reset_(batt_dones)
+
+        all_dones = base_dones | batt_dones
+
+        # ── 4. Power-aware reward shaping ─────────────────────────────────────
+
+        if self.experiment_type in (1, 3) and self._dense_weight > 0.0:
+            # Dense penalty: every step, for every env (including terminal step).
+            # _last_power is valid because we stepped batteries above (step 1).
+            for i in range(self.num_envs):
+                rewards[i] -= self._dense_weight * self._batteries[i]._last_power
+
+        if self.experiment_type in (2, 3) and np.any(all_dones):
+            for i in np.where(all_dones)[0]:
+                ep_energy  = self._ep_terminal_energy_j[i]   # set by reset_()
+                ep_soc     = self._ep_terminal_soc[i]
+                batt_died  = bool(just_depleted[i])
+
+                if self.experiment_type == 2:
+                    # Sparse penalty: deduct total episode energy from final reward.
+                    # Weight is in units of reward / Joule — sweep to find the
+                    # Pareto frontier between gate-passes and energy efficiency.
+                    rewards[i] -= self._sparse_weight * ep_energy
+
+                elif self.experiment_type == 3 and not batt_died:
+                    # Hybrid bonus: grant +sparse_bonus × SoC_final_%  if the
+                    # battery survived the episode (agent conserved energy).
+                    # A battery that died earns NO bonus — the agent must learn
+                    # to reach the goal AND land with charge remaining.
+                    rewards[i] += self._sparse_bonus * (ep_soc * 100.0)
+
+        # ── 5. Augment info dicts with battery telemetry ──────────────────────
+        for i in np.where(all_dones)[0]:
+            infos[i]["battery_final_soc"]     = float(self._ep_terminal_soc[i])
+            infos[i]["battery_final_voltage"]  = float(self._ep_terminal_voltage[i])
+            infos[i]["battery_energy_j"]       = float(self._ep_terminal_energy_j[i])
+            infos[i]["battery_died"]           = bool(just_depleted[i])
+
+        # ── 6. Extend observations ────────────────────────────────────────────
+        # Use self.states (authoritative post-all-resets gate-relative obs).
+        # For done envs this is the fresh reset state; for active envs it is
+        # the current flight state — consistent with standard SB3 VecEnv contract.
+        self._update_batt_obs()
+        obs_ext = np.concatenate([self.states, self._batt_obs], axis=1)
+
+        return obs_ext, rewards, all_dones, infos
