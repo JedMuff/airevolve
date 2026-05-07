@@ -28,7 +28,7 @@
 set -euo pipefail
 
 # ── Environment ───────────────────────────────────────────────────────────────
-CONDA_ENV="airevolve"          # change to your conda/venv name if different
+source /local/data/mdu219/venvs/drone-venv/bin/activate
 DEVICE="cuda:0"
 NUM_ENVS=64                    # optimal for L4 + 64-thread EPYC (see profiling notes)
 TOTAL_STEPS=10000000
@@ -43,15 +43,6 @@ SCRIPT="${REPO_ROOT}/examples/learning/run_power_experiment.py"
 
 # ── Weights to sweep ──────────────────────────────────────────────────────────
 WEIGHTS=(0.0 0.0001 0.0005 0.001 0.005 0.01 0.05 0.1)
-
-# ── Activate conda environment ────────────────────────────────────────────────
-# Source conda so 'conda activate' works in non-login shells
-if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
-    source "$HOME/miniconda3/etc/profile.d/conda.sh"
-elif [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
-    source "$HOME/anaconda3/etc/profile.d/conda.sh"
-fi
-conda activate "${CONDA_ENV}"
 
 echo "========================================================================"
 echo "  Experiment 1 — Dense Timestep Penalty"

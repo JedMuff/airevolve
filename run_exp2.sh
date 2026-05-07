@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-CONDA_ENV="airevolve"
+source /local/data/mdu219/venvs/drone-venv/bin/activate
 DEVICE="cuda:0"
 NUM_ENVS=64
 TOTAL_STEPS=10000000
@@ -27,13 +27,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="${REPO_ROOT}/examples/learning/run_power_experiment.py"
 
 WEIGHTS=(0.0 0.01 0.05 0.1 0.25 0.5)
-
-if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
-    source "$HOME/miniconda3/etc/profile.d/conda.sh"
-elif [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
-    source "$HOME/anaconda3/etc/profile.d/conda.sh"
-fi
-conda activate "${CONDA_ENV}"
 
 echo "========================================================================"
 echo "  Experiment 2 — Sparse End-of-Episode Energy Penalty"
