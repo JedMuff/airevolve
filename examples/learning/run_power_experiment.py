@@ -158,7 +158,7 @@ def main() -> None:
         torch.manual_seed(args.seed)
 
     # ── Print run configuration ────────────────────────────────────────────────
-    exp_names = {1: "Dense", 2: "Sparse", 3: "Hybrid"}
+    exp_names = {4: "Dense", 5: "Sparse", 6: "Hybrid"}
     print("=" * 72)
     print(f"  PowerAwareDroneEnv — Experiment {args.experiment} ({exp_names[args.experiment]})")
     print(f"  penalty_weights   : {penalty_weights}")
