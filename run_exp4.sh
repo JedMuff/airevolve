@@ -67,7 +67,7 @@ for W in "${WEIGHTS[@]}"; do
     echo "--------------------------------------------------------------------"
 
     python "${SCRIPT}" \
-        --experiment    4       \
+        --experiment    1       \
         --dense-weight  "${W}"  \
         --num-envs      "${NUM_ENVS}"   \
         --total-steps   "${TOTAL_STEPS}" \

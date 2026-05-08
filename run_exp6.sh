@@ -76,7 +76,7 @@ for PAIR in "${PAIRS[@]}"; do
     echo "--------------------------------------------------------------------"
 
     python "${SCRIPT}" \
-        --experiment    6       \
+        --experiment    3       \
         --dense-weight  "${DW}" \
         --sparse-bonus  "${SB}" \
         --num-envs      "${NUM_ENVS}"    \

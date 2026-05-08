@@ -51,7 +51,7 @@ for W in "${WEIGHTS[@]}"; do
     echo "--------------------------------------------------------------------"
 
     python "${SCRIPT}" \
-        --experiment    5       \
+        --experiment    2       \
         --sparse-weight "${W}"  \
         --num-envs      "${NUM_ENVS}"    \
         --total-steps   "${TOTAL_STEPS}" \

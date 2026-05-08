@@ -91,16 +91,16 @@ def parse_args() -> argparse.Namespace:
     )
 
     # Experiment identity
-    p.add_argument("--experiment", type=int, choices=[4, 5, 6], default=1,
+    p.add_argument("--experiment", type=int, choices=[1, 2, 3], default=1,
                    help="4=Dense, 5=Sparse, 6=Hybrid")
 
     # Penalty weights (provide only the relevant one for your experiment)
     p.add_argument("--dense-weight",  type=float, default=0.0,
-                   help="Exp 4 & 6: per-step power penalty weight")
+                   help="Exp 1 & 3: per-step power penalty weight")
     p.add_argument("--sparse-weight", type=float, default=0.0,
-                   help="Exp 5:      end-of-episode energy penalty weight")
+                   help="Exp 2:      end-of-episode energy penalty weight")
     p.add_argument("--sparse-bonus",  type=float, default=0.0,
-                   help="Exp 6:      end-of-episode SoC survival bonus")
+                   help="Exp 3:      end-of-episode SoC survival bonus")
 
     # Training scale
     p.add_argument("--total-steps", type=float, default=1e6,
@@ -158,7 +158,7 @@ def main() -> None:
         torch.manual_seed(args.seed)
 
     # ── Print run configuration ────────────────────────────────────────────────
-    exp_names = {4: "Dense", 5: "Sparse", 6: "Hybrid"}
+    exp_names = {1: "Dense", 2: "Sparse", 3: "Hybrid"}
     print("=" * 72)
     print(f"  PowerAwareDroneEnv — Experiment {args.experiment} ({exp_names[args.experiment]})")
     print(f"  penalty_weights   : {penalty_weights}")
