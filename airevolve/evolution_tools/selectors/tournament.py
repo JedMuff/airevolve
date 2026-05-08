@@ -1,5 +1,45 @@
 import pandas as pd
 
+def nsga2_tournament_selection(population: pd.DataFrame, tournament_size=2, k=1) -> pd.DataFrame:
+    """Binary tournament selection using the NSGA-II crowded-comparison operator.
+
+    An individual i wins over j if:
+      1. i has a lower front rank (i.rank < j.rank), OR
+      2. same rank AND higher crowding distance (more diverse).
+
+    Requires 'rank' and 'crowding_distance' columns in population.
+
+    Parameters
+    ----------
+    population     : DataFrame with 'rank' and 'crowding_distance' columns.
+    tournament_size: Number of individuals per tournament (default 2).
+    k              : Number of individuals to select.
+    """
+    assert len(population) > 0, "Population must not be empty"
+    assert "rank" in population.columns and "crowding_distance" in population.columns, (
+        "nsga2_tournament_selection requires 'rank' and 'crowding_distance' columns"
+    )
+
+    selected = []
+    for _ in range(k):
+        tournament = population.sample(n=tournament_size, replace=True).reset_index(drop=True)
+        winner_idx = 0
+        for j in range(1, tournament_size):
+            a_rank = tournament.at[winner_idx, "rank"]
+            b_rank = tournament.at[j,          "rank"]
+            a_cd   = tournament.at[winner_idx, "crowding_distance"]
+            b_cd   = tournament.at[j,          "crowding_distance"]
+
+            if b_rank < a_rank:
+                winner_idx = j
+            elif b_rank == a_rank and b_cd > a_cd:
+                winner_idx = j
+
+        selected.append(tournament.iloc[winner_idx].to_dict())
+
+    return pd.DataFrame(selected).reset_index(drop=True)
+
+
 def tournament_selection(population: pd.DataFrame, tournament_size=3, k=1) -> pd.DataFrame:
     """
     Perform tournament selection on a population DataFrame.
