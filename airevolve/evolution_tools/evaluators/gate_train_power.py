@@ -29,14 +29,16 @@ import sys
 import time
 import argparse
 import warnings
+from functools import partial
 
 import numpy as np
 import pandas as pd
 import torch
+import gymnasium as gym
 import matplotlib.pyplot as plt
 
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import VecMonitor
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.common.callbacks import BaseCallback
 
 warnings.filterwarnings("ignore", message="The `render_mode` attribute is not defined in your environment")
@@ -53,6 +55,115 @@ from airevolve.evolution_tools.inspection_tools.morphological_descriptors.hoveri
 )
 from airevolve.evolution_tools.inspection_tools.drone_visualizer import DroneVisualizer
 from airevolve.simulator.simulation.battery_model import LiPoBatteryModel
+
+# ── Single-environment gym wrapper (one per SubprocVecEnv worker) ────────────
+
+class _SingleDroneEnv(gym.Env):
+    """gym.Env wrapping DroneGateEnv(num_envs=1) for use inside SubprocVecEnv.
+
+    SubprocVecEnv requires callables that return gym.Env instances.
+    DroneGateEnv is already a VecEnv (SB3 abstract), so this thin wrapper
+    squeezes the batch dimension out of observations / rewards / dones and
+    exposes the standard 4-tuple step() interface that SB3 expects.
+
+    Must be defined at module level (not as a closure) so that the 'spawn'
+    start method can pickle it across the process boundary without CUDA
+    fork-safety issues.
+    """
+
+    def __init__(
+        self,
+        individual: np.ndarray,
+        gate_pos: np.ndarray,
+        gate_yaw: np.ndarray,
+        start_pos: np.ndarray,
+        x_bounds: np.ndarray,
+        y_bounds: np.ndarray,
+        z_bounds: np.ndarray,
+        device: str,
+        max_steps: int,
+        experiment_type: int,
+        penalty_weights: dict,
+    ) -> None:
+        super().__init__()
+
+        _kwargs = dict(
+            num_envs=1,
+            individual=individual,
+            gates_pos=gate_pos,
+            gate_yaw=gate_yaw,
+            start_pos=start_pos,
+            x_bounds=x_bounds,
+            y_bounds=y_bounds,
+            z_bounds=z_bounds,
+            gates_ahead=1,
+            num_state_history=0,
+            num_action_history=0,
+            history_step_size=1,
+            render_mode=None,
+            device=device,
+            max_steps=max_steps,
+        )
+        if experiment_type in (1, 2):
+            self._env = PowerAwareDroneEnv(
+                experiment_type=experiment_type,
+                penalty_weights=penalty_weights,
+                randomize_soc=True,
+                **_kwargs,
+            )
+        else:
+            self._env = DroneGateEnv(**_kwargs)
+
+        # Expose spaces directly — VecEnv spaces are already 1-D (no batch dim)
+        self.observation_space = self._env.observation_space
+        self.action_space      = self._env.action_space
+
+    def reset(self, **kwargs):
+        obs = self._env.reset()          # shape (1, obs_len) from VecEnv
+        return obs[0], {}                # shape (obs_len,) + empty info dict
+
+    def step(self, action):
+        # VecEnv expects (num_envs, action_dim); we have (action_dim,)
+        obs, rewards, dones, infos = self._env.step(action[np.newaxis])
+        return obs[0], float(rewards[0]), bool(dones[0]), False, infos[0]
+
+    def seed(self, seed=None):
+        return self._env.seed(seed)
+
+    def close(self):
+        self._env.close()
+
+
+def _env_init(
+    individual,
+    gate_pos,
+    gate_yaw,
+    start_pos,
+    x_bounds,
+    y_bounds,
+    z_bounds,
+    device,
+    max_steps,
+    experiment_type,
+    penalty_weights,
+):
+    """Top-level (non-closure) factory — picklable for 'spawn' start method."""
+    return _SingleDroneEnv(
+        individual=individual,
+        gate_pos=gate_pos,
+        gate_yaw=gate_yaw,
+        start_pos=start_pos,
+        x_bounds=x_bounds,
+        y_bounds=y_bounds,
+        z_bounds=z_bounds,
+        device=device,
+        max_steps=max_steps,
+        experiment_type=experiment_type,
+        penalty_weights=penalty_weights,
+    )
+
+
+# ── Energy sentinel ───────────────────────────────────────────────────────────
 
 # Energy returned for morphologies that cannot hover — large enough to guarantee
 # domination by any individual that passes ≥ 1 gate.
@@ -116,35 +227,28 @@ def train_power(
     save_dir = save_dir + "/"
     os.makedirs(save_dir, exist_ok=True)
 
-    # ── Training environment ──────────────────────────────────────────────────
-    # Baseline (exp 0): standard DroneGateEnv — no power overhead.
-    # Dense/Sparse (exp 1/2): PowerAwareDroneEnv with the requested penalty.
-    _env_kwargs = dict(
-        num_envs=num_envs,
+    # ── Training environment — SubprocVecEnv for true CPU parallelism ─────────
+    # Each of the num_envs worker processes runs a single _SingleDroneEnv.
+    # 'spawn' is required: it creates a fresh Python interpreter per worker,
+    # initialising CUDA independently and avoiding fork-safety deadlocks.
+    _factory = partial(
+        _env_init,
         individual=individual,
-        gates_pos=gate_pos,
+        gate_pos=gate_pos,
         gate_yaw=gate_yaw,
         start_pos=start_pos,
         x_bounds=x_bounds,
         y_bounds=y_bounds,
         z_bounds=z_bounds,
-        gates_ahead=1,
-        num_state_history=0,
-        num_action_history=0,
-        history_step_size=1,
-        render_mode=None,
         device=device,
         max_steps=max_steps,
+        experiment_type=experiment_type,
+        penalty_weights=penalty_weights or {},
     )
-    if experiment_type in (1, 2):
-        env = PowerAwareDroneEnv(
-            experiment_type=experiment_type,
-            penalty_weights=penalty_weights or {},
-            randomize_soc=True,
-            **_env_kwargs,
-        )
-    else:
-        env = DroneGateEnv(**_env_kwargs)
+    env = SubprocVecEnv(
+        [_factory] * num_envs,
+        start_method='spawn',
+    )
 
     monitor_file = save_dir + (f"m{num}" if num is not None else "")
     env = VecMonitor(env, filename=monitor_file)
