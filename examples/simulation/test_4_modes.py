@@ -96,6 +96,7 @@ from airevolve.evolution_tools.evaluators.drone_gate_env import (
     gate_pos as DEFAULT_GATE_POS,
     gate_yaw as DEFAULT_GATE_YAW,
 )
+from airevolve.evolution_tools.evaluators.drone_gate_env_power import PowerAwareDroneEnv
 from airevolve.simulator.simulation.propeller_data import create_standard_propeller_config
 from airevolve.simulator.simulation.battery_model import LiPoBatteryModel
 
@@ -461,7 +462,9 @@ def main() -> None:
     # built-in render() only returns a state dict, not a graphical output.
     # Wide bounds (±50 m) prevent out-of-bounds termination with a random policy,
     # ensuring each episode runs for the full max_steps = 12 s.
-    env = DroneGateEnv(
+    env = PowerAwareDroneEnv(
+        experiment_type=1,       # The type doesn't matter for testing
+        randomize_soc=False,     # We want the drone to start with a 100% full battery!
         num_envs=1,
         propellers=propellers,
         gates_ahead=1,
