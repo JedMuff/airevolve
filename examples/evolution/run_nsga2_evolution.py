@@ -42,6 +42,7 @@ from airevolve.evolution_tools.evaluators.bi_objective_fitness import BiObjectiv
 from airevolve.evolution_tools.strategies.nsga2_strategy import evolve_nsga2
 from airevolve.evolution_tools.strategies.init_population import (
     generate_initial_pop_parallel,
+    generate_viable_initial_population,
 )
 from airevolve.evolution_tools.genome_handlers.spherical_angular_genome_handler import (
     SphericalAngularDroneGenomeHandler,
@@ -133,11 +134,15 @@ def build_fitness(args, config):
 
 
 def build_initial_population(args, config, WrappedHandler):
+    is_indirect = args.genome in ("cppn", "hybrid-cppn")
+
     if args.init_pop_mode == "random":
-        if args.genome in ("spherical", "cartesian"):
-            return WrappedHandler().random_population(args.population_size), None
-        handlers = WrappedHandler().generate_random_population(args.population_size)
-        return [h.genome for h in handlers], None
+        return generate_viable_initial_population(
+            WrappedHandler(),
+            args.population_size,
+            is_indirect=is_indirect,
+        )
+
     pop, stats = generate_initial_pop_parallel(
         WrappedHandler(),
         args.population_size,

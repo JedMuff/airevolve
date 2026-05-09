@@ -28,6 +28,93 @@ from airevolve.evolution_tools.genome_handlers.operators.optimization_repair_ope
 )
 
 
+def generate_viable_initial_population(
+    handler_instance,
+    population_size: int,
+    is_indirect: bool = False,
+    max_attempts: int = 50_000,
+):
+    """Rejection-sample random genomes until ``population_size`` hover-viable ones are found.
+
+    For each candidate, only the fast static-hover rank-test
+    (``stage2_hover_check``) is applied — no expensive repair pipeline.
+    Unviable genomes are silently discarded and a new one is drawn.
+
+    Prints a progress line for every accepted individual so progress is
+    visible during long runs.
+
+    Parameters
+    ----------
+    handler_instance : GenomeHandler
+        A fully configured genome handler (already constructed with the
+        experiment's bounds and operator settings).
+    population_size  : int
+        Number of viable individuals to collect before returning.
+    is_indirect      : bool
+        True for CPPN / hybrid-cppn genomes.  Uses ``generate_random_population``
+        + ``get_phenotype()`` to decode; False (default) uses ``random_population``
+        which returns arm-matrix arrays directly.
+    max_attempts     : int
+        Safety cap. Raises ``RuntimeError`` if reached before the population
+        is complete (prevents an infinite loop on degenerate configs).
+
+    Returns
+    -------
+    genomes : list
+        Viable genomes — numpy arrays for direct encodings, CPPN/graph objects
+        for indirect encodings.
+    stats : dict
+        ``{"total_attempts": int, "acceptance_rate": float}``
+    """
+    n_width = len(str(population_size))
+    viable   = []
+    attempts = 0
+
+    print(
+        f"\n[init-pop] Rejection sampling — need {population_size} "
+        f"hover-viable drones…",
+        flush=True,
+    )
+
+    while len(viable) < population_size:
+        if attempts >= max_attempts:
+            raise RuntimeError(
+                f"[init-pop] Safety cap reached: {max_attempts} attempts, "
+                f"only {len(viable)}/{population_size} viable drones found.  "
+                f"Try loosening arm-count or geometry bounds."
+            )
+
+        attempts += 1
+
+        if is_indirect:
+            [h]       = handler_instance.generate_random_population(1)
+            genome    = h.genome
+            phenotype = h.get_phenotype()
+        else:
+            genome    = handler_instance.random_population(1)[0]
+            phenotype = np.asarray(genome)
+
+        can_hover, _ = stage2_hover_check(phenotype, verbose=False, allow_spinning=False)
+        if not can_hover:
+            continue
+
+        viable.append(genome)
+        n_found = len(viable)
+        print(
+            f"[init-pop]   Found viable initial drone "
+            f"{n_found:{n_width}d}/{population_size}  (attempt {attempts})",
+            flush=True,
+        )
+
+    rate = population_size / attempts
+    print(
+        f"[init-pop] Done — {population_size} viable drones in {attempts} attempts "
+        f"(acceptance rate {rate:.1%})\n",
+        flush=True,
+    )
+    return viable, {"total_attempts": attempts, "acceptance_rate": rate}
+
+
 def _try_generate_individual(args):
     """Worker: generate one direct-encoded hoverable+repaired individual."""
     idx, base_seed, handler_kwargs, _param_limits, coordinate_system = args

@@ -54,7 +54,10 @@ sys.path.insert(0, str(_REPO_ROOT / "examples" / "evolution"))  # for run_evolut
 
 from airevolve.evolution_tools.evaluators.bi_objective_fitness import BiObjectiveFitness
 from airevolve.evolution_tools.strategies.nsga2_strategy import evolve_nsga2
-from airevolve.evolution_tools.strategies.init_population import generate_initial_pop_parallel
+from airevolve.evolution_tools.strategies.init_population import (
+    generate_initial_pop_parallel,
+    generate_viable_initial_population,
+)
 from airevolve.evolution_tools.genome_handlers.spherical_angular_genome_handler import (
     SphericalAngularDroneGenomeHandler,
 )
@@ -264,11 +267,20 @@ def build_fitness(args, config, experiment_type_int, penalty_weights_dict):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_initial_population(args, config, WrappedHandler):
+    is_indirect = args.genome in ("cppn", "hybrid-cppn")
+
     if args.init_pop_mode == "random":
-        if args.genome in ("spherical", "cartesian"):
-            return WrappedHandler().random_population(args.population_size), None
-        handlers = WrappedHandler().generate_random_population(args.population_size)
-        return [h.genome for h in handlers], None
+        # Rejection-sample until we have exactly population_size hover-viable
+        # genomes.  Bare random_population() produces ~0.1–5% viable rate for
+        # typical arm-count / bound settings, so this replaces the old one-shot
+        # call that silently handed unviable genomes to the evaluator.
+        return generate_viable_initial_population(
+            WrappedHandler(),
+            args.population_size,
+            is_indirect=is_indirect,
+        )
+
+    # hover_repair mode: full 3-stage repair pipeline (slower but higher quality)
     pop, stats = generate_initial_pop_parallel(
         WrappedHandler(),
         args.population_size,
