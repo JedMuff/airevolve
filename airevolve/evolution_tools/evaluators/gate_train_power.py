@@ -298,10 +298,27 @@ def train_power(
         pass
 
     # ── Deterministic evaluation: fixed max_steps window ─────────────────────
-    # We use a single-env DroneGateEnv paired with an independent LiPoBatteryModel.
-    # The battery accumulates energy across the full max_steps window regardless
-    # of any episode resets triggered by out-of-bounds terminations.
-    test_env = DroneGateEnv(
+    # The test env MUST use the same class as the training env so that the
+    # observation space (and therefore the number of features seen by the
+    # policy) is identical.
+    #
+    # experiment_type 0  →  DroneGateEnv          (22-dim obs)
+    # experiment_type 1/2 → PowerAwareDroneEnv    (22 + 3 battery = 25-dim obs)
+    #
+    # For power experiments we set penalty_weights={} and randomize_soc=False:
+    # no reward shaping during eval, battery always starts at full charge for a
+    # fair and deterministic 12-second measurement window.
+    #
+    # Energy is tracked by an independent LiPoBatteryModel stepped in lockstep
+    # with the physics, so that it accumulates across the full max_steps window
+    # regardless of any mid-flight episode resets.
+    #
+    # IMPORTANT: we use the observation *returned* by reset() / step() rather
+    # than test_env.states.  For PowerAwareDroneEnv, self.states holds only the
+    # base 22-dim obs; the 3 battery dims are concatenated onto the *return
+    # value* of step_wait() / reset_().  Using test_env.states would feed a
+    # 22-dim vector to a policy trained on 25-dim vectors.
+    _test_kwargs = dict(
         num_envs=1,
         individual=individual,
         gates_pos=gate_pos,
@@ -319,18 +336,27 @@ def train_power(
         device=device,
         max_steps=max_steps,
     )
+    if experiment_type in (1, 2):
+        test_env = PowerAwareDroneEnv(
+            experiment_type=experiment_type,
+            penalty_weights={},       # no reward shaping during evaluation
+            randomize_soc=False,      # full charge → deterministic 12-second window
+            **_test_kwargs,
+        )
+    else:
+        test_env = DroneGateEnv(**_test_kwargs)
 
-    test_env.reset()
+    obs = test_env.reset()   # (1, obs_len) — 22 or 25 dims depending on class
     battery = LiPoBatteryModel()
     battery.reset()
 
     dt = float(test_env.dt)
 
     for _ in range(max_steps):
-        # Capture state BEFORE the physics step (consistent with PowerAwareDroneEnv)
+        # Capture kinematics BEFORE the physics step (matches PowerAwareDroneEnv timing)
         pre_state = test_env.world_states[0].copy()
-        actions, _ = model.predict(test_env.states, deterministic=True)
-        _states, _rewards, _dones, infos = test_env.step(actions)
+        actions, _ = model.predict(obs, deterministic=True)  # obs from step/reset
+        obs, _rewards, _dones, infos = test_env.step(actions)
         battery.step(dt, pre_state)
 
     num_gates_passed = int(infos[0]["num_gates_passed"][0])
