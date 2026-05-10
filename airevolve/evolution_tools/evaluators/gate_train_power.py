@@ -270,32 +270,41 @@ def train_power(
         gamma=0.999,
         device=device,
     )
-    model.learn(
-        total_timesteps=int(total_timesteps),
-        reset_num_timesteps=False,
-        log_interval=100,
-        callback=FullStatsCallback(),
-    )
-    policy_path = save_dir + (f"policy{num}" if num is not None else "policy")
-    model.save(policy_path)
-
-    # ── Training curve plot ───────────────────────────────────────────────────
+    # ── Train then unconditionally release worker processes ──────────────────
+    # SubprocVecEnv creates one OS pipe pair per worker.  Without an explicit
+    # env.close(), those pipes accumulate across evaluations in the same OS
+    # process and eventually exhaust the per-process file-descriptor limit
+    # (default 1024 on Linux), causing "OSError: [Errno 24] Too many open files".
+    # The finally block guarantees closure even when model.learn() raises.
     try:
+        model.learn(
+            total_timesteps=int(total_timesteps),
+            reset_num_timesteps=False,
+            log_interval=100,
+            callback=FullStatsCallback(),
+        )
+        policy_path = save_dir + (f"policy{num}" if num is not None else "policy")
+        model.save(policy_path)
+
+        # ── Training curve plot ───────────────────────────────────────────────
         try:
-            data = pd.read_csv(monitor_file + ".monitor.csv", skiprows=1)
+            try:
+                data = pd.read_csv(monitor_file + ".monitor.csv", skiprows=1)
+            except Exception:
+                data = pd.read_csv(monitor_file + "monitor.csv", skiprows=1)
+            plt.figure(figsize=(10, 6))
+            plt.plot(data["t"], data["r"], label="Episode Reward")
+            plt.xlabel("Timesteps")
+            plt.ylabel("Reward")
+            plt.title("Reward per Episode")
+            plt.legend()
+            fig_path = save_dir + (f"figure{num}.png" if num is not None else "figure.png")
+            plt.savefig(fig_path)
+            plt.close()
         except Exception:
-            data = pd.read_csv(monitor_file + "monitor.csv", skiprows=1)
-        plt.figure(figsize=(10, 6))
-        plt.plot(data["t"], data["r"], label="Episode Reward")
-        plt.xlabel("Timesteps")
-        plt.ylabel("Reward")
-        plt.title("Reward per Episode")
-        plt.legend()
-        fig_path = save_dir + (f"figure{num}.png" if num is not None else "figure.png")
-        plt.savefig(fig_path)
-        plt.close()
-    except Exception:
-        pass
+            pass
+    finally:
+        env.close()  # terminates all worker processes and closes their pipes
 
     # ── Deterministic evaluation: fixed max_steps window ─────────────────────
     # The test env MUST use the same class as the training env so that the
@@ -346,21 +355,29 @@ def train_power(
     else:
         test_env = DroneGateEnv(**_test_kwargs)
 
-    obs = test_env.reset()   # (1, obs_len) — 22 or 25 dims depending on class
-    battery = LiPoBatteryModel()
-    battery.reset()
+    # Initialise return values before the try block so that a mid-eval crash
+    # still yields a well-typed, dominated tuple rather than an UnboundLocalError.
+    num_gates_passed = 0
+    total_energy_j   = _FAIL_ENERGY
 
-    dt = float(test_env.dt)
+    try:
+        obs = test_env.reset()   # (1, obs_len) — 22 or 25 dims depending on class
+        battery = LiPoBatteryModel()
+        battery.reset()
 
-    for _ in range(max_steps):
-        # Capture kinematics BEFORE the physics step (matches PowerAwareDroneEnv timing)
-        pre_state = test_env.world_states[0].copy()
-        actions, _ = model.predict(obs, deterministic=True)  # obs from step/reset
-        obs, _rewards, _dones, infos = test_env.step(actions)
-        battery.step(dt, pre_state)
+        dt = float(test_env.dt)
 
-    num_gates_passed = int(infos[0]["num_gates_passed"][0])
-    total_energy_j   = float(battery.get_total_energy_consumed())
+        for _ in range(max_steps):
+            # Capture kinematics BEFORE the physics step (matches PowerAwareDroneEnv timing)
+            pre_state = test_env.world_states[0].copy()
+            actions, _ = model.predict(obs, deterministic=True)  # obs from step/reset
+            obs, _rewards, _dones, infos = test_env.step(actions)
+            battery.step(dt, pre_state)
+
+        num_gates_passed = int(infos[0]["num_gates_passed"][0])
+        total_energy_j   = float(battery.get_total_energy_consumed())
+    finally:
+        test_env.close()  # no-op for DroneGateEnv but harmless; closes PowerAwareDroneEnv
 
     return num_gates_passed, total_energy_j
 
