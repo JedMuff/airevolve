@@ -6,9 +6,9 @@
 # Reward shaping:  reward_terminal -= sparse_weight × E_episode_joules
 #                  (no in-flight penalty; agent only penalised at episode end)
 #
-# Weight sweep:    [0.0, 0.01, 0.05, 0.1, 0.25, 0.5]
+# Weight sweep:    [0.0 0.001 0.002 0.003 0.004 0.005 0.006 0.007 0.008 0.009 0.01 0.02 0.03 0.04 0.05]
 # Total runs:      6
-# Steps / run:     10_000_000
+# Steps / run:     50_000_000
 # Output root:     /local/data/mdu219/drone-experiment-2/
 #
 # Estimated wall time: ~80 min/run × 6 runs ≈ 8.0 hours (sequential)
@@ -19,14 +19,14 @@ set -euo pipefail
 source /local/data/mdu219/venvs/drone-venv/bin/activate
 DEVICE="cuda:0"
 NUM_ENVS=64
-TOTAL_STEPS=10000000
+TOTAL_STEPS=50000000
 MAX_STEPS=1200
 
 BASE_DIR="/local/data/mdu219/drone-experiment-2"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="${REPO_ROOT}/examples/learning/run_power_experiment.py"
 
-WEIGHTS=(0.0 0.01 0.05 0.1 0.25 0.5)
+WEIGHTS=(0.0 0.001 0.002 0.003 0.004 0.005 0.006 0.007 0.008 0.009 0.01 0.02 0.03 0.04 0.05)
 
 echo "========================================================================"
 echo "  Experiment 2 — Sparse End-of-Episode Energy Penalty"

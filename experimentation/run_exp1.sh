@@ -5,9 +5,9 @@
 #
 # Reward shaping:  reward_t -= dense_weight × P_instantaneous_t
 #
-# Weight sweep:    [0.0, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]
+# Weight sweep:    [0.0, 0.00001, 0.00005, 0.0001, 0.0002, 0.0003, 0.0004, 0.0005, 0.0006, 0.0007, 0.0008, 0.0009, 0.001]
 # Total runs:      8
-# Steps / run:     10_000_000
+# Steps / run:     50_000_000
 # Output root:     /local/data/mdu219/drone-experiment-1/
 #
 # Server requirements
@@ -31,7 +31,7 @@ set -euo pipefail
 source /local/data/mdu219/venvs/drone-venv/bin/activate
 DEVICE="cuda:0"
 NUM_ENVS=64                    # optimal for L4 + 64-thread EPYC (see profiling notes)
-TOTAL_STEPS=10000000
+TOTAL_STEPS=50000000
 MAX_STEPS=1200                 # 12 s per episode at dt=0.01
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="${REPO_ROOT}/examples/learning/run_power_experiment.py"
 
 # ── Weights to sweep ──────────────────────────────────────────────────────────
-WEIGHTS=(0.0 0.0001 0.0005 0.001 0.005 0.01 0.05 0.1)
+WEIGHTS=(0.0 0.00001 0.00005 0.0001 0.0002 0.0003 0.0004 0.0005 0.0006 0.0007 0.0008 0.0009 0.001)
 
 echo "========================================================================"
 echo "  Experiment 1 — Dense Timestep Penalty"

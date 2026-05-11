@@ -89,10 +89,10 @@ class DroneConfiguration:
     def _compute_inertia(self):
         """Compute inertia matrix components using parallel axis theorem."""
         # Controller inertia about its own center (approximated as rectangular block)
-        # Typical flight controller dimensions: 105mm x 36mm x 35mm
-        controller_Ix = (1/12) * CONTROLLER_MASS * (0.036**2 + 0.035**2)
-        controller_Iy = (1/12) * CONTROLLER_MASS * (0.105**2 + 0.035**2)
-        controller_Iz = (1/12) * CONTROLLER_MASS * (0.105**2 + 0.036**2)
+        # Typical flight controller dimensions: 27mm x 33mm x 8mm for Flywoo GOKU BS 20A ESC; Flywoo GOKU GN405 Nano HD FC 25mm x 23mm x 8mm
+        controller_Ix = (1/12) * CONTROLLER_MASS * (0.033**2 + 0.008**2)
+        controller_Iy = (1/12) * CONTROLLER_MASS * (0.027**2 + 0.008**2)
+        controller_Iz = (1/12) * CONTROLLER_MASS * (0.027**2 + 0.033**2)
         
         # Translate controller inertia to center of gravity using parallel axis theorem
         cg_offset_sq = np.dot(self.cg, self.cg)
