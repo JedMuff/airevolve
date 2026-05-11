@@ -44,17 +44,17 @@ class LiPoBatteryModel:
     # ------------------------------------------------------------------ #
     # Battery specifications — Tattu R-Line 750mAh 14.8V 95C 4S          #
     # ------------------------------------------------------------------ #
-    BATTERY_NAME = "Tattu 450mAh 14.8V 75C 4S"
+    BATTERY_NAME = "Tattu 750mAh 14.8V 95C 4S"
     NUM_CELLS = 4
 
     # Electrical
-    CAPACITY_MAH = 450.0          # mAh  750 or 450
-    CAPACITY_AH  = 0.450          # Ah  (= CAPACITY_MAH / 1000)
+    CAPACITY_MAH = 750.0          # mAh  750 or 450
+    CAPACITY_AH  = 0.750          # Ah  (= CAPACITY_MAH / 1000)
     VOLTAGE_FULL     = 16.8       # V   (4 × 4.20 V/cell, fully charged)
     VOLTAGE_NOMINAL  = 14.8       # V   (4 × 3.70 V/cell, nominal)
     VOLTAGE_DEPLETED = 12.8       # V   (4 × 3.20 V/cell, lower cutoff)
-    C_RATING     = 75             # 95 or 75
-    MAX_CURRENT  = 33.75          # A   71.25 or 33.75
+    C_RATING     = 95             # 95 or 75
+    MAX_CURRENT  = 71.25          # A   71.25 or 33.75
 
     # ECM internal resistance — 60 mΩ is a validated value for a high-discharge
     # 4S racing pack.  At 18 A takeoff this causes 1.08 V sag (≈6% of nominal),
@@ -65,9 +65,9 @@ class LiPoBatteryModel:
     # Physical
     # NOTE: MASS_KG must equal BATTERY_MASS in propeller_data.py (currently 0.082 kg).
     # NOTE: DIMENSIONS_MM must match any URDF / CAD generator geometry.
-    MASS_G         = 55           # grams  82 or 55
-    MASS_KG        = 0.055        # kg   — matches BATTERY_MASS in propeller_data.py
-    DIMENSIONS_MM  = (45, 24, 27) # mm     (60 x 31 x 28) or (45 x 24 x 27)
+    MASS_G         = 82           # grams  82 or 55
+    MASS_KG        = 0.082        # kg   — matches BATTERY_MASS in propeller_data.py
+    DIMENSIONS_MM  = (60, 31, 28) # mm     (60 x 31 x 28) or (45 x 24 x 27)
 
     # Depletion thresholds
     SOC_DEPLETION_THRESHOLD     = 0.15  # 15 % SoC commercial safety reserve
