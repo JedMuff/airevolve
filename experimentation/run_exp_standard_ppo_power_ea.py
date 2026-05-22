@@ -274,14 +274,23 @@ class _SnapshotCallback:
             print(f"[snapshot] Visualization skipped: {viz_err}")
 
 
-def _safe_fitness_wrapper(fitness_fn: BiObjectiveFitness):
-    """Wrap fitness_fn so a single crash returns (0, FAIL_ENERGY) instead of
-    propagating an exception that would abort the entire Pool.map() call."""
-    _FAIL_ENERGY = 1e9
+class _SafeFitnessCallable:
+    """Picklable wrapper around BiObjectiveFitness.
 
-    def _safe(genome, ind_save_dir):
+    multiprocessing.Pool.map() serialises the callable with pickle before
+    sending it to worker processes.  Closures (local functions returned from
+    a factory) cannot be pickled, but instances of a *module-level* class can.
+    This wrapper provides identical fault-isolation behaviour.
+    """
+
+    _FAIL_ENERGY: float = 1e9
+
+    def __init__(self, fitness_fn: BiObjectiveFitness) -> None:
+        self._fn = fitness_fn
+
+    def __call__(self, genome, ind_save_dir):
         try:
-            return fitness_fn(genome, ind_save_dir)
+            return self._fn(genome, ind_save_dir)
         except Exception:
             tb = traceback.format_exc()
             fail_log = os.path.join(ind_save_dir or ".", "EVAL_FAILED.txt")
@@ -291,11 +300,12 @@ def _safe_fitness_wrapper(fitness_fn: BiObjectiveFitness):
                     fh.write(tb)
             except Exception:
                 pass
-            print(f"[ERROR] Evaluation failed — returning sentinel. See {fail_log}\n{tb}",
-                  flush=True)
-            return (0, _FAIL_ENERGY)
-
-    return _safe
+            print(
+                f"[ERROR] Evaluation failed — returning sentinel. "
+                f"See {fail_log}\n{tb}",
+                flush=True,
+            )
+            return (0, self._FAIL_ENERGY)
 
 
 def _save_artefacts(all_individuals, results_dir: Path, args: argparse.Namespace) -> None:
@@ -410,8 +420,8 @@ def main() -> None:
     WrappedHandler = create_genome_handler_wrapper(
         config["handler_class"], config["handler_kwargs"]
     )
-    fitness_fn    = _build_fitness(args, config)
-    safe_fitness  = _safe_fitness_wrapper(fitness_fn)
+    fitness_fn   = _build_fitness(args, config)
+    safe_fitness = _SafeFitnessCallable(fitness_fn)
 
     print("\n--- Phase 1: Initial Population ---", flush=True)
     initial_pop, init_stats = _build_initial_population(args, config, WrappedHandler)
