@@ -37,9 +37,12 @@ import torch
 import gymnasium as gym
 import matplotlib.pyplot as plt
 
+import json
+
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
-from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
+from stable_baselines3.common.vec_env import DummyVecEnv
 
 warnings.filterwarnings("ignore", message="The `render_mode` attribute is not defined in your environment")
 
@@ -84,6 +87,7 @@ class _SingleDroneEnv(gym.Env):
         max_steps: int,
         sparse_weight: float,
         use_power_env: bool,
+        overdraw_penalty_weight: float = 0.0,
     ) -> None:
         super().__init__()
 
@@ -109,7 +113,8 @@ class _SingleDroneEnv(gym.Env):
                 experiment_type=2,
                 penalty_weights={"sparse_weight": sparse_weight},
                 randomize_soc=True,
-                strict_voltage_kill=False,  # PPO training: allow voltage sags
+                strict_voltage_kill=False,
+                overdraw_penalty_weight=overdraw_penalty_weight,
                 **_kwargs,
             )
         else:
@@ -147,6 +152,7 @@ def _env_init(
     max_steps,
     sparse_weight,
     use_power_env,
+    overdraw_penalty_weight=0.0,
 ):
     """Top-level (non-closure) factory — picklable for 'spawn' start method."""
     return _SingleDroneEnv(
@@ -161,6 +167,7 @@ def _env_init(
         max_steps=max_steps,
         sparse_weight=sparse_weight,
         use_power_env=use_power_env,
+        overdraw_penalty_weight=overdraw_penalty_weight,
     )
 
 
@@ -182,6 +189,7 @@ def train_power(
     max_steps: int = 1200,
     sparse_weight: float = 0.002,
     use_power_env: bool = True,
+    overdraw_penalty_weight: float = 0.0,
 ):
     """Train a PPO policy for gate racing and return bi-objective fitness.
 
@@ -245,6 +253,7 @@ def train_power(
         max_steps=max_steps,
         sparse_weight=sparse_weight,
         use_power_env=use_power_env,
+        overdraw_penalty_weight=overdraw_penalty_weight,
     )
     env = SubprocVecEnv(
         [_factory] * num_envs,
@@ -277,13 +286,43 @@ def train_power(
     # process and eventually exhaust the per-process file-descriptor limit
     # (default 1024 on Linux), causing "OSError: [Errno 24] Too many open files".
     # The finally block guarantees closure even when model.learn() raises.
+    eval_env = DummyVecEnv([partial(
+        _env_init,
+        individual=individual,
+        gate_pos=gate_pos,
+        gate_yaw=gate_yaw,
+        start_pos=start_pos,
+        x_bounds=x_bounds,
+        y_bounds=y_bounds,
+        z_bounds=z_bounds,
+        device=device,
+        max_steps=max_steps,
+        sparse_weight=0.0,
+        use_power_env=use_power_env,
+        overdraw_penalty_weight=0.0,
+    )])
+    best_model_path = os.path.join(save_dir, "best_model")
+    eval_callback = EvalCallback(
+        eval_env,
+        best_model_save_path=save_dir,
+        log_path=os.path.join(save_dir, "eval_logs"),
+        eval_freq=max(1, int(total_timesteps) // 20),
+        n_eval_episodes=3,
+        deterministic=True,
+        render=False,
+        verbose=0,
+    )
+
     try:
         model.learn(
             total_timesteps=int(total_timesteps),
             reset_num_timesteps=False,
             log_interval=100,
-            callback=FullStatsCallback(),
+            callback=[FullStatsCallback(), eval_callback],
         )
+        final_model_path = os.path.join(save_dir, "final_model")
+        model.save(final_model_path)
+
         policy_path = save_dir + (f"policy{num}" if num is not None else "policy")
         model.save(policy_path)
 
@@ -305,7 +344,8 @@ def train_power(
         except Exception:
             pass
     finally:
-        env.close()  # terminates all worker processes and closes their pipes
+        env.close()
+        eval_env.close()
 
     # ── Deterministic evaluation: fixed max_steps window ─────────────────────
     # The test env MUST use the same class as the training env so that the
@@ -400,8 +440,9 @@ def evaluate_individual(
     device: str = "cuda:0",
     num=None,
     max_steps: int = 1200,
-    sparse_weight: float = 0.002,
-    use_power_env: bool = True,
+    sparse_weight: float = 0.0,
+    use_power_env: bool = False,
+    overdraw_penalty_weight: float = 0.0,
 ) -> tuple:
     """Hover-check, train, and evaluate one morphology.
 
@@ -413,6 +454,24 @@ def evaluate_individual(
     (num_gates_passed, total_energy_j) : (int, float)
     """
     start_time = time.time()
+    os.makedirs(ind_save_dir, exist_ok=True)
+
+    try:
+        np.save(os.path.join(ind_save_dir, "genome.npy"), individual)
+        morph_cfg = {
+            "num_motors": int((~np.isnan(individual).any(axis=1)).sum()),
+            "arms": [
+                {k: float(v) for k, v in zip(
+                    ["magnitude", "arm_yaw", "arm_pitch", "mot_pitch", "mot_yaw", "direction"],
+                    row
+                )}
+                for row in individual[~np.isnan(individual).any(axis=1)]
+            ],
+        }
+        with open(os.path.join(ind_save_dir, "morphology_config.json"), "w") as fh:
+            json.dump(morph_cfg, fh, indent=2)
+    except Exception as e:
+        print(f"[warn] Could not save genome artifacts: {e}")
 
     sim = get_sim(individual)
     sim.compute_hover(verbose=False)
@@ -444,9 +503,7 @@ def evaluate_individual(
             individual, ax=ax,
             title=f"Pre-training (Gen {num})", fitness=np.nan, generation=num,
         )
-        plt.savefig(
-            ind_save_dir + (f"/morphology{num}.png" if num is not None else "/morphology.png")
-        )
+        plt.savefig(os.path.join(ind_save_dir, "morphology_pre.png"))
         plt.close()
     except Exception:
         pass
@@ -462,6 +519,7 @@ def evaluate_individual(
         max_steps=max_steps,
         sparse_weight=sparse_weight,
         use_power_env=use_power_env,
+        overdraw_penalty_weight=overdraw_penalty_weight,
     )
 
     # Post-training morphology plot
@@ -470,13 +528,11 @@ def evaluate_individual(
         ax  = fig.add_subplot(111, projection="3d")
         visualizer.plot_3d(
             individual, ax=ax,
-            title=f"Post-training (Gen {num})",
+            title=f"Post-training (Gen {num}) | gates={num_gates_passed} | energy={total_energy_j:.0f}J",
             fitness=num_gates_passed,
             generation=num,
         )
-        plt.savefig(
-            ind_save_dir + (f"/morphology{num}.png" if num is not None else "/morphology.png")
-        )
+        plt.savefig(os.path.join(ind_save_dir, "morphology_post.png"))
         plt.close()
     except Exception:
         pass

@@ -44,13 +44,14 @@ class BiObjectiveFitness:
     handler_kwargs     : kwargs forwarded to handler_class().
     coordinate_system  : 'spherical' | 'cartesian' | 'cppn' | 'hybrid-cppn'.
     brain_kwargs       : forwarded to gate_train_power.evaluate_individual():
-        gate_cfg         : str  — 'figure8', 'circle', etc.
-        training_ts      : int  — PPO training timesteps.
-        num_envs         : int  — parallel envs during training.
-        device           : str  — torch device string.
-        max_steps        : int  — evaluation length in env steps (default 1200 → 12 s).
-        sparse_weight    : float — Penalty weight for episodic energy.
-        use_power_env    : bool  — Whether to use PowerAwareDroneEnv.
+        gate_cfg              : str   — 'figure8', 'circle', etc.
+        training_ts           : int   — PPO training timesteps.
+        num_envs              : int   — parallel envs during training.
+        device                : str   — torch device string.
+        max_steps             : int   — evaluation length in env steps (default 1200 → 12 s).
+        sparse_weight         : float — Penalty weight for episodic energy (0.0 = disabled).
+        overdraw_penalty_weight: float — Per-step current-limit penalty weight (0.0 = disabled).
+        use_power_env         : bool  — Whether to use PowerAwareDroneEnv.
     """
 
     def __init__(
@@ -124,8 +125,9 @@ class BiObjectiveFitness:
             self.brain_kwargs["gate_cfg"],
             self.brain_kwargs["device"],
             max_steps=self.brain_kwargs.get("max_steps", 1200),
-            sparse_weight=self.brain_kwargs.get("sparse_weight", 0.002),
-            use_power_env=self.brain_kwargs.get("use_power_env", True),
+            sparse_weight=self.brain_kwargs.get("sparse_weight", 0.0),
+            use_power_env=self.brain_kwargs.get("use_power_env", False),
+            overdraw_penalty_weight=self.brain_kwargs.get("overdraw_penalty_weight", 0.0),
         )
 
     # ── Internal helpers ──────────────────────────────────────────────────────
