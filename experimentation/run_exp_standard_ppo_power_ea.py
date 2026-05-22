@@ -74,6 +74,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import multiprocessing
+import multiprocessing.pool
+import pandas as pd
+
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -91,6 +95,28 @@ from airevolve.evolution_tools.strategies.init_population import (
 )
 from airevolve.evolution_tools.inspection_tools.plot_pareto_front import plot_pareto_front
 from run_evolution import get_genome_handler_config, create_genome_handler_wrapper
+import airevolve.evolution_tools.strategies.evolution_components as _evo_components
+
+
+class NonDaemonProcess(multiprocessing.Process):
+    @property
+    def daemon(self):
+        return False
+
+    @daemon.setter
+    def daemon(self, value):
+        pass
+
+
+class NonDaemonPool(multiprocessing.pool.Pool):
+    def Process(self, *args, **kwds):
+        if args and hasattr(args[0], "Process"):
+            ctx, args = args[0], args[1:]
+        else:
+            ctx = self._ctx
+        proc = ctx.Process(*args, **kwds)
+        proc.__class__ = NonDaemonProcess
+        return proc
 
 
 _EXPERIMENT_NAME = "exp_standard_ppo_power_ea"
@@ -434,6 +460,43 @@ def main() -> None:
     print(f"  Initial population: {len(initial_pop)} viable individuals.", flush=True)
 
     snapshot_cb = _SnapshotCallback(results_dir, _SNAPSHOT_GENS)
+
+    def _patched_evaluate_population(
+        fitness_function,
+        population,
+        ids,
+        generation,
+        all_parent_ids,
+        log_dir_base,
+        num_workers=1,
+    ):
+        if num_workers > 1:
+            args_list = [
+                (
+                    fitness_function,
+                    genome,
+                    ids[i],
+                    generation,
+                    all_parent_ids[i],
+                    log_dir_base,
+                )
+                for i, genome in enumerate(population)
+            ]
+            with NonDaemonPool(
+                processes=min(num_workers, len(population)),
+                initializer=_evo_components._pool_worker_init,
+            ) as pool:
+                evaluated = pool.map(
+                    _evo_components._evaluate_individual_worker, args_list
+                )
+            return pd.DataFrame(evaluated)
+        return _evo_components._orig_evaluate_population(
+            fitness_function, population, ids, generation,
+            all_parent_ids, log_dir_base, num_workers=1,
+        )
+
+    _evo_components._orig_evaluate_population = _evo_components.evaluate_population
+    _evo_components.evaluate_population = _patched_evaluate_population
 
     print("\n--- Phase 2: NSGA-II Evolution ---", flush=True)
     all_individuals = evolve_nsga2(
