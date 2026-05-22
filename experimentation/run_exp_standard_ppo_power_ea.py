@@ -498,6 +498,9 @@ def main() -> None:
     _evo_components._orig_evaluate_population = _evo_components.evaluate_population
     _evo_components.evaluate_population = _patched_evaluate_population
 
+    import airevolve.evolution_tools.strategies.nsga2_strategy as _nsga2
+    _nsga2.evaluate_population = _patched_evaluate_population
+
     print("\n--- Phase 2: NSGA-II Evolution ---", flush=True)
     all_individuals = evolve_nsga2(
         fitness_function=safe_fitness,
