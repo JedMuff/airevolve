@@ -1,9 +1,9 @@
 """
 LiPo Battery Model for Airevolve Drone Physics Simulation.
 
-Models the Tattu R-Line 750mAh 14.8V 95C 4S / Tattu 450mAh 14.8V 75C 4S lithium polymer battery using an
-Equivalent Circuit Model (ECM) with SoC-based voltage curve and dynamic
-flight-mode classification for realistic current-draw estimation.
+Models the Tattu R-Line 750mAh 14.8V 95C 4S / Tattu 450mAh 14.8V 75C 4S lithium polymer battery using a
+high-fidelity motor-level Equivalent Circuit Model (ECM) with SoC-based voltage curve and RPM-based
+current estimation for a 295g hexacopter (6 motors).
 
 COMPATIBILITY NOTE FOR MORPHOLOGY / URDF GENERATORS:
   External code that builds drone geometry or URDF files MUST use:
@@ -29,9 +29,12 @@ except ImportError:
 
 class LiPoBatteryModel:
     """
-    Supports two calling conventions for step():
-      Legacy:  step(dt, current_draw_amps: float)   — explicit current in amps
-      Modal:   step(dt, kinematic_state: array-like) — auto-classifies flight mode
+    Motor-level Equivalent Circuit Model (ECM) for a 295 g hexacopter (6 motors).
+
+    step() signature:
+        step(dt, motor_rpms, max_rpm)
+            RPM-to-current quadratic curve per motor, summed with FC baseline,
+            then ECM voltage sag applied.
 
     Integration hooks
     -----------------
@@ -57,10 +60,17 @@ class LiPoBatteryModel:
     MAX_CURRENT  = 71.25          # A   71.25 or 33.75
 
     # ECM internal resistance — 60 mΩ is a validated value for a high-discharge
-    # 4S racing pack.  At 18 A takeoff this causes 1.08 V sag (≈6% of nominal),
-    # accurately capturing the under-voltage dip that differentiates idle from
-    # full-throttle flight in the energy model.
+    # 4S racing pack.  At max current (71.25 A) this causes ~4.3 V sag,
+    # accurately modelling brownout risk at peak throttle.
     INTERNAL_RESISTANCE = 0.06    # Ω
+
+    # ------------------------------------------------------------------ #
+    # Motor-level ECM constants — 295 g hexacopter (6 motors)            #
+    # ------------------------------------------------------------------ #
+    MOTOR_IDLE_CURRENT  = 0.5     # A — per-motor current at zero throttle
+    MOTOR_MAX_CURRENT   = 14.0    # A — per-motor current at max RPM
+    FC_BASELINE_CURRENT = 0.15    # A — flight controller + ESC idle draw
+    BATTERY_MAX_CURRENT = 71.25   # A — battery continuous discharge limit
 
     # Physical
     # NOTE: MASS_KG must equal BATTERY_MASS in propeller_data.py (currently 0.082 kg).
@@ -71,25 +81,7 @@ class LiPoBatteryModel:
 
     # Depletion thresholds
     SOC_DEPLETION_THRESHOLD     = 0.15  # 15 % SoC commercial safety reserve
-    VOLTAGE_DEPLETION_THRESHOLD = 13.2  # V  (4 × 3.30 V/cell)
-
-    # ------------------------------------------------------------------ #
-    # Flight modes — hardware-measured current draws for the sub-250 g   #
-    # hexacopter: Flywoo GN405 FC, EMAX ECO 1404 3700KV × 6,            #
-    # Gemfan 2609 props, Tattu R-Line 750mAh 14.8V 4S 95C battery.      #
-    # ------------------------------------------------------------------ #
-    FLIGHT_MODE_CURRENTS: dict[str, float] = {
-        "Ground":  0.15,    # A — FC + ESC idle, props stationary
-        "Hover":   4.50,    # A — altitude hold, minimal translation
-        "Move":    6.50,    # A — lateral / forward flight during figure-8
-        "Takeoff": 18.00,   # A — full-throttle climb at mission start
-    }
-
-    # Mode-detection thresholds for _classify_mode() (state in NED frame).
-    # In NED: z < 0 is airborne, z ≈ 0 is ground level, vz < 0 is ascending.
-    _ALTITUDE_GROUND_THRESHOLD = 0.05   # m  : altitude ≤ this → Ground mode
-    _TAKEOFF_VZ_THRESHOLD      = 0.30   # m/s: |vz| > this AND airborne → Takeoff
-    _MOVE_VXY_THRESHOLD        = 0.30   # m/s: √(vx²+vy²) > this → Move
+    VOLTAGE_DEPLETION_THRESHOLD = 12.8  # V  — same as VOLTAGE_DEPLETED (hard cutoff)
 
     # Legacy Open-Circuit Voltage lookup table — kept for reference; ECM formula is the live path.
     _OCV_SOC = np.array([0.00, 0.05, 0.20, 0.80, 1.00])
@@ -97,7 +89,18 @@ class LiPoBatteryModel:
 
     # ------------------------------------------------------------------ #
 
-    def __init__(self) -> None:
+    def __init__(self, strict_voltage_kill: bool = True) -> None:
+        """
+        Parameters
+        ----------
+        strict_voltage_kill : bool
+            If True (default / NSGA-II eval): depletion fires on
+            SoC < 0.15 OR V_terminal < 12.8 V — physically accurate.
+            If False (PPO training): depletion fires ONLY on SoC < 0.15,
+            preventing transient voltage sags from instantly killing
+            episodes before the agent has learned throttle control.
+        """
+        self.strict_voltage_kill = strict_voltage_kill
         self.reset()
 
     def reset(self) -> None:
@@ -111,11 +114,10 @@ class LiPoBatteryModel:
         # Last-step cache (used by get_rl_observations before first step)
         self._last_voltage: float = self.VOLTAGE_FULL
         self._last_power: float = 0.0
-        self._last_mode: str = "Ground"
+        self._last_current: float = 0.0
 
         # Per-step history lists — converted to arrays / DataFrame at get_history()
         self._hist_time:         list[float] = []
-        self._hist_mode:         list[str]   = []
         self._hist_voltage:      list[float] = []
         self._hist_soc:          list[float] = []
         self._hist_capacity_mah: list[float] = []
@@ -131,115 +133,96 @@ class LiPoBatteryModel:
         """
         ECM terminal voltage using a square-root SoC curve and R_internal sag.
 
-          V_ideal  = 13.0 + (16.8 − 13.0) × √SoC
-          V_actual = V_ideal − I × R_internal   (clamped to VOLTAGE_DEPLETED)
+          V_ideal    = 13.0 + 3.8 × √SoC
+          V_terminal = V_ideal − I_total × R_internal
 
         The √SoC shape follows the empirical discharge profile of a 4S LiPo:
         fast drop near full charge, long flat mid-range plateau, steep knee
         at low SoC.  R_internal = 0.06 Ω models the dominant DC series resistance
         of the pack at room temperature under high-rate discharge.
+
+        NOTE: V_terminal is NOT clamped here so that the depletion check can
+        accurately detect sub-threshold voltages (strict_voltage_kill path).
         """
         soc_clamped = max(0.0, min(1.0, soc))
-        v_ideal  = 13.0 + (16.8 - 13.0) * math.pow(soc_clamped, 0.5)
-        v_actual = v_ideal - (current * self.INTERNAL_RESISTANCE)
-        return max(self.VOLTAGE_DEPLETED, v_actual)
+        v_ideal    = 13.0 + 3.8 * math.sqrt(soc_clamped)
+        v_terminal = v_ideal - (current * self.INTERNAL_RESISTANCE)
+        return v_terminal
 
     def _compute_ocv(self, soc: float) -> float:
         """Piecewise-linear OCV from the lookup table (legacy reference path)."""
         return float(np.interp(np.clip(soc, 0.0, 1.0), self._OCV_SOC, self._OCV_V))
 
-    def _classify_mode(self, state) -> str:
+    def compute_current_from_rpms(
+        self, motor_rpms: np.ndarray, max_rpm: float
+    ) -> float:
         """
-        Classify flight mode from a kinematic state vector (NED frame).
+        Compute total battery current from motor RPMs using the quadratic ECM.
 
-        State layout (from DroneGateEnv.world_states):
-            [0:3]  position  (x, y, z_NED)   — z < 0 when airborne
-            [3:6]  velocity  (vx, vy, vz)    — vz < 0 when ascending
-            [6:9]  attitude  (phi, theta, psi)
-            [9:12] ang. rate (p, q, r)
-            [12:]  motor speeds
+        Per-motor model:
+            I_m = MOTOR_IDLE_CURRENT + (MOTOR_MAX_CURRENT - MOTOR_IDLE_CURRENT)
+                  × (RPM_i / max_rpm)²
 
-        Priority ladder (highest-power mode wins ties):
-            Ground  → altitude ≤ _ALTITUDE_GROUND_THRESHOLD
-            Takeoff → airborne AND |vz| > _TAKEOFF_VZ_THRESHOLD
-            Move    → airborne AND √(vx²+vy²) > _MOVE_VXY_THRESHOLD
-            Hover   → airborne, low velocity
+        Total current:
+            I_total = FC_BASELINE_CURRENT + Σ I_m   (over all 6 motors)
+
+        Parameters
+        ----------
+        motor_rpms : np.ndarray
+            Array of per-motor RPM values (length = number of motors, typically 6).
+        max_rpm : float
+            Maximum achievable RPM for the motor set.
+
+        Returns
+        -------
+        float
+            Total battery current draw in Amperes.
         """
-        z_ned = float(state[2])
-        vx    = float(state[3])
-        vy    = float(state[4])
-        vz    = float(state[5])
+        rpm_ratio = np.clip(np.asarray(motor_rpms, dtype=float) / max_rpm, 0.0, 1.0)
+        motor_currents = (
+            self.MOTOR_IDLE_CURRENT
+            + (self.MOTOR_MAX_CURRENT - self.MOTOR_IDLE_CURRENT) * rpm_ratio ** 2
+        )
+        return float(self.FC_BASELINE_CURRENT + np.sum(motor_currents))
 
-        # altitude is positive when the drone is airborne (NED z is negative when up)
-        altitude  = -z_ned
-        horiz_spd = math.sqrt(vx * vx + vy * vy)
-
-        if altitude <= self._ALTITUDE_GROUND_THRESHOLD:
-            return "Ground"
-        if abs(vz) > self._TAKEOFF_VZ_THRESHOLD:
-            return "Takeoff"
-        if horiz_spd > self._MOVE_VXY_THRESHOLD:
-            return "Move"
-        return "Hover"
-
-    def step(self, dt: float, state_or_current) -> dict:
+    def step(self, dt: float, motor_rpms: np.ndarray, max_rpm: float) -> dict:
         """
-        Advance the battery model by one timestep.
-
-        Two calling conventions
-        -----------------------
-        Legacy (direct current draw):
-            step(dt, current_draw_amps: float)
-            The caller supplies the exact current in amps.  Useful for fixed-
-            profile test scripts (e.g. test_battery_model.py phase replays).
-            The mode field in the returned dict and history is empty string "".
-
-        Modal (kinematic state → automatic mode classification):
-            step(dt, kinematic_state: array-like)
-            Accepts the full drone state vector from DroneGateEnv.world_states[i]
-            and maps it to a FLIGHT_MODE_CURRENTS entry via _classify_mode().
+        Advance the battery model by one timestep using motor RPMs.
 
         Parameters
         ----------
         dt : float
             Timestep in seconds.  Matches DroneSimulator / DroneGateEnv dt
             (typically 0.005–0.01 s).
-        state_or_current : float | array-like
-            A scalar current [A] (legacy path) or the drone's 12+N element
-            kinematic state vector (modal path).
+        motor_rpms : np.ndarray
+            Per-motor RPM values, shape (n_motors,).  Typically 6 for the
+            295 g hexacopter.
+        max_rpm : float
+            Maximum achievable RPM used to normalise the quadratic curve.
 
         Returns
         -------
         dict with keys:
             time          — simulation time at the START of this step [s]
-            mode          — flight mode string ("Ground"/"Hover"/"Move"/"Takeoff"
-                            or "" for the legacy scalar path)
             soc           — State of Charge in [0, 1]
             voltage       — ECM terminal voltage [V]
-            current       — actual current drawn this step [A]
+            current       — total battery current [A]
             capacity_mah  — remaining capacity [mAh]
             power         — instantaneous power [W]
             total_energy_j — cumulative energy consumed [J]
         """
         t_now = self._total_time_s
 
-        # ── Dispatch on argument type ──────────────────────────────────── #
-        if isinstance(state_or_current, (int, float, np.floating)):
-            # Legacy path: caller provides explicit current [A]
-            mode    = ""
-            current = float(np.clip(state_or_current, 0.0, self.MAX_CURRENT))
-        else:
-            # Modal path: classify from kinematic state, look up current
-            mode    = self._classify_mode(state_or_current)
-            current = self.FLIGHT_MODE_CURRENTS[mode]
+        # ── RPM → Current ─────────────────────────────────────────────── #
+        # Per-motor quadratic: I_m = idle + (max - idle) × (RPM/max_rpm)²
+        # Total: FC baseline + Σ motor currents
+        current = self.compute_current_from_rpms(motor_rpms, max_rpm)
 
         # BMS cutoff — no further drain once the safety threshold is breached
         if self.is_depleted:
             current = 0.0
 
         # Capacity drain: Δ_Ah = I [A] × dt [s] / 3600 [s/h]
-        # Unit note: dt is in seconds; dividing by 3600 converts to hours so
-        # the product with current (Amps) yields capacity consumed in Amp-hours.
         delta_ah = current * (dt / 3600.0)
         self._capacity_remaining_ah = max(0.0, self._capacity_remaining_ah - delta_ah)
 
@@ -248,30 +231,35 @@ class LiPoBatteryModel:
             self._capacity_remaining_ah / self.CAPACITY_AH, 0.0, 1.0
         ))
 
-        # ECM terminal voltage (SoC curve + R_internal sag)
+        # ECM terminal voltage: V_ideal = 13.0 + 3.8 × √SoC,  V_term = V_ideal - I×R
         v_terminal = self._compute_ecm_voltage(self._soc, current)
 
-        # Instantaneous power [W] and cumulative energy [J]
+        # Instantaneous power [W] = V_terminal × I_total
         power_w = v_terminal * current
         self._total_energy_j += power_w * dt
 
         # Advance simulation clock
         self._total_time_s += dt
 
-        # Depletion check — evaluated AFTER update so the breaching step is recorded
-        if (self._soc < self.SOC_DEPLETION_THRESHOLD or
-                v_terminal < self.VOLTAGE_DEPLETION_THRESHOLD):
+        # ── Depletion check ───────────────────────────────────────────── #
+        # Evaluated AFTER update so the breaching step is still recorded.
+        # strict_voltage_kill=True  → SoC OR voltage cutoff  (NSGA-II eval)
+        # strict_voltage_kill=False → SoC cutoff ONLY         (PPO training)
+        soc_depleted = self._soc < self.SOC_DEPLETION_THRESHOLD
+        if self.strict_voltage_kill:
+            v_depleted = v_terminal < self.VOLTAGE_DEPLETION_THRESHOLD
+        else:
+            v_depleted = False
+        if soc_depleted or v_depleted:
             self.is_depleted = True
 
         # Persist for property accessors and RL observation cache
         self._last_voltage = v_terminal
         self._last_power   = power_w
-        self._last_mode    = mode
+        self._last_current = current
 
         # Append to per-step history
-        # capacity_mah: Ah × 1000 → mAh
         self._hist_time.append(t_now)
-        self._hist_mode.append(mode)
         self._hist_voltage.append(v_terminal)
         self._hist_soc.append(self._soc)
         self._hist_capacity_mah.append(self._capacity_remaining_ah * 1000.0)
@@ -281,7 +269,6 @@ class LiPoBatteryModel:
 
         return {
             'time':           t_now,
-            'mode':           mode,
             'soc':            self._soc,
             'voltage':        v_terminal,
             'current':        current,
@@ -305,9 +292,9 @@ class LiPoBatteryModel:
         return self._last_voltage
 
     @property
-    def mode(self) -> str:
-        """Last classified flight mode string."""
-        return self._last_mode
+    def current(self) -> float:
+        """Total battery current from the last step, in Amperes."""
+        return self._last_current
 
     # ------------------------------------------------------------------ #
     # Integration hooks                                                   #
@@ -346,17 +333,15 @@ class LiPoBatteryModel:
         Returns a pandas DataFrame if pandas is available, otherwise a plain
         dict of lists.  Keys / columns:
             'time'          — simulation time at step start [s]
-            'mode'          — flight mode string (or "" for legacy scalar calls)
             'voltage'       — ECM terminal voltage [V]
             'soc'           — State of Charge [0, 1]
             'capacity_mah'  — remaining capacity [mAh]
             'power'         — instantaneous power [W]
-            'current'       — current drawn [A]
+            'current'       — total battery current [A]
             'total_energy_j'— cumulative energy consumed [J]
         """
         data = {
             'time':           self._hist_time,
-            'mode':           self._hist_mode,
             'voltage':        self._hist_voltage,
             'soc':            self._hist_soc,
             'capacity_mah':   self._hist_capacity_mah,
@@ -375,9 +360,10 @@ class LiPoBatteryModel:
     def __repr__(self) -> str:
         return (
             f"LiPoBatteryModel({self.BATTERY_NAME}) | "
-            f"mode={self._last_mode!r} | "
+            f"strict_kill={self.strict_voltage_kill} | "
             f"SoC={self._soc*100:.1f}% | "
             f"V={self._last_voltage:.3f}V | "
+            f"I={self._last_current:.2f}A | "
             f"E={self._total_energy_j:.1f}J | "
             f"depleted={self.is_depleted}"
         )

@@ -109,6 +109,7 @@ class _SingleDroneEnv(gym.Env):
                 experiment_type=2,
                 penalty_weights={"sparse_weight": sparse_weight},
                 randomize_soc=True,
+                strict_voltage_kill=False,  # PPO training: allow voltage sags
                 **_kwargs,
             )
         else:
@@ -350,6 +351,7 @@ def train_power(
             experiment_type=2,
             penalty_weights={},       # no reward shaping during evaluation
             randomize_soc=False,      # full charge → deterministic 12-second window
+            strict_voltage_kill=True, # NSGA-II eval: strict physical voltage cutoff
             **_test_kwargs,
         )
     else:
@@ -362,17 +364,24 @@ def train_power(
 
     try:
         obs = test_env.reset()   # (1, obs_len) — 22 or 25 dims depending on class
-        battery = LiPoBatteryModel()
+        # strict_voltage_kill=True: the energy-tracking battery mirrors NSGA-II eval
+        # behaviour — voltage sags beyond 12.8 V count as a true depletion event.
+        battery = LiPoBatteryModel(strict_voltage_kill=True)
         battery.reset()
 
         dt = float(test_env.dt)
 
         for _ in range(max_steps):
-            # Capture kinematics BEFORE the physics step (matches PowerAwareDroneEnv timing)
-            pre_state = test_env.world_states[0].copy()
+            # Capture actions BEFORE the physics step so we can step the
+            # independent energy-tracking battery with the same normalised RPMs
+            # that the policy commanded (consistent with PowerAwareDroneEnv timing).
             actions, _ = model.predict(obs, deterministic=True)  # obs from step/reset
+            # actions shape: (1, n_motors) from VecEnv; squeeze for battery
+            motor_rpms = np.asarray(actions).flatten()
             obs, _rewards, _dones, infos = test_env.step(actions)
-            battery.step(dt, pre_state)
+            # Independent battery: strict_voltage_kill=True mirrors NSGA-II eval behaviour.
+            # max_rpm=1.0 matches the normalised action convention used in PowerAwareDroneEnv.
+            battery.step(dt, motor_rpms, max_rpm=1.0)
 
         num_gates_passed = int(infos[0]["num_gates_passed"][0])
         total_energy_j   = float(battery.get_total_energy_consumed())
