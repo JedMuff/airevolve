@@ -46,7 +46,7 @@ Directory layout (all paths relative to --results-dir)
 
 Example
 -------
-  source drone-project/bin/activate
+  source drone-venv/bin/activate
   python experimentation/run_exp_standard_ppo_power_ea.py
 
   # Dry-run (no actual training; prints config and exits):
