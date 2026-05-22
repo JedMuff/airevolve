@@ -15,22 +15,22 @@ def main():
     
     initial_pop, _ = generate_viable_initial_population(
         WrappedHandler(),
-        population_size=2,
+        population_size=8,
         is_indirect=False
     )
     
     fitness_function = BiObjectiveFitness(
         brain="rl",
-        hover_gradient=False,
-        per_individual_repair=False,
+        hover_gradient=True,
+        per_individual_repair=True,
         is_indirect=False,
         handler_class=config["handler_class"],
         handler_kwargs=config["handler_kwargs"],
         coordinate_system=config["coordinate_system"],
         brain_kwargs={
             "gate_cfg": "figure8",
-            "training_ts": 100000,
-            "num_envs": 1,
+            "training_ts": 1000000,
+            "num_envs": 16,
             "device": "cpu",
             "max_steps": 120,
             "sparse_weight": 0.002,
@@ -40,10 +40,10 @@ def main():
     
     all_individuals = evolve_nsga2(
         fitness_function=fitness_function,
-        population_size=2,
-        num_generations=1,
-        num_mutate=2,
-        num_crossover=0,
+        population_size=8,
+        num_generations=6,
+        num_mutate=4,
+        num_crossover=4,
         mutate_after_crossover=True,
         initial_population=initial_pop,
         log_dir="__data__/test_nsga2_ppo",

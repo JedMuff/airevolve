@@ -23,7 +23,7 @@ PROPELLER_LIBRARY = {
     "prop2": {
         "constants": [8.12e-08, 6.40e-10],  # [k_f, k_m] force and moment constants
         "wmax": 5000,                       # Maximum angular velocity (rad/s)
-        "mass": 0.0046,                     # Propeller + motor mass (kg)
+        "mass": 0.0102,                     # Propeller + motor mass (kg)
         # Borrowed from params_3inch (closest sysid set; prop2 has no real sysid).
         "w_min": 305.40,
         "k": 0.84,
@@ -41,7 +41,7 @@ PROPELLER_LIBRARY = {
         # to exactly reproduce params_3inch's k_w/k_r1..4.
         "constants": [1.80e-07, 2.89e-09],  # [k_f, k_m] (k_f = k_w·m_canonical, rough)
         "wmax": 4887,
-        "mass": 0.012,
+        "mass": 0.0102,
         "w_min": 305.40,
         "k": 0.84,
         "k_r_react": 1.14e-03,
@@ -52,7 +52,7 @@ PROPELLER_LIBRARY = {
     "prop4": {
         "constants": [7.24e-07, 8.20e-09],  # [k_f, k_m] force and moment constants
         "wmax": 3927,                       # Maximum angular velocity (rad/s)
-        "mass": 0.018,                      # Propeller + motor mass (kg)
+        "mass": 0.0102,                      # Propeller + motor mass (kg)
         # Borrowed from params_3inch (closest sysid set).
         "w_min": 305.40,
         "k": 0.84,
@@ -62,9 +62,9 @@ PROPELLER_LIBRARY = {
         "tau": 0.04,
     },
     "prop5": {
-        "constants": [1.08e-06, 1.22e-08],
-        "wmax": 3142,
-        "mass": 0.0196,
+        "constants": [1.442e-05, 2.155e-07],
+        "wmax": 2042,
+        "mass": 0.0102,
         # Sysid: params_5inch from optimal_quad_control_RL/randomization.py:5-10.
         "w_min": 238.49,
         "k": 0.95,
@@ -76,7 +76,7 @@ PROPELLER_LIBRARY = {
     "prop6": {
         "constants": [2.21e-06, 2.74e-08],
         "wmax": 2618,
-        "mass": 0.0252,
+        "mass": 0.0102,
         # Borrowed from params_5inch (closest sysid set).
         "w_min": 238.49,
         "k": 0.95,
@@ -86,9 +86,9 @@ PROPELLER_LIBRARY = {
         "tau": 0.04,
     },
     "prop7": {
-        "constants": [4.65e-06, 6.62e-08],
-        "wmax": 2244,
-        "mass": 0.046,
+        "constants": [2.5e-05, 3.5e-07],
+        "wmax": 1600,
+        "mass": 0.0102,
         # Borrowed from params_5inch (closest sysid set).
         "w_min": 238.49,
         "k": 0.95,
@@ -100,7 +100,7 @@ PROPELLER_LIBRARY = {
     "prop8": {
         "constants": [7.60e-06, 1.14e-07],
         "wmax": 1963,
-        "mass": 0.056,
+        "mass": 0.0102,
         # Borrowed from params_5inch (closest sysid set).
         "w_min": 238.49,
         "k": 0.95,
@@ -112,7 +112,7 @@ PROPELLER_LIBRARY = {
     "matched": {
         "constants": [1.076e-05, 1.61e-07],  # Matched to original framework (kTh = 1.076e-5)
         "wmax": 1963,
-        "mass": 0.300,  # Increased to match original 1.2kg total mass exactly
+        "mass": 0.0102,  # 8.6g motor + 1.6g prop
         # Borrowed from params_5inch (closest sysid set).
         "w_min": 238.49,
         "k": 0.95,

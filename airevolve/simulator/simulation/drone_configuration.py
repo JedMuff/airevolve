@@ -70,12 +70,16 @@ class DroneConfiguration:
     def _compute_mass_and_cg(self):
         """Compute total mass and center of gravity location."""
         # Total mass = controller + battery + per-prop (propeller + beam).
-        self.mass = CONTROLLER_MASS + BATTERY_MASS
+        structural_mass = CONTROLLER_MASS + BATTERY_MASS
         for prop in self.propellers:
             beam_length = norm(np.array(prop["loc"]))
-            self.mass += prop["mass"] + BEAM_DENSITY * beam_length
+            structural_mass += prop["mass"] + BEAM_DENSITY * beam_length
 
-        # Center of gravity. Controller sits at origin, battery at BATTERY_POS,
+        # Set total mass to exactly 295g as requested
+        self.mass = 0.295
+        self.extra_mass = max(0.0, self.mass - structural_mass)
+
+        # Center of gravity. Controller and extra mass sit at origin, battery at BATTERY_POS,
         # propellers at their loc, beams at their midpoint.
         self.cg = (BATTERY_MASS / self.mass) * BATTERY_POS
         for prop in self.propellers:
@@ -104,6 +108,14 @@ class DroneConfiguration:
         self.Ixy = -CONTROLLER_MASS * self.cg[0] * self.cg[1]
         self.Ixz = -CONTROLLER_MASS * self.cg[0] * self.cg[2]
         self.Iyz = -CONTROLLER_MASS * self.cg[1] * self.cg[2]
+        
+        # Add extra mass contribution (treated as point mass at origin)
+        self.Ix += self.extra_mass * (self.cg[1]**2 + self.cg[2]**2)
+        self.Iy += self.extra_mass * (self.cg[0]**2 + self.cg[2]**2)
+        self.Iz += self.extra_mass * (self.cg[0]**2 + self.cg[1]**2)
+        self.Ixy -= self.extra_mass * self.cg[0] * self.cg[1]
+        self.Ixz -= self.extra_mass * self.cg[0] * self.cg[2]
+        self.Iyz -= self.extra_mass * self.cg[1] * self.cg[2]
 
         # Battery contribution (treated as a point mass at BATTERY_POS).
         r_bat = BATTERY_POS - self.cg
