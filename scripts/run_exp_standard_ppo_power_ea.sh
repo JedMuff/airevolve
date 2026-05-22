@@ -35,8 +35,8 @@
 
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}") /.." && pwd)"
-VENV_ACTIVATE="drone-venv/bin/activate"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VENV_ACTIVATE="drone-project/bin/activate"
 RUNNER="${REPO_ROOT}/experimentation/run_exp_standard_ppo_power_ea.py"
 RESULTS_DIR="${REPO_ROOT}/results"
 LOG_DIR="${REPO_ROOT}/logs/exp_standard_ppo_power_ea"
@@ -65,13 +65,15 @@ while [[ $# -gt 0 ]]; do
         --population-size)       POPULATION_SIZE="$2"; shift         ;;
         --num-workers)           NUM_WORKERS="$2";    shift          ;;
         --num-envs)              NUM_ENVS="$2";       shift          ;;
-        --genome)                GENOME="$2";          shift          ;;
-        --gate-cfg)              GATE_CFG="$2";        shift          ;;
+        --genome)                GENOME="$2";         shift          ;;
+        --gate-cfg)              GATE_CFG="$2";       shift          ;;
         --results-dir)           RESULTS_DIR="$2";    shift          ;;
         --run-id)                EXTRA_ARGS+=("--run-id" "$2"); shift ;;
         *)                       EXTRA_ARGS+=("$1")                   ;;
     esac
-    shift
+    if [[ $# -gt 0 ]]; then
+        shift
+    fi
 done
 
 mkdir -p "${LOG_DIR}"
