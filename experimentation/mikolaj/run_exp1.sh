@@ -42,10 +42,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="${REPO_ROOT}/examples/learning/run_power_experiment.py"
 
 # ── Weights to sweep ──────────────────────────────────────────────────────────
-WEIGHTS=(0.0 0.00001 0.00005 0.0001 0.0002 0.0003 0.0004 0.0005 0.0006 0.0007 0.0008 0.0009 0.001)
+WEIGHTS=(0.001 0.002 0.003 0.004)
 
 echo "========================================================================"
-echo "  Experiment 1 — Dense Timestep Penalty"
+echo "  Experiment 2 — Sparse Episodic Penalty"
 echo "  Sweep: ${WEIGHTS[*]}"
 echo "  Runs:  ${#WEIGHTS[@]}  ×  ${TOTAL_STEPS} steps  ×  ${NUM_ENVS} envs"
 echo "  GPU:   ${DEVICE}   |   Repo: ${REPO_ROOT}"
@@ -60,15 +60,15 @@ RUN_NUM=0
 
 for W in "${WEIGHTS[@]}"; do
     RUN_NUM=$((RUN_NUM + 1))
-    RUN_DIR="${BASE_DIR}/dense_w${W}"
+    RUN_DIR="${BASE_DIR}/sparse_w${W}"
     echo "--------------------------------------------------------------------"
-    echo "  Run ${RUN_NUM}/${TOTAL_RUNS}  |  dense_weight=${W}  |  ${RUN_DIR}"
+    echo "  Run ${RUN_NUM}/${TOTAL_RUNS}  |  sparse_weight=${W}  |  ${RUN_DIR}"
     echo "  Started: $(date)"
     echo "--------------------------------------------------------------------"
 
     python "${SCRIPT}" \
-        --experiment    1       \
-        --dense-weight  "${W}"  \
+        --experiment    2       \
+        --sparse-weight "${W}"  \
         --num-envs      "${NUM_ENVS}"   \
         --total-steps   "${TOTAL_STEPS}" \
         --max-steps     "${MAX_STEPS}"  \

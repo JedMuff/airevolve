@@ -103,6 +103,8 @@ def parse_arguments():
     p.add_argument("--training-timesteps", type=float, default=1e6)
     p.add_argument("--num-envs",           type=int,   default=4)
     p.add_argument("--device",             default="cuda:0")
+    p.add_argument("--sparse-weight",      type=float, default=0.002)
+    p.add_argument("--no-power-env",       action="store_true")
 
     args = p.parse_args()
 
@@ -129,6 +131,8 @@ def build_fitness(args, config):
             "num_envs":       args.num_envs,
             "device":         args.device,
             "max_steps":      max_steps,
+            "sparse_weight":  args.sparse_weight,
+            "use_power_env":  not args.no_power_env,
         },
     )
 

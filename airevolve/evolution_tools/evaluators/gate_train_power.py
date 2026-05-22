@@ -82,8 +82,8 @@ class _SingleDroneEnv(gym.Env):
         z_bounds: np.ndarray,
         device: str,
         max_steps: int,
-        experiment_type: int,
-        penalty_weights: dict,
+        sparse_weight: float,
+        use_power_env: bool,
     ) -> None:
         super().__init__()
 
@@ -104,10 +104,10 @@ class _SingleDroneEnv(gym.Env):
             device=device,
             max_steps=max_steps,
         )
-        if experiment_type in (1, 2):
+        if use_power_env:
             self._env = PowerAwareDroneEnv(
-                experiment_type=experiment_type,
-                penalty_weights=penalty_weights,
+                experiment_type=2,
+                penalty_weights={"sparse_weight": sparse_weight},
                 randomize_soc=True,
                 **_kwargs,
             )
@@ -144,8 +144,8 @@ def _env_init(
     z_bounds,
     device,
     max_steps,
-    experiment_type,
-    penalty_weights,
+    sparse_weight,
+    use_power_env,
 ):
     """Top-level (non-closure) factory — picklable for 'spawn' start method."""
     return _SingleDroneEnv(
@@ -158,8 +158,8 @@ def _env_init(
         z_bounds=z_bounds,
         device=device,
         max_steps=max_steps,
-        experiment_type=experiment_type,
-        penalty_weights=penalty_weights,
+        sparse_weight=sparse_weight,
+        use_power_env=use_power_env,
     )
 
 
@@ -179,8 +179,8 @@ def train_power(
     device: str = "cuda:0",
     num=None,
     max_steps: int = 1200,
-    experiment_type: int = 0,
-    penalty_weights: dict = None,
+    sparse_weight: float = 0.002,
+    use_power_env: bool = True,
 ):
     """Train a PPO policy for gate racing and return bi-objective fitness.
 
@@ -242,8 +242,8 @@ def train_power(
         z_bounds=z_bounds,
         device=device,
         max_steps=max_steps,
-        experiment_type=experiment_type,
-        penalty_weights=penalty_weights or {},
+        sparse_weight=sparse_weight,
+        use_power_env=use_power_env,
     )
     env = SubprocVecEnv(
         [_factory] * num_envs,
@@ -345,9 +345,9 @@ def train_power(
         device=device,
         max_steps=max_steps,
     )
-    if experiment_type in (1, 2):
+    if use_power_env:
         test_env = PowerAwareDroneEnv(
-            experiment_type=experiment_type,
+            experiment_type=2,
             penalty_weights={},       # no reward shaping during evaluation
             randomize_soc=False,      # full charge → deterministic 12-second window
             **_test_kwargs,
@@ -391,8 +391,8 @@ def evaluate_individual(
     device: str = "cuda:0",
     num=None,
     max_steps: int = 1200,
-    experiment_type: int = 0,
-    penalty_weights: dict = None,
+    sparse_weight: float = 0.002,
+    use_power_env: bool = True,
 ) -> tuple:
     """Hover-check, train, and evaluate one morphology.
 
@@ -451,8 +451,8 @@ def evaluate_individual(
         device=device,
         num=num,
         max_steps=max_steps,
-        experiment_type=experiment_type,
-        penalty_weights=penalty_weights,
+        sparse_weight=sparse_weight,
+        use_power_env=use_power_env,
     )
 
     # Post-training morphology plot
@@ -493,20 +493,12 @@ if __name__ == "__main__":
     parser.add_argument("--device",             default="cuda:0")
     parser.add_argument("--num",                default=None)
     parser.add_argument("--max_steps",        default=1200,  type=int)
-    parser.add_argument("--experiment_type",  default=0,     type=int,
-                        help="0=baseline, 1=dense, 2=sparse")
-    parser.add_argument("--dense_weight",     default=0.0,   type=float)
-    parser.add_argument("--sparse_weight",    default=0.0,   type=float)
+    parser.add_argument("--sparse_weight",    default=0.002, type=float)
+    parser.add_argument("--no_power_env",     action="store_true")
     args = parser.parse_args()
 
     individual = np.load(args.filename + "/individual.npy", allow_pickle=True).astype(np.float32)
     num        = int(args.num) if args.num is not None else None
-
-    penalty_weights: dict = {}
-    if args.experiment_type == 1:
-        penalty_weights = {"dense_weight": args.dense_weight}
-    elif args.experiment_type == 2:
-        penalty_weights = {"sparse_weight": args.sparse_weight}
 
     gates, energy = evaluate_individual(
         individual,
@@ -517,8 +509,8 @@ if __name__ == "__main__":
         args.device,
         num=num,
         max_steps=args.max_steps,
-        experiment_type=args.experiment_type,
-        penalty_weights=penalty_weights,
+        sparse_weight=args.sparse_weight,
+        use_power_env=not args.no_power_env,
     )
 
     # Subprocess contract: print "gates energy_j" on stdout

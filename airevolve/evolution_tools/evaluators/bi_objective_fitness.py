@@ -49,8 +49,8 @@ class BiObjectiveFitness:
         num_envs         : int  — parallel envs during training.
         device           : str  — torch device string.
         max_steps        : int  — evaluation length in env steps (default 1200 → 12 s).
-        experiment_type  : int  — 0=baseline, 1=dense, 2=sparse (default 0).
-        penalty_weights  : dict — e.g. {"dense_weight": 1e-5} or {"sparse_weight": 1e-3}.
+        sparse_weight    : float — Penalty weight for episodic energy.
+        use_power_env    : bool  — Whether to use PowerAwareDroneEnv.
     """
 
     def __init__(
@@ -124,8 +124,8 @@ class BiObjectiveFitness:
             self.brain_kwargs["gate_cfg"],
             self.brain_kwargs["device"],
             max_steps=self.brain_kwargs.get("max_steps", 1200),
-            experiment_type=self.brain_kwargs.get("experiment_type", 0),
-            penalty_weights=self.brain_kwargs.get("penalty_weights", None),
+            sparse_weight=self.brain_kwargs.get("sparse_weight", 0.002),
+            use_power_env=self.brain_kwargs.get("use_power_env", True),
         )
 
     # ── Internal helpers ──────────────────────────────────────────────────────
