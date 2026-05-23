@@ -142,6 +142,10 @@ def parse_args() -> argparse.Namespace:
                    help="SubprocVecEnv workers per individual PPO training run.")
     p.add_argument("--device",             default="cpu",
                    help="PyTorch device for PPO (cpu recommended for Threadripper).")
+    p.add_argument("--sparse-weight",      type=float, default=0.0,
+                   help="Energy penalty weight for RL training.")
+    p.add_argument("--overdraw-weight",    type=float, default=0.0,
+                   help="Current overdraw penalty weight for RL training.")
 
     p.add_argument("--genome",    choices=["spherical", "cartesian"], default="spherical")
     p.add_argument("--min-narms", type=int, default=6)
@@ -176,8 +180,8 @@ def _save_config(args: argparse.Namespace, results_dir: Path) -> None:
     snapshot: dict[str, Any] = vars(args).copy()
     snapshot["experiment_name"]       = _EXPERIMENT_NAME
     snapshot["timestamp"]             = datetime.now().isoformat()
-    snapshot["rl_sparse_weight"]      = 0.0
-    snapshot["rl_overdraw_weight"]    = 0.0
+    snapshot["rl_sparse_weight"]      = args.sparse_weight
+    snapshot["rl_overdraw_weight"]    = args.overdraw_weight
     snapshot["rl_strict_kill"]        = False
     snapshot["ea_strict_kill"]        = True
     snapshot["ea_use_power_env"]      = False
@@ -203,8 +207,8 @@ def _build_fitness(args: argparse.Namespace, config: dict) -> BiObjectiveFitness
             "num_envs":               args.num_envs,
             "device":                 args.device,
             "max_steps":              max_steps,
-            "sparse_weight":          0.0,
-            "overdraw_penalty_weight": 0.0,
+            "sparse_weight":          args.sparse_weight,
+            "overdraw_penalty_weight": args.overdraw_weight,
             "use_power_env":          False,
         },
     )
@@ -417,9 +421,9 @@ def _print_header(args: argparse.Namespace, results_dir: Path) -> None:
     print(f"  PPO num_envs/indiv  : {args.num_envs}")
     print(f"  PPO device          : {args.device}")
     print()
-    print("  ── RL Training (non-power-aware) ─────────────────────────────────")
-    print("    sparse_weight          = 0.0  (no energy penalty during training)")
-    print("    overdraw_penalty_weight= 0.0  (no current-limit penalty)")
+    print("  ── RL Training (non-power-aware/power-aware depending on sparse_weight) ──")
+    print(f"    sparse_weight          = {args.sparse_weight}")
+    print(f"    overdraw_penalty_weight= {args.overdraw_weight}")
     print("    strict_voltage_kill    = False (voltage sags allowed)")
     print("    use_power_env          = False (standard DroneGateEnv)")
     print()

@@ -53,6 +53,8 @@ MIN_NARMS=6
 MAX_NARMS=6
 INIT_POP_MODE="random"
 DRY_RUN=false
+SPARSE_WEIGHT=0.0
+OVERDRAW_WEIGHT=0.0
 
 EXTRA_ARGS=()
 
@@ -68,6 +70,8 @@ while [[ $# -gt 0 ]]; do
         --genome)                GENOME="$2";         shift          ;;
         --gate-cfg)              GATE_CFG="$2";       shift          ;;
         --results-dir)           RESULTS_DIR="$2";    shift          ;;
+        --sparse-weight)         SPARSE_WEIGHT="$2";  shift          ;;
+        --overdraw-weight)       OVERDRAW_WEIGHT="$2"; shift         ;;
         --run-id)                EXTRA_ARGS+=("--run-id" "$2"); shift ;;
         *)                       EXTRA_ARGS+=("$1")                   ;;
     esac
@@ -94,7 +98,7 @@ echo "  gate_cfg           : ${GATE_CFG}"
 echo "  results_dir        : ${RESULTS_DIR}"
 echo "  log_file           : ${LOG_FILE}"
 echo ""
-echo "  RL flags  : sparse_weight=0.0  overdraw_weight=0.0  strict_kill=False"
+echo "  RL flags  : sparse_weight=${SPARSE_WEIGHT}  overdraw_weight=${OVERDRAW_WEIGHT}  strict_kill=False"
 echo "  EA flags  : strict_kill=True   fitness=(gates↑, energy↓)"
 echo "════════════════════════════════════════════════════════════════════════"
 
@@ -112,6 +116,8 @@ CMD=(
     --max-narms           "${MAX_NARMS}"
     --init-pop-mode       "${INIT_POP_MODE}"
     --results-dir         "${RESULTS_DIR}"
+    --sparse-weight       "${SPARSE_WEIGHT}"
+    --overdraw-weight     "${OVERDRAW_WEIGHT}"
     "${EXTRA_ARGS[@]}"
 )
 
