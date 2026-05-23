@@ -136,7 +136,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--population-size",    type=int,   default=32)
     p.add_argument("--num-workers",        type=int,   default=32,
                    help="Parallel EA workers (one per physical CPU core).")
-    p.add_argument("--num-mutate",         type=int,   default=None,
+    p.add_argument("--num-mutate",         type=int,   default=32,
                    help="Offspring per generation (default = population_size).")
     p.add_argument("--num-crossover",      type=int,   default=0)
     p.add_argument("--num-envs",           type=int,   default=4,
