@@ -26,19 +26,15 @@ mkdir -p ./logs
 mkdir -p ./results
 
 if [ "$SLURM_ARRAY_TASK_ID" -eq 0 ]; then
-    echo "Running standard experiment (sparse_weight=0.0, overdraw_weight=0.0)"
+    echo "Running STANDARD PPO experiment (no energy penalties in RL training)"
     bash scripts/run_exp_standard_ppo_power_ea.sh \
-        --sparse-weight 0.0 \
-        --overdraw-weight 0.0 \
         --num-workers 5 \
         --results-dir ./results \
-        --run-id exp_standard_ppo_power_ea_standard
+        --run-id exp_standard_ppo_power_ea
 elif [ "$SLURM_ARRAY_TASK_ID" -eq 1 ]; then
-    echo "Running penalty experiment (sparse_weight=0.004, overdraw_weight=0.01)"
-    bash scripts/run_exp_standard_ppo_power_ea.sh \
-        --sparse-weight 0.004 \
-        --overdraw-weight 0.01 \
+    echo "Running POWER-AWARE PPO experiment (sparse_weight=0.004, overdraw_weight=0.01)"
+    bash scripts/run_exp_power_ppo_power_ea.sh \
         --num-workers 5 \
         --results-dir ./results \
-        --run-id exp_standard_ppo_power_ea_penalty_0.004
+        --run-id exp_power_ppo_power_ea
 fi

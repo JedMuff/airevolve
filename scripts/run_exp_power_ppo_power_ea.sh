@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # =============================================================================
-# run_exp_standard_ppo_power_ea.sh
+# run_exp_power_ppo_power_ea.sh
 #
-# Launch script for: Standard-PPO Training + Power-Aware NSGA-II Evaluation
+# Launch script for: Power-Aware PPO Training + Power-Aware NSGA-II Evaluation
 # Hardware target  : AMD Threadripper Pro 32c/64t, 128 GB RAM
 #
 # Architecture
 # ------------
-#   RL  : Standard DroneGateEnv — no power penalties, no voltage kill.
-#         sparse_weight=0.0, overdraw_weight=0.0, strict_voltage_kill=False.
+#   RL  : PowerAwareDroneEnv — with energy penalties in the reward.
+#         sparse_weight=0.004, overdraw_weight=0.01, strict_voltage_kill=False.
 #   EA  : Power-aware bi-objective NSGA-II.
 #         Fitness = (gates_passed ↑, total_energy_j ↓).
 #         LiPoBatteryModel(strict_voltage_kill=True) in the 12-second eval.
@@ -16,13 +16,13 @@
 # Usage
 # -----
 #   # Full run (default hyperparameters):
-#   bash scripts/run_exp_standard_ppo_power_ea.sh
+#   bash scripts/run_exp_power_ppo_power_ea.sh
 #
 #   # Dry-run (validate config, no training):
-#   bash scripts/run_exp_standard_ppo_power_ea.sh --dry-run
+#   bash scripts/run_exp_power_ppo_power_ea.sh --dry-run
 #
 #   # Override any hyperparameter:
-#   bash scripts/run_exp_standard_ppo_power_ea.sh \
+#   bash scripts/run_exp_power_ppo_power_ea.sh \
 #       --population-size 16 --generations 8 \
 #       --training-timesteps 500000 --num-workers 8
 #
@@ -37,9 +37,9 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_ACTIVATE="drone-venv/bin/activate"
-RUNNER="${REPO_ROOT}/experimentation/run_exp_standard_ppo_power_ea.py"
+RUNNER="${REPO_ROOT}/experimentation/run_exp_power_ppo_power_ea.py"
 RESULTS_DIR="${REPO_ROOT}/results"
-LOG_DIR="${REPO_ROOT}/logs/exp_standard_ppo_power_ea"
+LOG_DIR="${REPO_ROOT}/logs/exp_power_ppo_power_ea"
 
 TRAINING_TIMESTEPS=10000000
 GENERATIONS=32
@@ -53,6 +53,8 @@ MIN_NARMS=6
 MAX_NARMS=6
 INIT_POP_MODE="random"
 DRY_RUN=false
+SPARSE_WEIGHT=0.004
+OVERDRAW_WEIGHT=0.01
 
 EXTRA_ARGS=()
 
@@ -68,6 +70,8 @@ while [[ $# -gt 0 ]]; do
         --genome)                GENOME="$2";         shift          ;;
         --gate-cfg)              GATE_CFG="$2";       shift          ;;
         --results-dir)           RESULTS_DIR="$2";    shift          ;;
+        --sparse-weight)         SPARSE_WEIGHT="$2";  shift          ;;
+        --overdraw-weight)       OVERDRAW_WEIGHT="$2"; shift         ;;
         --run-id)                EXTRA_ARGS+=("--run-id" "$2"); shift ;;
         *)                       EXTRA_ARGS+=("$1")                   ;;
     esac
@@ -81,12 +85,12 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 LOG_FILE="${LOG_DIR}/run_${TIMESTAMP}.log"
 
 echo "════════════════════════════════════════════════════════════════════════"
-echo " Experiment: Standard-PPO + Power-Aware NSGA-II"
+echo " Experiment: Power-Aware PPO + Power-Aware NSGA-II"
 echo "════════════════════════════════════════════════════════════════════════"
 echo "  training_timesteps : ${TRAINING_TIMESTEPS}"
 echo "  generations        : ${GENERATIONS}"
 echo "  population_size    : ${POPULATION_SIZE}"
-echo "  num_workers (EA)   : ${NUM_WORKERS}  (saturating 32 physical cores)"
+echo "  num_workers (EA)   : ${NUM_WORKERS}"
 echo "  num_envs (PPO)     : ${NUM_ENVS}"
 echo "  device             : ${DEVICE}"
 echo "  genome             : ${GENOME}"
@@ -94,7 +98,7 @@ echo "  gate_cfg           : ${GATE_CFG}"
 echo "  results_dir        : ${RESULTS_DIR}"
 echo "  log_file           : ${LOG_FILE}"
 echo ""
-echo "  RL flags  : sparse_weight=0.0  overdraw_weight=0.0  strict_kill=False"
+echo "  RL flags  : sparse_weight=${SPARSE_WEIGHT}  overdraw_weight=${OVERDRAW_WEIGHT}  strict_kill=False  use_power_env=True"
 echo "  EA flags  : strict_kill=True   fitness=(gates↑, energy↓)"
 echo "════════════════════════════════════════════════════════════════════════"
 
@@ -112,6 +116,8 @@ CMD=(
     --max-narms           "${MAX_NARMS}"
     --init-pop-mode       "${INIT_POP_MODE}"
     --results-dir         "${RESULTS_DIR}"
+    --sparse-weight       "${SPARSE_WEIGHT}"
+    --overdraw-weight     "${OVERDRAW_WEIGHT}"
     "${EXTRA_ARGS[@]}"
 )
 
@@ -141,7 +147,7 @@ else
     echo "════════════════════════════════════════════════════════════════════════"
     if [[ "${EXIT_CODE}" -eq 0 ]]; then
         echo " Experiment COMPLETE."
-        echo " Results → ${RESULTS_DIR}/exp_standard_ppo_power_ea/"
+        echo " Results → ${RESULTS_DIR}/exp_power_ppo_power_ea/"
     else
         echo " Experiment FAILED with exit code ${EXIT_CODE}."
         echo " Log      → ${LOG_FILE}"

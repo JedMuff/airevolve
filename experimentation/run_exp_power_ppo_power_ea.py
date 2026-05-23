@@ -1,10 +1,11 @@
-"""Experiment: Standard-PPO training + Power-Aware NSGA-II evaluation.
+"""Experiment: Power-Aware PPO training + Power-Aware NSGA-II evaluation.
 
 Architecture
 ------------
-  RL Training  : Standard DroneGateEnv (no power penalties).
-                 PPO optimises purely for gate-passing and distance-to-gate.
-                 strict_voltage_kill=False, sparse_weight=0.0, overdraw_weight=0.0.
+  RL Training  : PowerAwareDroneEnv with energy penalties in the reward.
+                 PPO optimises for gate-passing WITH energy awareness.
+                 sparse_weight=0.004, overdraw_penalty_weight=0.01,
+                 strict_voltage_kill=False, use_power_env=True.
 
   EA Evaluation: Bi-objective NSGA-II with a standalone LiPoBatteryModel
                  (strict_voltage_kill=True).  Fitness returned to the EA is
@@ -18,7 +19,7 @@ Hardware target: AMD Threadripper Pro 32c/64t, 128 GB RAM.
 
 Directory layout (all paths relative to --results-dir)
 -------------------------------------------------------
-  results/exp_standard_ppo_power_ea/
+  results/exp_power_ppo_power_ea/
     config.json                        # Experiment hyperparameters snapshot
     init_pop_stats.json                # Initial population generation statistics
     evolution_data.csv                 # Every individual, every generation
@@ -47,13 +48,13 @@ Directory layout (all paths relative to --results-dir)
 Example
 -------
   source drone-venv/bin/activate
-  python experimentation/run_exp_standard_ppo_power_ea.py
+  python experimentation/run_exp_power_ppo_power_ea.py
 
   # Dry-run (no actual training; prints config and exits):
-  python experimentation/run_exp_standard_ppo_power_ea.py --dry-run
+  python experimentation/run_exp_power_ppo_power_ea.py --dry-run
 
   # Override key hyperparameters:
-  python experimentation/run_exp_standard_ppo_power_ea.py \\
+  python experimentation/run_exp_power_ppo_power_ea.py \\
       --population-size 16 --generations 8 --training-timesteps 500000 \\
       --num-workers 8 --results-dir ./test_results
 """
@@ -119,13 +120,13 @@ class NonDaemonPool(multiprocessing.pool.Pool):
         return proc
 
 
-_EXPERIMENT_NAME = "exp_standard_ppo_power_ea"
+_EXPERIMENT_NAME = "exp_power_ppo_power_ea"
 _SNAPSHOT_GENS   = {1, 5, 10, 16, 20, 24, 26, 28, 32}
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Standard-PPO + Power-Aware NSGA-II experiment runner",
+        description="Power-Aware PPO + Power-Aware NSGA-II experiment runner",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -142,6 +143,10 @@ def parse_args() -> argparse.Namespace:
                    help="SubprocVecEnv workers per individual PPO training run.")
     p.add_argument("--device",             default="cpu",
                    help="PyTorch device for PPO (cpu recommended for Threadripper).")
+    p.add_argument("--sparse-weight",      type=float, default=0.004,
+                   help="End-of-episode energy penalty weight for RL training.")
+    p.add_argument("--overdraw-weight",    type=float, default=0.01,
+                   help="Per-step current overdraw penalty weight for RL training.")
 
     p.add_argument("--genome",    choices=["spherical", "cartesian"], default="spherical")
     p.add_argument("--min-narms", type=int, default=6)
@@ -176,11 +181,11 @@ def _save_config(args: argparse.Namespace, results_dir: Path) -> None:
     snapshot: dict[str, Any] = vars(args).copy()
     snapshot["experiment_name"]       = _EXPERIMENT_NAME
     snapshot["timestamp"]             = datetime.now().isoformat()
-    snapshot["rl_sparse_weight"]      = 0.0
-    snapshot["rl_overdraw_weight"]    = 0.0
+    snapshot["rl_sparse_weight"]      = args.sparse_weight
+    snapshot["rl_overdraw_weight"]    = args.overdraw_weight
     snapshot["rl_strict_kill"]        = False
     snapshot["ea_strict_kill"]        = True
-    snapshot["ea_use_power_env"]      = False
+    snapshot["ea_use_power_env"]      = True
     snapshot["ea_fitness"]            = "(gates_passed, total_energy_j)"
     with open(results_dir / "config.json", "w") as fh:
         json.dump(snapshot, fh, indent=2)
@@ -203,9 +208,9 @@ def _build_fitness(args: argparse.Namespace, config: dict) -> BiObjectiveFitness
             "num_envs":               args.num_envs,
             "device":                 args.device,
             "max_steps":              max_steps,
-            "sparse_weight":          0.0,
-            "overdraw_penalty_weight": 0.0,
-            "use_power_env":          False,
+            "sparse_weight":          args.sparse_weight,
+            "overdraw_penalty_weight": args.overdraw_weight,
+            "use_power_env":          True,
         },
     )
 
@@ -405,7 +410,7 @@ def _plot_objectives_over_generations(df, results_dir: Path,
 def _print_header(args: argparse.Namespace, results_dir: Path) -> None:
     sep = "=" * 80
     print(sep)
-    print(" Experiment: Standard-PPO Training + Power-Aware NSGA-II Evaluation")
+    print(" Experiment: Power-Aware PPO Training + Power-Aware NSGA-II Evaluation")
     print(sep)
     print(f"  Results directory   : {results_dir}")
     print(f"  Genome encoding     : {args.genome}")
@@ -413,15 +418,15 @@ def _print_header(args: argparse.Namespace, results_dir: Path) -> None:
     print(f"  Population size     : {args.population_size}")
     print(f"  Generations         : {args.generations}")
     print(f"  Training timesteps  : {int(args.training_timesteps):,}")
-    print(f"  EA parallel workers : {args.num_workers}  (32 physical cores saturated)")
+    print(f"  EA parallel workers : {args.num_workers}")
     print(f"  PPO num_envs/indiv  : {args.num_envs}")
     print(f"  PPO device          : {args.device}")
     print()
-    print("  ── RL Training (non-power-aware) ─────────────────────────────────")
-    print("    sparse_weight          = 0.0  (no energy penalty during training)")
-    print("    overdraw_penalty_weight= 0.0  (no current-limit penalty)")
+    print("  ── RL Training (power-aware) ─────────────────────────────────────")
+    print(f"    sparse_weight          = {args.sparse_weight}  (end-of-episode energy penalty)")
+    print(f"    overdraw_penalty_weight= {args.overdraw_weight}  (per-step current-limit penalty)")
     print("    strict_voltage_kill    = False (voltage sags allowed)")
-    print("    use_power_env          = False (standard DroneGateEnv)")
+    print("    use_power_env          = True  (PowerAwareDroneEnv)")
     print()
     print("  ── EA Evaluation (power-aware) ───────────────────────────────────")
     print("    LiPoBatteryModel(strict_voltage_kill=True)")
