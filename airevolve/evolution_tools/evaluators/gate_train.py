@@ -385,7 +385,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Load Bf and Bm from directory
-    individual = np.load(args.filename + "/individual.npy", allow_pickle=True)
+    try:
+        individual = np.load(args.filename + "/individual.npy", allow_pickle=True)
+    except FileNotFoundError:
+        individual = np.load(args.filename + "/genome.npy", allow_pickle=True)
     individual = individual.astype(np.float32)
 
     if args.num is None:
