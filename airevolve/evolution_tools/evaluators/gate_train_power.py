@@ -559,10 +559,15 @@ if __name__ == "__main__":
     parser.add_argument("--num",                default=None)
     parser.add_argument("--max_steps",        default=1200,  type=int)
     parser.add_argument("--sparse_weight",    default=0.002, type=float)
+    parser.add_argument("--overdraw_weight",  default=0.0,   type=float)
     parser.add_argument("--no_power_env",     action="store_true")
     args = parser.parse_args()
 
-    individual = np.load(args.filename + "/individual.npy", allow_pickle=True).astype(np.float32)
+    try:
+        individual = np.load(args.filename + "/individual.npy", allow_pickle=True)
+    except FileNotFoundError:
+        individual = np.load(args.filename + "/genome.npy", allow_pickle=True)
+    individual = individual.astype(np.float32)
     num        = int(args.num) if args.num is not None else None
 
     gates, energy = evaluate_individual(
@@ -576,6 +581,7 @@ if __name__ == "__main__":
         max_steps=args.max_steps,
         sparse_weight=args.sparse_weight,
         use_power_env=not args.no_power_env,
+        overdraw_penalty_weight=args.overdraw_weight,
     )
 
     # Subprocess contract: print "gates energy_j" on stdout
