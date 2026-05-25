@@ -17,7 +17,7 @@ from stable_baselines3.common.logger import configure
 # Suppress the render_mode warning from stable_baselines3
 warnings.filterwarnings("ignore", message="The `render_mode` attribute is not defined in your environment")
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
 from airevolve.evolution_tools.evaluators.drone_gate_env import DroneGateEnv
 from airevolve.simulator.visualization.animation import view as animation_view
