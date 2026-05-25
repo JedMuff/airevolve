@@ -24,7 +24,7 @@ def main():
     print("=" * 70)
     print("Generate STL Files from Evolved Drone Genome")
     print("=" * 70)
-
+    '''
     # ========================================================================
     # OPTION 1: Generate a random individual (for demonstration)
     # ========================================================================
@@ -56,17 +56,17 @@ def main():
         print(f"    motor_rotation: {np.degrees(arm[3]):.1f}°")
         print(f"    motor_pitch: {np.degrees(arm[4]):.1f}°")
         print(f"    direction: {int(arm[5])}")
-
+    '''
     # ========================================================================
     # OPTION 2: Load an evolved individual from file (commented out)
     # ========================================================================
 
     # Uncomment and modify this section to load your evolved individual:
-    """
+
     print("\n[OPTION 2] Loading evolved individual from file...")
 
     # Load genome from numpy file
-    genome = np.load("path/to/your/evolved_genome.npy")
+    genome = np.load("/Users/mikolajduchlinski/Desktop/results_folder_update/standard_ppo_power_ea/best_run_standard_ppo_power_ea/individual_0903/genome.npy")
 
     # Create handler with the loaded genome
     handler = SphericalAngularDroneGenomeHandler(
@@ -76,7 +76,6 @@ def main():
     )
 
     print(f"Loaded evolved drone with {handler.get_arm_count()} arms")
-    """
 
     # ========================================================================
     # Generate STL Files
