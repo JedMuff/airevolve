@@ -3,6 +3,12 @@ import copy
 
 from dronehover.bodies.custom_bodies import Custombody
 from dronehover.optimization import Hover
+import dronehover
+
+# Runtime patch to inject the missing 3-inch propeller into dronehover's prop_lib
+if "prop3" not in dronehover.prop_lib:
+    dronehover.prop_lib["prop3"] = {"constants": [1.80e-07, 2.89e-09], "wmax": 4368, "mass": 0.0102}
+
 from airevolve.evolution_tools.genome_handlers.mounting_points import (
     generate_disc_mounting_points,
     assign_nearest_mounting_point
