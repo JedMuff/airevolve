@@ -40,7 +40,7 @@ PROPELLER_LIBRARY = {
         # the migration doc — may need a `prop3_real` entry that derives [k_f, k_m, wmax]
         # to exactly reproduce params_3inch's k_w/k_r1..4.
         "constants": [1.80e-07, 2.89e-09],  # [k_f, k_m] (k_f = k_w·m_canonical, rough)
-        "wmax": 4887,
+        "wmax": 4881,
         "mass": 0.0102,
         "w_min": 305.40,
         "k": 0.84,

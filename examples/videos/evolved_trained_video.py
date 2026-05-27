@@ -11,12 +11,14 @@ import matplotlib.gridspec as gridspec
 import numpy as np
 import torch
 from stable_baselines3 import PPO
+from stable_baselines3.common.save_util import load_from_zip_file
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from airevolve.evolution_tools.evaluators.drone_gate_env import DroneGateEnv
+from airevolve.evolution_tools.evaluators.drone_gate_env_power import PowerAwareDroneEnv
 from airevolve.simulator.visualization.animation import (
     create_camera, create_gate_geometry, draw_drone_and_forces,
     COLORS_BGR, DEFAULT_WIDTH, DEFAULT_HEIGHT,
@@ -33,9 +35,7 @@ VIDEOS_DIR = "__data__/evolved_videos"
 
 GENOME_PATHS = {
     "ind0903": (
-        "/Users/mikolajduchlinski/Desktop/results_folder_update/"
-        "standard_ppo_power_ea/exp_standard_ppo_power_ea/rl_logs/"
-        "generation_28/individual_0903/genome.npy"
+        "/Users/mikolajduchlinski/Desktop/results_folder_update/standard_ppo_power_ea/exp_standard_ppo_power_ea/rl_logs/generation_28/individual_0903/genome.npy"
     ),
 }
 
@@ -47,11 +47,11 @@ THRUST_SCALE = 0.2
 THRUST_BASE_LEN = 0.0
 
 VIEW_W = 640
-VIEW_H = 432
+VIEW_H = 400
 PLOT_W = 640
-PLOT_H_MID = 864
-PLOT_H_RIGHT = 864
-BAT_H = 216
+PLOT_H_MID = 800
+PLOT_H_RIGHT = 800
+BAT_H = 280
 
 OUT_W = 1920
 OUT_H = 1080
@@ -71,7 +71,7 @@ class Target:
 TARGETS = [
     Target(
         "ind0903", "finalgate",
-        "/Users/mikolajduchlinski/Desktop/results_folder_update/trained/individual_0903/policy.zip",
+        "/Users/mikolajduchlinski/Desktop/results_folder_update/standard_ppo_power_ea/exp_standard_ppo_power_ea/rl_logs/generation_28/individual_0903/policy.zip",
         5, 1001, 31,
     ),
 ]
@@ -82,19 +82,26 @@ def _load_genome_arms(path: str) -> np.ndarray:
     arms = inner.arms if hasattr(inner, "arms") else inner
     return np.asarray(arms, dtype=float)
 
-def _build_env(morph: str, env_seed: int, device: str) -> DroneGateEnv:
+def _build_env(morph: str, env_seed: int, device: str, is_power_aware: bool) -> DroneGateEnv:
     common = dict(
         num_envs=1, gates_ahead=1, num_state_history=0, num_action_history=0,
         history_step_size=1, render_mode=None, device=device, dt=0.01,
         initialize_at_random_gates=True, seed=env_seed,
     )
+    if is_power_aware:
+        common["strict_voltage_kill"] = False
+        common["randomize_soc"] = False
+        EnvClass = PowerAwareDroneEnv
+    else:
+        EnvClass = DroneGateEnv
+
     if morph == "quad":
-        return DroneGateEnv(propellers=create_standard_propeller_config("quad", 0.11, 2), **common)
+        return EnvClass(propellers=create_standard_propeller_config("quad", 0.11, 2), **common)
     if morph == "hex":
-        return DroneGateEnv(propellers=create_standard_propeller_config("hex", 0.11, 2), **common)
+        return EnvClass(propellers=create_standard_propeller_config("hex", 0.11, 2), **common)
     if morph in GENOME_PATHS:
         arms = _load_genome_arms(os.path.join(REPO_ROOT, GENOME_PATHS[morph]))
-        return DroneGateEnv(individual=arms, **common)
+        return EnvClass(individual=arms, **common)
     raise ValueError(f"unknown morph: {morph}")
 
 def _get_wmax(propellers: list) -> float:
@@ -107,11 +114,11 @@ class ViewRenderer:
         
         # Zoom out to see the full scene
         if view_type == 'top':
-            self.cam.r[0] = -13.0
+            self.cam.r[0] = -11.0
             # To move drone down-right, we move the camera target up-left
             self.center_offset = np.array([-1.0, 1.0, 0.0])
         else:
-            self.cam.r[0] = -12.5
+            self.cam.r[0] = -11.5
             self.center_offset = np.array([-2.0, 2.0, 0.0])
             
         self.gate_pos = gate_pos
@@ -271,7 +278,7 @@ class DashboardPlotter:
             if i < n - 1:
                 ax.set_xticklabels([])
             else:
-                ax.set_xlabel("Time Step", color="black", fontsize=9)
+                ax.set_xlabel("", color="black", fontsize=9)
             line, = ax.plot([], [], color=MOTOR_COLORS[i % len(MOTOR_COLORS)], lw=1.1)
             self.ax_motors.append(ax)
             self.line_motors.append(line)
@@ -378,12 +385,17 @@ def _redraw_gate_lines(ax: plt.Axes, gate_steps: list[int]):
             _line_cache[aid].add(gs)
 
 def render_target(t: Target, device: str, steps: int) -> str:
-    env = _build_env(t.morph, t.env_seed, device)
+    # First check observation space size from zip
+    data, _, _ = load_from_zip_file(t.policy_zip)
+    obs_dim = data["observation_space"].shape[0]
+    is_power_aware = (obs_dim == 25)
+
+    env = _build_env(t.morph, t.env_seed, device, is_power_aware)
+    model = PPO.load(t.policy_zip, env=env, device=device)
+
     propellers = env.drone_sim.config.propellers
     num_motors = len(propellers)
     wmax = _get_wmax(propellers)
-
-    model = PPO.load(t.policy_zip, env=env, device=device)
 
     out_dir = os.path.join(REPO_ROOT, VIDEOS_DIR)
     os.makedirs(out_dir, exist_ok=True)
@@ -404,12 +416,12 @@ def render_target(t: Target, device: str, steps: int) -> str:
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out = cv2.VideoWriter(out_path, fourcc, FPS, (OUT_W, OUT_H))
 
-    env.reset()
+    obs = env.reset()
     battery.reset()
 
     for step in range(steps):
-        actions, _ = model.predict(env.states, deterministic=True)
-        _, _, dones, infos = env.step(actions)
+        actions, _ = model.predict(obs, deterministic=True)
+        obs, _, dones, infos = env.step(actions)
 
         ws = env.world_states[0]
         prev_u = env.prev_actions[0]

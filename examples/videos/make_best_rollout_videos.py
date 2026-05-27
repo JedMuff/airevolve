@@ -18,12 +18,14 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 from stable_baselines3 import PPO
+from stable_baselines3.common.save_util import load_from_zip_file
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from airevolve.evolution_tools.evaluators.drone_gate_env import DroneGateEnv  # noqa: E402
+from airevolve.evolution_tools.evaluators.drone_gate_env_power import PowerAwareDroneEnv  # noqa: E402
 from airevolve.simulator.visualization.animation import view as animation_view  # noqa: E402
 from airevolve.simulator.simulation.propeller_data import (  # noqa: E402
     create_standard_propeller_config,
@@ -62,27 +64,38 @@ def _load_genome_arms(path: str) -> np.ndarray:
     return np.asarray(arms, dtype=float)
 
 
-def _build_env(morph: str, env_seed: int, device: str) -> DroneGateEnv:
+def _build_env(morph: str, env_seed: int, device: str, is_power_aware: bool) -> DroneGateEnv:
     common = dict(
         num_envs=1, gates_ahead=1, num_state_history=0, num_action_history=0,
         history_step_size=1, render_mode=None, device=device, dt=0.01,
         initialize_at_random_gates=True, seed=env_seed,
     )
+    if is_power_aware:
+        common["strict_voltage_kill"] = False
+        common["randomize_soc"] = False
+        EnvClass = PowerAwareDroneEnv
+    else:
+        EnvClass = DroneGateEnv
+
     if morph == "quad":
-        return DroneGateEnv(propellers=create_standard_propeller_config("quad", 0.11, 2), **common)
+        return EnvClass(propellers=create_standard_propeller_config("quad", 0.11, 2), **common)
     if morph == "hex":
-        return DroneGateEnv(propellers=create_standard_propeller_config("hex", 0.11, 2), **common)
+        return EnvClass(propellers=create_standard_propeller_config("hex", 0.11, 2), **common)
     if morph in GENOME_PATHS:
         arms = _load_genome_arms(os.path.join(REPO_ROOT, GENOME_PATHS[morph]))
-        return DroneGateEnv(individual=arms, **common)
+        return EnvClass(individual=arms, **common)
     raise ValueError(f"unknown morph: {morph}")
 
 
 def render_target(t: Target, view_type: str, device: str, steps: int) -> str:
-    env = _build_env(t.morph, t.env_seed, device)
-    propellers = env.drone_sim.config.propellers
     policy_path = t.policy_zip
+    data, _, _ = load_from_zip_file(policy_path)
+    obs_dim = data["observation_space"].shape[0]
+    is_power_aware = (obs_dim == 25)
+
+    env = _build_env(t.morph, t.env_seed, device, is_power_aware)
     model = PPO.load(policy_path, env=env, device=device)
+    propellers = env.drone_sim.config.propellers
 
     out_dir = os.path.join(REPO_ROOT, VIDEOS_DIR)
     os.makedirs(out_dir, exist_ok=True)
@@ -92,12 +105,13 @@ def render_target(t: Target, view_type: str, device: str, steps: int) -> str:
           f"({t.expected_gates} gates expected, {view_type} view) → {out_path}",
           flush=True)
 
-    env.reset()
+    obs = env.reset()
     num_motors = len(propellers)
 
     def get_drone_state():
-        actions, _ = model.predict(env.states, deterministic=True)
-        env.step(actions)
+        nonlocal obs
+        actions, _ = model.predict(obs, deterministic=True)
+        obs, _, _, _ = env.step(actions)
         ws = env.world_states[0]
         state = {
             "x": ws[0], "y": ws[1], "z": ws[2],

@@ -89,7 +89,7 @@ class LiPoBatteryModel:
 
     # ------------------------------------------------------------------ #
 
-    def __init__(self, strict_voltage_kill: bool = True) -> None:
+    def __init__(self, strict_voltage_kill: bool = True, track_history: bool = True) -> None:
         """
         Parameters
         ----------
@@ -101,6 +101,7 @@ class LiPoBatteryModel:
             episodes before the agent has learned throttle control.
         """
         self.strict_voltage_kill = strict_voltage_kill
+        self.track_history = track_history
         self.reset()
 
     def reset(self) -> None:
@@ -259,13 +260,14 @@ class LiPoBatteryModel:
         self._last_current = current
 
         # Append to per-step history
-        self._hist_time.append(t_now)
-        self._hist_voltage.append(v_terminal)
-        self._hist_soc.append(self._soc)
-        self._hist_capacity_mah.append(self._capacity_remaining_ah * 1000.0)
-        self._hist_power.append(power_w)
-        self._hist_current.append(current)
-        self._hist_energy.append(self._total_energy_j)
+        if self.track_history:
+            self._hist_time.append(t_now)
+            self._hist_voltage.append(v_terminal)
+            self._hist_soc.append(self._soc)
+            self._hist_capacity_mah.append(self._capacity_remaining_ah * 1000.0)
+            self._hist_power.append(power_w)
+            self._hist_current.append(current)
+            self._hist_energy.append(self._total_energy_j)
 
         return {
             'time':           t_now,

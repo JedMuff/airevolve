@@ -94,6 +94,22 @@ class TestRunner:
                 ],
                 requires_deps=['stable_baselines3']
             ),
+            'dynamics': TestCategory(
+                name='Bi-Objective fitness',
+                description='Testing the NSGA-II implementation, smoke run',
+                test_files=[
+                    'test_nsga2_ppo.py'
+                ],
+                requires_deps=['stable_baselines3']
+            ),
+            'dynamics': TestCategory(
+                name='Power architecture with realistic battery model',
+                description='LiPoBaterry Model class testinga dn all electronic metrics',
+                test_files=[
+                    'test_power_architecture.py'
+                ],
+                requires_deps=['stable_baselines3']
+            ),
         }
     
     def check_dependencies(self, category: TestCategory) -> Tuple[bool, List[str]]:

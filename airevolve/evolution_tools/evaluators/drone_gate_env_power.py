@@ -137,7 +137,7 @@ class PowerAwareDroneEnv(DroneGateEnv):
 
         # ── Battery array — one instance per parallel environment ──────────────
         self._batteries: list[LiPoBatteryModel] = [
-            LiPoBatteryModel(strict_voltage_kill=strict_voltage_kill)
+            LiPoBatteryModel(strict_voltage_kill=strict_voltage_kill, track_history=False)
             for _ in range(self.num_envs)
         ]
 

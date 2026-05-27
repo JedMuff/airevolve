@@ -246,7 +246,7 @@ class DroneGateEnv(VecEnv):
             propellers.append({
                 "loc": [x, y, z],
                 "dir": [thrust_x, thrust_y, thrust_z, rotation],
-                "propsize": 2  # Default prop size
+                "propsize": 3  # Default prop size
             })
             propeller_positions.append([x, y, z])
 
