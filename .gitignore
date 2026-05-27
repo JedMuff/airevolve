@@ -147,4 +147,5 @@ drone-project/
 test_output/
 .aider*
 results/
+results_training/
 
