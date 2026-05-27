@@ -135,8 +135,8 @@ class BiObjectiveFitness:
     def _fail_result(self, phenotype) -> tuple:
         if self.hover_gradient:
             hover_score = continuous_hover_fitness(phenotype)
-            return (int(hover_score), _FAIL_ENERGY)
-        return (0, _FAIL_ENERGY)
+            return (float(hover_score), _FAIL_ENERGY)
+        return (0.0, _FAIL_ENERGY)
 
     def _repair(self, phenotype, repair_coord):
         """3-stage repair; returns None on failure."""

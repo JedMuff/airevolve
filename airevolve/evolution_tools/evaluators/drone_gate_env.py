@@ -418,9 +418,15 @@ class DroneGateEnv(VecEnv):
         else:
             action_for_dynamics = self.actions
 
-        full_state = self.world_states  # (num_envs, 12+N)
+        full_state = self.world_states
+        
+        if hasattr(self, 'dynamic_w_max') and self.dynamic_w_max is not None:
+            w_max_array = self.dynamic_w_max
+        else:
+            w_max_array = np.full(self.num_envs, self.drone_sim.params["w_max"])
+            
         full_state_dot = self.drone_sim.dynamics_func(
-            full_state.T, action_for_dynamics.T
+            full_state.T, action_for_dynamics.T, w_max_array
         ).T  # (num_envs, 12+N)
         new_states = (full_state + self.dt * full_state_dot).astype(np.float32)
 
@@ -443,7 +449,7 @@ class DroneGateEnv(VecEnv):
         action_penalty_delta = 0.001*np.linalg.norm((self.actions-self.prev_actions), axis=1)
 
         prog_rewards = d2g_old - d2g_new
-        rewards = prog_rewards - rat_penalty
+        rewards = prog_rewards - rat_penalty - action_penalty_delta
 
         # Gate passing/collision
         normal = np.array([np.cos(yaw_gate), np.sin(yaw_gate)]).T
@@ -514,6 +520,8 @@ class DroneGateEnv(VecEnv):
             infos[i]["out_of_bounds"] = out_of_bounds[i]
             infos[i]["gate_passed"] = gate_passed[i]
             infos[i]["num_gates_passed"] = gates_passed_before_reset
+            infos[i]["distance_to_gate"] = float(d2g_new[i])
+            infos[i]["target_gate_idx"] = int(self.target_gates[i] % self.num_gates)
             
         return self.states, rewards, dones, infos
     

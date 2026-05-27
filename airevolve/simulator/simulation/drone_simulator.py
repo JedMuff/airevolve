@@ -200,10 +200,11 @@ class DroneSimulator:
         tau = p_dict["tau"]
         k = p_dict["k"]
         w_min = p_dict["w_min"]
-        w_max = p_dict["w_max"]
+        w_max_sym = symbols('w_max_dynamic')
+        #w_max = p_dict["w_max"]
 
         # Motor command: action U → target speed Wc via sqrt-polynomial.
-        Wc = [(w_max - w_min) * sqrt(k * U_i**2 + (1 - k) * U_i) + w_min for U_i in U]
+        Wc = [(w_max_sym - w_min) * sqrt(k * U_i**2 + (1 - k) * U_i) + w_min for U_i in U]
         # First-order lag.
         d_W = [(Wc_i - W_i) / tau for Wc_i, W_i in zip(Wc, W)]
         # Convert dW (rad/s²) back to normalized derivative (1/s).
@@ -226,10 +227,7 @@ class DroneSimulator:
         # is morphology-agnostic).
         Mx = sum(k_p_signed[i] * W[i]**2 for i in range(n))
         My = sum(k_q_signed[i] * W[i]**2 for i in range(n))
-        Mz = (
-            sum(k_r_signed[i] * W[i] for i in range(n))
-            + sum(k_r_react_signed[i] * d_W[i] for i in range(n))
-        )
+        Mz = (sum(k_r_signed[i] * W[i]**2 for i in range(n)) + sum(k_r_react_signed[i] * d_W[i] for i in range(n)))
 
         # Translational kinematics.
         d_x = vx
@@ -259,7 +257,7 @@ class DroneSimulator:
         ] + d_w  # length 12 + n
 
         self.dynamics_func = lambdify(
-            (Array(full_state_syms), Array(control_syms)),
+            (Array(full_state_syms), Array(control_syms), w_max_sym),
             Array(state_dot),
             'numpy',
         )
@@ -327,23 +325,26 @@ class DroneSimulator:
         self.actions = np.clip(commands, -1, 1)
         self.motor_commands = self.actions
 
-    def step(self, motor_commands=None):
+    def step(self, motor_commands=None, v_terminal=None):
         """
-        Advance simulation by one time step using RK4 integration on the
-        full 12+N state. The dynamics_func handles the motor model
-        internally; pass actions in [-1, 1].
-
-        Args:
-            motor_commands: Optional actions for this step (in [-1, 1]).
+        Advance simulation by one time step.
         """
         if motor_commands is not None:
             self.set_motor_commands(motor_commands)
 
+        # Dynamic RPM calculation: Scale the nominal w_max by the current voltage
+        if v_terminal is not None:
+            current_w_max = float(v_terminal * (self.params["w_max"] / 14.8))
+        else:
+            # Fallback for legacy controllers not passing voltage
+            current_w_max = float(self.params["w_max"])
+
         with np.errstate(all='ignore'):
-            k1 = self.dt * np.asarray(self.dynamics_func(self.state, self.actions))
-            k2 = self.dt * np.asarray(self.dynamics_func(self.state + 0.5 * k1, self.actions))
-            k3 = self.dt * np.asarray(self.dynamics_func(self.state + 0.5 * k2, self.actions))
-            k4 = self.dt * np.asarray(self.dynamics_func(self.state + k3, self.actions))
+            # Pass current_w_max as the third argument to the dynamics function
+            k1 = self.dt * np.asarray(self.dynamics_func(self.state, self.actions, current_w_max))
+            k2 = self.dt * np.asarray(self.dynamics_func(self.state + 0.5 * k1, self.actions, current_w_max))
+            k3 = self.dt * np.asarray(self.dynamics_func(self.state + 0.5 * k2, self.actions, current_w_max))
+            k4 = self.dt * np.asarray(self.dynamics_func(self.state + k3, self.actions, current_w_max))
             self.state = self.state + (k1 + 2*k2 + 2*k3 + k4) / 6.0
 
         # Detect numerical divergence (e.g. Euler angle singularity at ±90° pitch)

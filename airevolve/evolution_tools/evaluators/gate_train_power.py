@@ -403,32 +403,37 @@ def train_power(
     total_energy_j   = _FAIL_ENERGY
 
     try:
-        obs = test_env.reset()   # (1, obs_len) — 22 or 25 dims depending on class
-        # strict_voltage_kill=True: the energy-tracking battery mirrors NSGA-II eval
-        # behaviour — voltage sags beyond 12.8 V count as a true depletion event.
+        obs = test_env.reset()   
         battery = LiPoBatteryModel(strict_voltage_kill=True)
         battery.reset()
 
         dt = float(test_env.dt)
 
         for _ in range(max_steps):
-            # Capture actions BEFORE the physics step so we can step the
-            # independent energy-tracking battery with the same normalised RPMs
-            # that the policy commanded (consistent with PowerAwareDroneEnv timing).
-            actions, _ = model.predict(obs, deterministic=True)  # obs from step/reset
-            # actions shape: (1, n_motors) from VecEnv; squeeze for battery
+            actions, _ = model.predict(obs, deterministic=True) 
             motor_rpms = np.asarray(actions).flatten()
             obs, _rewards, _dones, infos = test_env.step(actions)
-            # Independent battery: strict_voltage_kill=True mirrors NSGA-II eval behaviour.
-            # max_rpm=1.0 matches the normalised action convention used in PowerAwareDroneEnv.
             battery.step(dt, motor_rpms, max_rpm=1.0)
 
         num_gates_passed = int(infos[0]["num_gates_passed"][0])
         total_energy_j   = float(battery.get_total_energy_consumed())
-    finally:
-        test_env.close()  # no-op for DroneGateEnv but harmless; closes PowerAwareDroneEnv
+        
+        distance_to_gate = float(infos[0]["distance_to_gate"])
+        target_idx = int(infos[0]["target_gate_idx"])
+        
+        if num_gates_passed == 0:
+            gate_dist = float(np.linalg.norm(test_env.gate_pos[0] - test_env.start_pos))
+        else:
+            prev_idx = (target_idx - 1) % test_env.num_gates
+            gate_dist = float(np.linalg.norm(test_env.gate_pos[target_idx] - test_env.gate_pos[prev_idx]))
+            
+        fraction = max(0.0, 1.0 - (distance_to_gate / gate_dist))
+        continuous_fitness = float(num_gates_passed) + fraction
 
-    return num_gates_passed, total_energy_j
+    finally:
+        test_env.close()  
+
+    return continuous_fitness, total_energy_j
 
 
 def evaluate_individual(

@@ -34,8 +34,8 @@ PROPELLER_LIBRARY = {
     },
     "prop3": {
         "constants": [1.80e-07, 2.89e-09], 
-        "wmax": 4368,
-        "mass": 0.0102,
+        "wmax": 4399,
+        "mass": 0.01024,
         "w_min": 305.40,
         "k": 0.84,
         "k_r_react": 1.14e-03,

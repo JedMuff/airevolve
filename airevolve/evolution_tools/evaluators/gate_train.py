@@ -298,27 +298,28 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     else:
         plt.savefig(save_dir+f"/figure{num}.png")
     plt.close()
-    # plt.show()
-    # TESTING
-    test_env.reset()
-    # if num is None:
-    #     animate_policy(individual, model, test_env, deterministic=False, log_times=False, print_vel=False, log=None, 
-    #                 record_steps=1200, record_file=save_dir + f'v.mp4',
-    #                 show_window=False)
-    # else:
-    #     animate_policy(individual, model, test_env, deterministic=False, log_times=False, print_vel=False, log=None, 
-    #                 record_steps=1200, record_file=save_dir + f'v{num}.mp4',
-    #                 show_window=False)
 
     test_env.reset()
-    # do 1200 steps and print state and action
-    for i in range(1000):
-        num = test_env.num_state_history+1
-        state_len = int(len(test_env.states[0])/num)
+    
+    for i in range(max_steps):
         actions, _ = model.predict(test_env.states, deterministic=True)
         states, rewards, dones, infos = test_env.step(actions)
     
-    return infos[0]["num_gates_passed"][0]
+    # Calculate Continuous Waypoint Fitness
+    num_gates_passed = int(infos[0]["num_gates_passed"][0])
+    d2g = float(infos[0]["distance_to_gate"])
+    target_idx = int(infos[0]["target_gate_idx"])
+    
+    if num_gates_passed == 0:
+        gate_dist = float(np.linalg.norm(test_env.gate_pos[0] - test_env.start_pos))
+    else:
+        prev_idx = (target_idx - 1) % test_env.num_gates
+        gate_dist = float(np.linalg.norm(test_env.gate_pos[target_idx] - test_env.gate_pos[prev_idx]))
+        
+    fraction = max(0.0, 1.0 - (d2g / gate_dist))
+    continuous_fitness = float(num_gates_passed) + fraction
+    
+    return continuous_fitness
 
 def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cuda:0", num=None, max_steps=1200) -> list:
     start_time = time.time()

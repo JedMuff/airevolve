@@ -323,6 +323,10 @@ class PowerAwareDroneEnv(DroneGateEnv):
         #       – saves _ep_terminal_* for base_dones envs  ✓
         #       – resets batteries (optionally random SoC)   ✓
         #   • self.states updated to post-reset gate-relative obs
+        base_w_max = self.drone_sim.params["w_max"]
+        voltages = np.array([b.voltage for b in self._batteries])
+        self.dynamic_w_max = voltages * (base_w_max / 14.8)
+
         _obs, rewards, base_dones, infos = super().step_wait()
         # Note: _obs is self.states (may be stale for batt_dones envs below).
         # We rebuild obs from self.states at the end.
