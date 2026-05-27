@@ -148,9 +148,3 @@ test_output/
 .aider*
 results/
 
-# Ignore training outputs in individual folders but keep .npy files
-evolved_genomes/individual_*/*
-!evolved_genomes/individual_*/*.npy
-
-evolved_genomes/standard_hexa/*
-!evolved_genomes/standard_hexa/*.npy

@@ -396,6 +396,12 @@ if __name__ == "__main__":
         num = None
     else:
         num = int(args.num)
-    num_gates_passed = evaluate_individual(individual, args.filename, args.training_timesteps, args.num_envs, args.gate_cfg, args.device, num=num)
+
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+    ind_name = os.path.basename(os.path.normpath(args.filename))
+    out_dir = os.path.join(project_root, "results_training", ind_name)
+    os.makedirs(out_dir, exist_ok=True)
+
+    num_gates_passed = evaluate_individual(individual, out_dir, args.training_timesteps, args.num_envs, args.gate_cfg, args.device, num=num)
 
     print(num_gates_passed)

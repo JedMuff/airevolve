@@ -575,9 +575,14 @@ if __name__ == "__main__":
     individual = individual.astype(np.float32)
     num        = int(args.num) if args.num is not None else None
 
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+    ind_name = os.path.basename(os.path.normpath(args.filename))
+    out_dir = os.path.join(project_root, "results_training", ind_name)
+    os.makedirs(out_dir, exist_ok=True)
+
     gates, energy = evaluate_individual(
         individual,
-        args.filename,
+        out_dir,
         args.training_timesteps,
         args.num_envs,
         args.gate_cfg,
