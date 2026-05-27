@@ -51,7 +51,7 @@ GENOME="spherical"
 GATE_CFG="figure8"
 MIN_NARMS=6
 MAX_NARMS=6
-INIT_POP_MODE="random"
+INIT_POP_MODE="hover_repair"
 DRY_RUN=false
 SPARSE_WEIGHT=0.004
 OVERDRAW_WEIGHT=0.01
@@ -141,8 +141,21 @@ echo ""
 if $DRY_RUN; then
     "${CMD[@]}"
 else
+    START_WALL="$(date '+%Y-%m-%d %H:%M:%S')"
+    SECONDS=0
+    echo "  Started at : ${START_WALL}"
+    echo ""
+
     "${CMD[@]}" 2>&1 | tee "${LOG_FILE}"
     EXIT_CODE=${PIPESTATUS[0]}
+
+    ELAPSED=${SECONDS}
+    END_WALL="$(date '+%Y-%m-%d %H:%M:%S')"
+    ELAPSED_H=$(( ELAPSED / 3600 ))
+    ELAPSED_M=$(( (ELAPSED % 3600) / 60 ))
+    ELAPSED_S=$(( ELAPSED % 60 ))
+    ELAPSED_FMT=$(printf '%02d:%02d:%02d' "${ELAPSED_H}" "${ELAPSED_M}" "${ELAPSED_S}")
+
     echo ""
     echo "════════════════════════════════════════════════════════════════════════"
     if [[ "${EXIT_CODE}" -eq 0 ]]; then
@@ -152,6 +165,10 @@ else
         echo " Experiment FAILED with exit code ${EXIT_CODE}."
         echo " Log      → ${LOG_FILE}"
     fi
+    echo ""
+    echo "  Started  : ${START_WALL}"
+    echo "  Finished : ${END_WALL}"
+    echo "  Elapsed  : ${ELAPSED_FMT}  (${ELAPSED}s)"
     echo "════════════════════════════════════════════════════════════════════════"
     exit "${EXIT_CODE}"
 fi
