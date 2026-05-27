@@ -80,7 +80,7 @@ class DroneSimulator:
         """
 
         if propellers is None:
-            propellers = create_standard_propeller_config("quad", arm_length=0.11, prop_size=2)
+            propellers = create_standard_propeller_config("quad", arm_length=0.11, prop_size=3)
 
         self.config = DroneConfiguration(propellers)
 
@@ -96,7 +96,7 @@ class DroneSimulator:
         # All propellers are assumed to share the same prop_size (current
         # airevolve convention). For asymmetric prop sizes, derive_reference_params
         # would need per-motor extended params.
-        prop_size = propellers[0].get("propsize", 2)
+        prop_size = propellers[0].get("propsize", 3)
         self.prop_size = prop_size
 
         self.params = derive_reference_params(
@@ -188,7 +188,9 @@ class DroneSimulator:
         U = [(u_i + 1) / 2 for u_i in control_syms]
 
         p_dict = self.params
-        k_w = p_dict["k_w"]
+        k_fx_signed = p_dict["k_fx_signed"]
+        k_fy_signed = p_dict["k_fy_signed"]
+        k_fz_signed = p_dict["k_fz_signed"]
         k_x = p_dict["k_x"]
         k_y = p_dict["k_y"]
         k_p_signed = p_dict["k_p_signed"]
@@ -207,10 +209,14 @@ class DroneSimulator:
         # Convert dW (rad/s²) back to normalized derivative (1/s).
         d_w = [d_W_i / (W_MAX_N - W_MIN_N) * 2 for d_W_i in d_W]
 
-        # Forces (treated as accelerations directly — mass implicit in k_w).
+        # Forces (treated as accelerations directly — mass implicit in
+        # per-motor coefficients). Per-motor thrust direction is captured
+        # by k_fx/k_fy/k_fz_signed so tilted propellers are handled correctly.
+        # For standard quads with dir=[0,0,-1]: k_fx=k_fy=0, k_fz=-k_f/m.
         sum_W = sum(W)
-        sum_W2 = sum(W_i**2 for W_i in W)
-        T = -k_w * sum_W2
+        Fx = sum(k_fx_signed[i] * W[i]**2 for i in range(n))
+        Fy = sum(k_fy_signed[i] * W[i]**2 for i in range(n))
+        Fz = sum(k_fz_signed[i] * W[i]**2 for i in range(n))
         Dx = -k_x * vbx * sum_W
         Dy = -k_y * vby * sum_W
 
@@ -231,7 +237,8 @@ class DroneSimulator:
         d_z = vz
 
         # Translational dynamics: gravity + body-frame forces rotated to world.
-        accel = Matrix([0, 0, self.g]) + R @ Matrix([Dx, Dy, T])
+        # Fx, Fy include per-motor directional thrust; Dx, Dy are drag.
+        accel = Matrix([0, 0, self.g]) + R @ Matrix([Fx + Dx, Fy + Dy, Fz])
         d_vx, d_vy, d_vz = accel
 
         # Euler-angle kinematics (singular at theta=±π/2; reset envs guard against this).

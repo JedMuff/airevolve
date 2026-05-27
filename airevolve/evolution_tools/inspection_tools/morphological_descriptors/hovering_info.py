@@ -60,7 +60,7 @@ def orientation_to_unit_vector(roll, pitch, yaw):
     
     return unit_vector
 
-def get_sim(individual, motor_template = {"propsize": 2}):
+def get_sim(individual, motor_template = {"propsize": 3}):
     # remove rows with nan values
     individual = individual[~np.isnan(individual).any(axis=1)]
 

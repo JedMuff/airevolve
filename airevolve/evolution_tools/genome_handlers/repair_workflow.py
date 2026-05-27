@@ -62,9 +62,9 @@ except ImportError as e:
 def genome_to_drone_hover_props(
     genome: npt.NDArray[Any],
     coordinate_system: str = 'spherical',
-    propeller_radius: float = 0.0127,  # 1-inch radius (2-inch diameter propellers)
+    propeller_radius: float = 0.01905,  # 1.5-inch radius (3-inch diameter propellers)
     cylinder_height: float = None,  # Will default to 8 * propeller_radius
-    default_propsize: int = 2
+    default_propsize: int = 3
 ) -> List[Dict[str, Any]]:
     """
     Convert airevolve genome to drone-hover props format.
@@ -84,11 +84,11 @@ def genome_to_drone_hover_props(
     coordinate_system : str
         'spherical' or 'cartesian'
     propeller_radius : float
-        Radius of propeller (default: 0.0127m = 1 inch radius, 2-inch diameter propellers)
+        Radius of propeller (default: 0.01905m = 1.5 inch radius, 3-inch diameter propellers)
     cylinder_height : float, optional
         Height of motor cylinder (default: 8 * propeller_radius = swept area)
     default_propsize : int
-        Default propeller size (default: 2 for 2-inch diameter)
+        Default propeller size (default: 3 for 3-inch diameter)
 
     Returns:
     --------

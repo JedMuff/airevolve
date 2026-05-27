@@ -21,7 +21,7 @@ def _genome_to_propellers(genome):
         propellers.append({
             "loc": [float(x), float(y), float(z)],
             "dir": [float(motor_dir[0]), float(motor_dir[1]), float(motor_dir[2]), rot],
-            "propsize": 2,
+            "propsize": 3,
         })
     return propellers
 

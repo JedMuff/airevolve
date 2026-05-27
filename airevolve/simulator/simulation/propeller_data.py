@@ -33,21 +33,15 @@ PROPELLER_LIBRARY = {
         "tau": 0.04,
     },
     "prop3": {
-        # New entry: 3-inch sysid'd from optimal_quad_control_RL/randomization.py:29-35.
-        # k_f / k_m / wmax derived from params_3inch: k_w = k_f/m → k_f = k_w·m;
-        # m chosen as 0.3 kg (typical 3" build; mass ↑ slightly compared to prop2's 0.0046
-        # because prop3 is bigger). For exact parity with params_3inch, see Phase 3.2 of
-        # the migration doc — may need a `prop3_real` entry that derives [k_f, k_m, wmax]
-        # to exactly reproduce params_3inch's k_w/k_r1..4.
-        "constants": [1.80e-07, 2.89e-09],  # [k_f, k_m] (k_f = k_w·m_canonical, rough)
-        "wmax": 4881,
+        "constants": [1.80e-07, 2.89e-09], 
+        "wmax": 4368,
         "mass": 0.0102,
         "w_min": 305.40,
         "k": 0.84,
         "k_r_react": 1.14e-03,
         "k_x_drag": 3.36e-05,
         "k_y_drag": 3.73e-05,
-        "tau": 0.04,
+        "tau": 0.04
     },
     "prop4": {
         "constants": [7.24e-07, 8.20e-09],  # [k_f, k_m] force and moment constants
@@ -112,7 +106,7 @@ PROPELLER_LIBRARY = {
     "matched": {
         "constants": [1.076e-05, 1.61e-07],  # Matched to original framework (kTh = 1.076e-5)
         "wmax": 1963,
-        "mass": 0.0102,  # 8.6g motor + 1.6g prop
+        "mass": 0.01024,  # 8.6g motor + 1.64g prop
         # Borrowed from params_5inch (closest sysid set).
         "w_min": 238.49,
         "k": 0.95,
@@ -209,7 +203,7 @@ def validate_propeller_config(props):
         if len(prop["loc"]) != 3:
             raise ValueError(f"Location must have 3 elements [x, y, z] for propeller {i}")
 
-def create_standard_propeller_config(config_type, arm_length=0.11, prop_size=2):
+def create_standard_propeller_config(config_type, arm_length=0.11, prop_size=3):
     """
     Create standard propeller configurations for common drone types.
     

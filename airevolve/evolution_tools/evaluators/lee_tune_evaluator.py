@@ -238,7 +238,7 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
             propellers.append({
                 "loc": [float(x), float(y), float(z)],
                 "dir": [float(motor_dir[0]), float(motor_dir[1]), float(motor_dir[2]), rot],
-                "propsize": 2
+                "propsize": 3
             })
 
         quad = DroneInterface(0, propellers=propellers)

@@ -58,7 +58,7 @@ def inertia(individual):
         props.append({
             "loc": [float(x), float(y), float(z)],
             "dir": [0, 0, -1, rotation],  # Downward thrust in NED
-            "propsize": 2  # Default 2-inch propeller
+            "propsize": 3  # Default 3-inch propeller
         })
 
     # Generate 8 mounting points on 60mm diameter disc
