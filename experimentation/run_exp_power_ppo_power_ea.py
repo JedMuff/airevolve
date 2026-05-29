@@ -47,7 +47,7 @@ Directory layout (all paths relative to --results-dir)
 
 Example
 -------
-  source drone-venv/bin/activate
+  source venv/bin/activate
   python experimentation/run_exp_power_ppo_power_ea.py
 
   # Dry-run (no actual training; prints config and exits):
@@ -456,7 +456,7 @@ def main() -> None:
 
     print("\n--- Phase 1: Initial Population ---", flush=True)
     initial_pop, init_stats = _build_initial_population(args, config, WrappedHandler)
-    if not initial_pop:
+    if initial_pop is None or len(initial_pop) == 0:
         print("[error] Failed to generate initial population. Exiting.")
         return
     if init_stats is not None:

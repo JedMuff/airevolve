@@ -36,7 +36,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENV_ACTIVATE="drone-venv/bin/activate"
+VENV_ACTIVATE="venv/bin/activate"
 RUNNER="${REPO_ROOT}/experimentation/run_exp_power_ppo_power_ea.py"
 RESULTS_DIR="${REPO_ROOT}/results"
 LOG_DIR="${REPO_ROOT}/logs/exp_power_ppo_power_ea"

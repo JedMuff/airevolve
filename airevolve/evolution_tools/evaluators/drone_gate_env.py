@@ -66,7 +66,6 @@ class DroneGateEnv(VecEnv):
         # Set device
         if device is not None:
             self.device = device
-            torch.set_default_device(device)
         
         if render_mode is not None:
             self.render_mode = render_mode

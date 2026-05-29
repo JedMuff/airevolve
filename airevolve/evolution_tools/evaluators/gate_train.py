@@ -269,7 +269,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         device=device,
     )
     # model.set_logger(custom_logger)
-
+    print(f"[diag] PPO.learn total_timesteps={total_timesteps} env.num_envs={env.num_envs} expected_rollouts={total_timesteps/(env.num_envs*1000):.0f}", flush=True)
     # TRAINING
     model.learn(total_timesteps=total_timesteps, reset_num_timesteps=False, log_interval=100, callback=FullStatsCallback())
     if num is None:
