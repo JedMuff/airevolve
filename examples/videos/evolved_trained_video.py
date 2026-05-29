@@ -35,7 +35,7 @@ VIDEOS_DIR = "__data__/evolved_videos"
 
 GENOME_PATHS = {
     "ind0903": (
-        "/Users/mikolajduchlinski/Desktop/results_folder_update/standard_ppo_power_ea/exp_standard_ppo_power_ea/rl_logs/generation_28/individual_0903/genome.npy"
+        "/Users/mikolajduchlinski/Desktop/results_folder_update/check/individual_0065/genome.npy"
     ),
 }
 
@@ -71,7 +71,7 @@ class Target:
 TARGETS = [
     Target(
         "ind0903", "finalgate",
-        "/Users/mikolajduchlinski/Desktop/results_folder_update/standard_ppo_power_ea/exp_standard_ppo_power_ea/rl_logs/generation_28/individual_0903/policy.zip",
+        "/Users/mikolajduchlinski/Desktop/results_folder_update/check/individual_0065/policy.zip",
         5, 1001, 31,
     ),
 ]
