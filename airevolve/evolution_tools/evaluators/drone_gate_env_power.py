@@ -176,13 +176,13 @@ class PowerAwareDroneEnv(DroneGateEnv):
     def _reset_single_battery(self, i: int) -> None:
         """
         Reset battery i.  If randomize_soc is active, draw a random starting
-        SoC ∈ [0.3, 1.0] after resetting to force the policy to generalise
+        SoC ∈ [0.5, 1.0] after resetting to force the policy to generalise
         across different charge levels (domain randomisation).
         """
         bat = self._batteries[i]
         bat.reset()
         if self._randomize_soc:
-            soc = float(np.random.uniform(0.3, 1.0))
+            soc = float(np.random.uniform(0.5, 1.0))
             bat._soc                   = soc
             bat._capacity_remaining_ah = soc * bat.CAPACITY_AH
             bat._last_voltage          = bat._compute_ecm_voltage(soc, 0.0)

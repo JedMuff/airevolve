@@ -25,6 +25,7 @@ Usage (subprocess):
 """
 
 import os
+os.environ["OMP_NUM_THREADS"] = "1"
 import sys
 import time
 import argparse
@@ -34,6 +35,7 @@ from functools import partial
 import numpy as np
 import pandas as pd
 import torch
+torch.set_num_threads(1)
 import gymnasium as gym
 import matplotlib.pyplot as plt
 
@@ -272,7 +274,7 @@ def train_power(
         "MlpPolicy",
         env,
         policy_kwargs=policy_kwargs,
-        verbose=0,
+        verbose=1,
         tensorboard_log=save_dir,
         n_steps=1000,
         batch_size=5000,
@@ -301,6 +303,9 @@ def train_power(
         use_power_env=use_power_env,
         overdraw_penalty_weight=0.0,
     )])
+    # Wrap in VecMonitor so EvalCallback can read episode stats and SB3 stops
+    # warning about an unmonitored eval environment.
+    eval_env = VecMonitor(eval_env)
     best_model_path = os.path.join(save_dir, "best_model")
     eval_callback = EvalCallback(
         eval_env,
@@ -319,6 +324,7 @@ def train_power(
             reset_num_timesteps=False,
             log_interval=100,
             callback=[FullStatsCallback(), eval_callback],
+            progress_bar=True,
         )
         final_model_path = os.path.join(save_dir, "final_model")
         model.save(final_model_path)
@@ -332,8 +338,13 @@ def train_power(
                 data = pd.read_csv(monitor_file + ".monitor.csv", skiprows=1)
             except Exception:
                 data = pd.read_csv(monitor_file + "monitor.csv", skiprows=1)
+            # Smooth with a rolling average sized to 1% of the episode count so
+            # the trend stays legible regardless of how many millions of
+            # timesteps were run.
+            window_size = max(1, len(data) // 100)
+            smoothed_rewards = data["r"].rolling(window=window_size, min_periods=1).mean()
             plt.figure(figsize=(10, 6))
-            plt.plot(data["t"], data["r"], label="Episode Reward")
+            plt.plot(data["t"], smoothed_rewards, label=f"Episode Reward (rolling avg, window={window_size})")
             plt.xlabel("Timesteps")
             plt.ylabel("Reward")
             plt.title("Reward per Episode")
@@ -409,18 +420,39 @@ def train_power(
 
         dt = float(test_env.dt)
 
+        # Track the maximum gates passed across the whole eval window: if the
+        # drone crashes mid-flight the env resets and num_gates_passed drops back
+        # to 0, so reading infos only after the loop would lose the count. We also
+        # snapshot distance_to_gate / target_gate_idx at the moment the max was
+        # reached (and keep the closest approach toward the next gate) so the
+        # continuous fitness fraction reflects real progress. The battery, by
+        # contrast, is stepped every iteration so energy accumulates over the full
+        # max_steps window regardless of any mid-flight resets.
+        max_gates_passed = 0
+        best_distance_to_gate = float(np.linalg.norm(test_env.gate_pos[0] - test_env.start_pos))
+        best_target_idx = 0
         for _ in range(max_steps):
-            actions, _ = model.predict(obs, deterministic=True) 
+            actions, _ = model.predict(obs, deterministic=True)
             motor_rpms = np.asarray(actions).flatten()
             obs, _rewards, _dones, infos = test_env.step(actions)
             battery.step(dt, motor_rpms, max_rpm=1.0)
 
-        num_gates_passed = int(infos[0]["num_gates_passed"][0])
+            gates_passed = int(infos[0]["num_gates_passed"][0])
+            current_d2g = float(infos[0]["distance_to_gate"])
+            if gates_passed > max_gates_passed:
+                max_gates_passed = gates_passed
+                best_distance_to_gate = current_d2g
+                best_target_idx = int(infos[0]["target_gate_idx"])
+            elif gates_passed == max_gates_passed and current_d2g < best_distance_to_gate:
+                best_distance_to_gate = current_d2g
+                best_target_idx = int(infos[0]["target_gate_idx"])
+
+        num_gates_passed = max_gates_passed
         total_energy_j   = float(battery.get_total_energy_consumed())
-        
-        distance_to_gate = float(infos[0]["distance_to_gate"])
-        target_idx = int(infos[0]["target_gate_idx"])
-        
+
+        distance_to_gate = best_distance_to_gate
+        target_idx = best_target_idx
+
         if num_gates_passed == 0:
             gate_dist = float(np.linalg.norm(test_env.gate_pos[0] - test_env.start_pos))
         else:

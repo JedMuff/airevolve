@@ -1,11 +1,13 @@
 # library imports
 import os
+os.environ["OMP_NUM_THREADS"] = "1"
 import sys
 import time
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+torch.set_num_threads(1)
 import warnings
 from stable_baselines3 import PPO
 from datetime import datetime
@@ -260,7 +262,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         "MlpPolicy",
         env,
         policy_kwargs=policy_kwargs,
-        verbose=0,
+        verbose=1,
         tensorboard_log=save_dir,
         n_steps=1000,
         batch_size=5000,
@@ -271,7 +273,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     # model.set_logger(custom_logger)
     print(f"[diag] PPO.learn total_timesteps={total_timesteps} env.num_envs={env.num_envs} expected_rollouts={total_timesteps/(env.num_envs*1000):.0f}", flush=True)
     # TRAINING
-    model.learn(total_timesteps=total_timesteps, reset_num_timesteps=False, log_interval=100, callback=FullStatsCallback())
+    model.learn(total_timesteps=total_timesteps, reset_num_timesteps=False, log_interval=100, callback=FullStatsCallback(), progress_bar=True)
     if num is None:
         model.save(save_dir + '/' + "policy")
     else:
@@ -286,8 +288,12 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         data = pd.read_csv(monitor_file+"monitor.csv", skiprows=1)
     episode_rewards = data["r"]  # Rewards per episode
     time_steps = data["t"]  # Timesteps at each episode
+    # Smooth with a rolling average sized to 1% of the episode count so the
+    # trend stays legible regardless of how many millions of timesteps were run.
+    window_size = max(1, len(data) // 100)
+    smoothed_rewards = episode_rewards.rolling(window=window_size, min_periods=1).mean()
     plt.figure(figsize=(10, 6))
-    plt.plot(time_steps, episode_rewards, label="Episode Reward")
+    plt.plot(time_steps, smoothed_rewards, label=f"Episode Reward (rolling avg, window={window_size})")
     # plt.fill_between(time_steps[:,0], episode_rewards_mean - episode_rewards_std, episode_rewards_mean + episode_rewards_std, alpha=0.2)
     plt.xlabel("Timesteps")
     plt.ylabel("Reward")
@@ -300,16 +306,29 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     plt.close()
 
     test_env.reset()
-    
+
+    # Track the maximum gates passed across the whole eval window: if the drone
+    # crashes mid-flight the env resets and num_gates_passed drops back to 0, so
+    # reading infos only after the loop would lose the count. We also snapshot
+    # distance_to_gate / target_gate_idx at the moment the max was reached (and
+    # keep the closest approach toward the next gate) so the continuous fitness
+    # fraction reflects real progress.
+    num_gates_passed = 0
+    d2g = float(np.linalg.norm(test_env.gate_pos[0] - test_env.start_pos))
+    target_idx = 0
     for i in range(max_steps):
         actions, _ = model.predict(test_env.states, deterministic=True)
         states, rewards, dones, infos = test_env.step(actions)
-    
-    # Calculate Continuous Waypoint Fitness
-    num_gates_passed = int(infos[0]["num_gates_passed"][0])
-    d2g = float(infos[0]["distance_to_gate"])
-    target_idx = int(infos[0]["target_gate_idx"])
-    
+        gates_passed = int(infos[0]["num_gates_passed"][0])
+        current_d2g = float(infos[0]["distance_to_gate"])
+        if gates_passed > num_gates_passed:
+            num_gates_passed = gates_passed
+            d2g = current_d2g
+            target_idx = int(infos[0]["target_gate_idx"])
+        elif gates_passed == num_gates_passed and current_d2g < d2g:
+            d2g = current_d2g
+            target_idx = int(infos[0]["target_gate_idx"])
+
     if num_gates_passed == 0:
         gate_dist = float(np.linalg.norm(test_env.gate_pos[0] - test_env.start_pos))
     else:
