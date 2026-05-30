@@ -206,6 +206,12 @@ def _build_fitness(args: argparse.Namespace, config: dict) -> BiObjectiveFitness
             "sparse_weight":          0.0,
             "overdraw_penalty_weight": 0.0,
             "use_power_env":          False,
+            # Keep the terminal clean during massive parallel EA runs: silence
+            # PPO stdout logging and the per-worker tqdm progress bars. PPO still
+            # logs to TensorBoard. (gate_train* default to verbose=1/progress_bar=True
+            # so running those scripts standalone still shows the bars.)
+            "verbose":                0,
+            "progress_bar":           False,
         },
     )
 
@@ -451,7 +457,7 @@ def main() -> None:
 
     print("\n--- Phase 1: Initial Population ---", flush=True)
     initial_pop, init_stats = _build_initial_population(args, config, WrappedHandler)
-    if not initial_pop:
+    if initial_pop is None or len(initial_pop) == 0:
         print("[error] Failed to generate initial population. Exiting.")
         return
     if init_stats is not None:

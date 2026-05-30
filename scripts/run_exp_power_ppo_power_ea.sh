@@ -44,7 +44,7 @@ LOG_DIR="${REPO_ROOT}/logs/exp_power_ppo_power_ea"
 TRAINING_TIMESTEPS=10000000
 GENERATIONS=32
 POPULATION_SIZE=32
-NUM_WORKERS=32
+NUM_WORKERS=12
 NUM_ENVS=4
 DEVICE="cpu"
 GENOME="spherical"
@@ -90,7 +90,7 @@ echo "════════════════════════�
 echo "  training_timesteps : ${TRAINING_TIMESTEPS}"
 echo "  generations        : ${GENERATIONS}"
 echo "  population_size    : ${POPULATION_SIZE}"
-echo "  num_workers (EA)   : ${NUM_WORKERS}"
+echo "  num_workers (EA)   : ${NUM_WORKERS}  (≈ ${NUM_WORKERS}×(1+${NUM_ENVS}) procs across 32c/64t)"
 echo "  num_envs (PPO)     : ${NUM_ENVS}"
 echo "  device             : ${DEVICE}"
 echo "  genome             : ${GENOME}"

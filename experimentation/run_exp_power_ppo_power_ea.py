@@ -211,6 +211,12 @@ def _build_fitness(args: argparse.Namespace, config: dict) -> BiObjectiveFitness
             "sparse_weight":          args.sparse_weight,
             "overdraw_penalty_weight": args.overdraw_weight,
             "use_power_env":          True,
+            # Keep the terminal clean during massive parallel EA runs: silence
+            # PPO stdout logging and the per-worker tqdm progress bars. PPO still
+            # logs to TensorBoard. (gate_train* default to verbose=1/progress_bar=True
+            # so running those scripts standalone still shows the bars.)
+            "verbose":                0,
+            "progress_bar":           False,
         },
     )
 

@@ -52,6 +52,8 @@ class BiObjectiveFitness:
         sparse_weight         : float — Penalty weight for episodic energy (0.0 = disabled).
         overdraw_penalty_weight: float — Per-step current-limit penalty weight (0.0 = disabled).
         use_power_env         : bool  — Whether to use PowerAwareDroneEnv.
+        verbose               : int   — PPO verbosity (default 1; set 0 to silence stdout logging).
+        progress_bar          : bool  — Show PPO tqdm progress bar (default True; set False for parallel EA runs).
     """
 
     def __init__(
@@ -128,6 +130,8 @@ class BiObjectiveFitness:
             sparse_weight=self.brain_kwargs.get("sparse_weight", 0.0),
             use_power_env=self.brain_kwargs.get("use_power_env", False),
             overdraw_penalty_weight=self.brain_kwargs.get("overdraw_penalty_weight", 0.0),
+            verbose=self.brain_kwargs.get("verbose", 1),
+            progress_bar=self.brain_kwargs.get("progress_bar", True),
         )
 
     # ── Internal helpers ──────────────────────────────────────────────────────

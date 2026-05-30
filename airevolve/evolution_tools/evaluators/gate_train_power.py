@@ -102,7 +102,7 @@ class _SingleDroneEnv(gym.Env):
             x_bounds=x_bounds,
             y_bounds=y_bounds,
             z_bounds=z_bounds,
-            gates_ahead=1,
+            gates_ahead=2,
             num_state_history=0,
             num_action_history=0,
             history_step_size=1,
@@ -192,6 +192,8 @@ def train_power(
     sparse_weight: float = 0.002,
     use_power_env: bool = True,
     overdraw_penalty_weight: float = 0.0,
+    verbose: int = 1,
+    progress_bar: bool = True,
 ):
     """Train a PPO policy for gate racing and return bi-objective fitness.
 
@@ -274,7 +276,7 @@ def train_power(
         "MlpPolicy",
         env,
         policy_kwargs=policy_kwargs,
-        verbose=1,
+        verbose=verbose,
         tensorboard_log=save_dir,
         n_steps=1000,
         batch_size=5000,
@@ -324,7 +326,7 @@ def train_power(
             reset_num_timesteps=False,
             log_interval=100,
             callback=[FullStatsCallback(), eval_callback],
-            progress_bar=True,
+            progress_bar=progress_bar,
         )
         final_model_path = os.path.join(save_dir, "final_model")
         model.save(final_model_path)
@@ -343,8 +345,10 @@ def train_power(
             # timesteps were run.
             window_size = max(1, len(data) // 100)
             smoothed_rewards = data["r"].rolling(window=window_size, min_periods=1).mean()
+            smoothed_std = data["r"].rolling(window=window_size, min_periods=1).std()
             plt.figure(figsize=(10, 6))
-            plt.plot(data["t"], smoothed_rewards, label=f"Episode Reward (rolling avg, window={window_size})")
+            plt.plot(data["t"], smoothed_rewards, color="red", label=f"Episode Reward (rolling avg, window={window_size})")
+            plt.fill_between(data["t"], smoothed_rewards - smoothed_std, smoothed_rewards + smoothed_std, color="red", alpha=0.2)
             plt.xlabel("Timesteps")
             plt.ylabel("Reward")
             plt.title("Reward per Episode")
@@ -389,7 +393,7 @@ def train_power(
         y_bounds=y_bounds,
         z_bounds=z_bounds,
         initialize_at_random_gates=False,
-        gates_ahead=1,
+        gates_ahead=2,
         num_state_history=0,
         num_action_history=0,
         history_step_size=1,
@@ -480,6 +484,8 @@ def evaluate_individual(
     sparse_weight: float = 0.0,
     use_power_env: bool = False,
     overdraw_penalty_weight: float = 0.0,
+    verbose: int = 1,
+    progress_bar: bool = True,
 ) -> tuple:
     """Hover-check, train, and evaluate one morphology.
 
@@ -557,6 +563,8 @@ def evaluate_individual(
         sparse_weight=sparse_weight,
         use_power_env=use_power_env,
         overdraw_penalty_weight=overdraw_penalty_weight,
+        verbose=verbose,
+        progress_bar=progress_bar,
     )
 
     # Post-training morphology plot

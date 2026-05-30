@@ -82,9 +82,10 @@ def _load_genome_arms(path: str) -> np.ndarray:
     arms = inner.arms if hasattr(inner, "arms") else inner
     return np.asarray(arms, dtype=float)
 
-def _build_env(morph: str, env_seed: int, device: str, is_power_aware: bool) -> DroneGateEnv:
+def _build_env(morph: str, env_seed: int, device: str, is_power_aware: bool,
+               gates_ahead: int = 1) -> DroneGateEnv:
     common = dict(
-        num_envs=1, gates_ahead=1, num_state_history=0, num_action_history=0,
+        num_envs=1, gates_ahead=gates_ahead, num_state_history=0, num_action_history=0,
         history_step_size=1, render_mode=None, device=device, dt=0.01,
         initialize_at_random_gates=True, seed=env_seed,
     )
@@ -385,12 +386,33 @@ def _redraw_gate_lines(ax: plt.Axes, gate_steps: list[int]):
             _line_cache[aid].add(gs)
 
 def render_target(t: Target, device: str, steps: int) -> str:
-    # First check observation space size from zip
+    # Infer the observation layout directly from the policy's observation space:
+    #
+    #   standard    obs = 18 (kinematics) + (num_motors - 6) + gates_ahead * 4
+    #   power-aware obs = standard + 3 (SoC, voltage, current)
+    #
+    # num_motors is fixed by the morphology (independent of both unknowns), so we
+    # probe it with a throwaway env first. After subtracting the kinematics and
+    # motor terms, the remainder is gates_ahead*4 (+3 if power-aware). Since
+    # gates_ahead*4 is always a multiple of 4 and the power term is exactly 3, the
+    # remainder mod 4 disambiguates power-aware (==3) from standard (==0), and the
+    # quotient gives gates_ahead.
     data, _, _ = load_from_zip_file(t.policy_zip)
-    obs_dim = data["observation_space"].shape[0]
-    is_power_aware = (obs_dim == 25)
+    obs_dim = int(data["observation_space"].shape[0])
 
-    env = _build_env(t.morph, t.env_seed, device, is_power_aware)
+    probe_env = _build_env(t.morph, t.env_seed, device, is_power_aware=False)
+    num_motors = len(probe_env.drone_sim.config.propellers)
+
+    base = obs_dim - 18 - (num_motors - 6)
+    is_power_aware = (base % 4) == 3
+    gates_ahead = (base - (3 if is_power_aware else 0)) // 4
+    if gates_ahead < 1:
+        raise ValueError(
+            f"Cannot infer a valid gates_ahead from obs_dim={obs_dim} "
+            f"(num_motors={num_motors}, base={base})"
+        )
+
+    env = _build_env(t.morph, t.env_seed, device, is_power_aware, gates_ahead)
     model = PPO.load(t.policy_zip, env=env, device=device)
 
     propellers = env.drone_sim.config.propellers

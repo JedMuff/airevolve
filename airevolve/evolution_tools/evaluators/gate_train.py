@@ -160,7 +160,7 @@ class FullStatsCallback(BaseCallback):
         # Force flush for debugging; can remove later
         self.logger.dump(self.num_timesteps)
 
-def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cuda:0", num=None, max_steps=1200):
+def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cuda:0", num=None, max_steps=1200, verbose=1, progress_bar=True):
 
     if gate_cfg == "backandforth":
         gate_pos = backandforth.gate_pos
@@ -215,7 +215,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         x_bounds=x_bounds,
         y_bounds=y_bounds,
         z_bounds=z_bounds,
-        gates_ahead=1,
+        gates_ahead=2,
         num_state_history=0,
         num_action_history=0,
         history_step_size=1,
@@ -233,7 +233,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         y_bounds=y_bounds,
         z_bounds=z_bounds,
         initialize_at_random_gates=False,
-        gates_ahead=1,
+        gates_ahead=2,
         num_state_history=0,
         num_action_history=0,
         history_step_size=1,
@@ -262,7 +262,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         "MlpPolicy",
         env,
         policy_kwargs=policy_kwargs,
-        verbose=1,
+        verbose=verbose,
         tensorboard_log=save_dir,
         n_steps=1000,
         batch_size=5000,
@@ -273,7 +273,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     # model.set_logger(custom_logger)
     print(f"[diag] PPO.learn total_timesteps={total_timesteps} env.num_envs={env.num_envs} expected_rollouts={total_timesteps/(env.num_envs*1000):.0f}", flush=True)
     # TRAINING
-    model.learn(total_timesteps=total_timesteps, reset_num_timesteps=False, log_interval=100, callback=FullStatsCallback(), progress_bar=True)
+    model.learn(total_timesteps=total_timesteps, reset_num_timesteps=False, log_interval=100, callback=FullStatsCallback(), progress_bar=progress_bar)
     if num is None:
         model.save(save_dir + '/' + "policy")
     else:
@@ -292,9 +292,10 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     # trend stays legible regardless of how many millions of timesteps were run.
     window_size = max(1, len(data) // 100)
     smoothed_rewards = episode_rewards.rolling(window=window_size, min_periods=1).mean()
+    smoothed_std = episode_rewards.rolling(window=window_size, min_periods=1).std()
     plt.figure(figsize=(10, 6))
-    plt.plot(time_steps, smoothed_rewards, label=f"Episode Reward (rolling avg, window={window_size})")
-    # plt.fill_between(time_steps[:,0], episode_rewards_mean - episode_rewards_std, episode_rewards_mean + episode_rewards_std, alpha=0.2)
+    plt.plot(time_steps, smoothed_rewards, color="red", label=f"Episode Reward (rolling avg, window={window_size})")
+    plt.fill_between(time_steps, smoothed_rewards - smoothed_std, smoothed_rewards + smoothed_std, color="red", alpha=0.2)
     plt.xlabel("Timesteps")
     plt.ylabel("Reward")
     plt.title("Reward per Episode")
@@ -340,7 +341,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     
     return continuous_fitness
 
-def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cuda:0", num=None, max_steps=1200) -> list:
+def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cuda:0", num=None, max_steps=1200, verbose=1, progress_bar=True) -> list:
     start_time = time.time()
     sim = get_sim(individual)
     sim.compute_hover(verbose=False)
@@ -375,7 +376,7 @@ def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cf
         plt.savefig(ind_save_dir + "/morphology.png")
     plt.close()
 
-    num_gates_passed = train(individual, gate_cfg, total_timesteps=int(float(training_ts)), save_dir=ind_save_dir, num_envs=int(num_envs), device=device, num=num, max_steps=max_steps)
+    num_gates_passed = train(individual, gate_cfg, total_timesteps=int(float(training_ts)), save_dir=ind_save_dir, num_envs=int(num_envs), device=device, num=num, max_steps=max_steps, verbose=verbose, progress_bar=progress_bar)
 
     fig = plt.figure(figsize=plt.figaspect(0.5))
     ax = fig.add_subplot(111, projection='3d')
