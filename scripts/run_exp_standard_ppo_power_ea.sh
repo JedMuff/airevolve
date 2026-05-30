@@ -68,6 +68,7 @@ while [[ $# -gt 0 ]]; do
         --genome)                GENOME="$2";         shift          ;;
         --gate-cfg)              GATE_CFG="$2";       shift          ;;
         --results-dir)           RESULTS_DIR="$2";    shift          ;;
+        --log-dir)               LOG_DIR="$2";        shift          ;;
         --run-id)                EXTRA_ARGS+=("--run-id" "$2"); shift ;;
         *)                       EXTRA_ARGS+=("$1")                   ;;
     esac
