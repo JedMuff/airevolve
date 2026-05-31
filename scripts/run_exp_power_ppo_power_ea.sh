@@ -41,7 +41,7 @@ RUNNER="${REPO_ROOT}/experimentation/run_exp_power_ppo_power_ea.py"
 RESULTS_DIR="${REPO_ROOT}/results"
 LOG_DIR="${REPO_ROOT}/logs/exp_power_ppo_power_ea"
 
-TRAINING_TIMESTEPS=10000000
+TRAINING_TIMESTEPS=1000000
 GENERATIONS=32
 POPULATION_SIZE=32
 NUM_WORKERS=12

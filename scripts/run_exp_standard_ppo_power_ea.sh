@@ -41,10 +41,10 @@ RUNNER="${REPO_ROOT}/experimentation/run_exp_standard_ppo_power_ea.py"
 RESULTS_DIR="${REPO_ROOT}/results"
 LOG_DIR="${REPO_ROOT}/logs/exp_standard_ppo_power_ea"
 
-TRAINING_TIMESTEPS=10000000
+TRAINING_TIMESTEPS=1000000
 GENERATIONS=32
 POPULATION_SIZE=32
-NUM_WORKERS=12
+NUM_WORKERS=14
 NUM_ENVS=4
 DEVICE="cpu"
 GENOME="spherical"

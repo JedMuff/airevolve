@@ -98,7 +98,15 @@ from run_evolution import get_genome_handler_config, create_genome_handler_wrapp
 import airevolve.evolution_tools.strategies.evolution_components as _evo_components
 
 
-class NonDaemonProcess(multiprocessing.Process):
+import multiprocessing.context
+
+
+# Non-daemon process built on the *spawn* context. spawn starts a fresh
+# interpreter per worker, so workers do NOT inherit the parent's already-imported
+# torch/numpy/matplotlib threads + held locks — which is what was deadlocking
+# fork-based workers and freezing the whole generation. Non-daemon is still
+# required so each worker can spawn its own PPO SubprocVecEnv children.
+class NoDaemonSpawnProcess(multiprocessing.context.SpawnProcess):
     @property
     def daemon(self):
         return False
@@ -108,15 +116,14 @@ class NonDaemonProcess(multiprocessing.Process):
         pass
 
 
+class NoDaemonSpawnContext(multiprocessing.context.SpawnContext):
+    Process = NoDaemonSpawnProcess
+
+
 class NonDaemonPool(multiprocessing.pool.Pool):
-    def Process(self, *args, **kwds):
-        if args and hasattr(args[0], "Process"):
-            ctx, args = args[0], args[1:]
-        else:
-            ctx = self._ctx
-        proc = ctx.Process(*args, **kwds)
-        proc.__class__ = NonDaemonProcess
-        return proc
+    def __init__(self, *args, **kwargs):
+        kwargs["context"] = NoDaemonSpawnContext()
+        super().__init__(*args, **kwargs)
 
 
 _EXPERIMENT_NAME = "exp_standard_ppo_power_ea"
@@ -488,13 +495,43 @@ def main() -> None:
                 )
                 for i, genome in enumerate(population)
             ]
+            PER_INDIVIDUAL_TIMEOUT = 1800  # seconds; ~8 min expected at 1M ts
             with NonDaemonPool(
                 processes=min(num_workers, len(population)),
                 initializer=_evo_components._pool_worker_init,
             ) as pool:
-                evaluated = pool.map(
-                    _evo_components._evaluate_individual_worker, args_list
-                )
+                async_results = [
+                    pool.apply_async(
+                        _evo_components._evaluate_individual_worker, (a,)
+                    )
+                    for a in args_list
+                ]
+                evaluated = []
+                for i, ar in enumerate(async_results):
+                    try:
+                        evaluated.append(ar.get(timeout=PER_INDIVIDUAL_TIMEOUT))
+                    except multiprocessing.TimeoutError:
+                        gen_dir = os.path.join(
+                            log_dir_base, f"generation_{generation:02d}"
+                        )
+                        indiv_log_dir = os.path.join(
+                            gen_dir, f"individual_{ids[i]}"
+                        )
+                        print(
+                            f"[TIMEOUT] individual {ids[i]} exceeded "
+                            f"{PER_INDIVIDUAL_TIMEOUT}s — recording sentinel.",
+                            flush=True,
+                        )
+                        evaluated.append({
+                            "id": ids[i],
+                            "generation": generation,
+                            "genome": population[i],
+                            "log_dir": indiv_log_dir,
+                            "parent_ids": all_parent_ids[i],
+                            "in_pop": False,
+                            "fitness": (0, 1e9),
+                        })
+                pool.terminate()
             return pd.DataFrame(evaluated)
         return _evo_components._orig_evaluate_population(
             fitness_function, population, ids, generation,
