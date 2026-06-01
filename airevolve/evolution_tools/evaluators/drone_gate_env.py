@@ -96,6 +96,41 @@ class DroneGateEnv(VecEnv):
         self.Bf, self.Bm = self.drone_sim.config.get_allocation_matrices()
 
         num_motors = self.drone_sim.num_motors
+        
+        # ── Action centering: compute U_hover ──────────────────────────────
+        # We need the physical W_hover (rad/s) that makes total thrust = mg.
+        # Use the raw k_f constant and mass directly (same formula as
+        # derive_reference_params) to avoid the dynamics-frame normalisation
+        # trap (k_fz_signed is k_f/m and operates on W_MAX_N=3000 scale).
+        k_f = self.drone_sim.config.propellers[0]["constants"][0]
+        mass = float(self.drone_sim.mass)
+        F_hover_per_motor = mass * 9.81 / num_motors
+        W_hover_phys = np.sqrt(F_hover_per_motor / k_f)   # rad/s, physical
+        
+        w_min = self.drone_sim.params["w_min"]             # 305.4 for prop3
+        w_max = self.drone_sim.params["w_max"]             # 4399  for prop3
+        k_poly = self.drone_sim.params["k"]                # 0.84  for prop3
+        
+        # Clamp: if the drone can't even hover at full throttle, cap at 1.0
+        W_hover_clamped = min(W_hover_phys, w_max)
+        
+        # The sqrt-poly motor model: Wc = (w_max-w_min)*sqrt(k*U²+(1-k)*U)+w_min
+        # Invert for U that yields W_hover:
+        #   sqrt(k*U²+(1-k)*U) = (W_hover - w_min) / (w_max - w_min)
+        #   k*U² + (1-k)*U = target_val
+        target_val = ((W_hover_clamped - w_min) / (w_max - w_min)) ** 2
+        
+        if abs(k_poly) < 1e-12:
+            U_hover = target_val
+        else:
+            a = k_poly
+            b = 1.0 - k_poly
+            c = -target_val
+            discriminant = b**2 - 4*a*c
+            U_hover = (-b + np.sqrt(max(0.0, discriminant))) / (2*a)
+            
+        self.U_hover = float(np.clip(U_hover, 0.01, 0.99))
+        self.u_hover = 2.0 * self.U_hover - 1.0
 
         # Motor time constant for first-order dynamics (matches reference 5-inch sysid).
         self.motor_tau = 0.04
@@ -190,8 +225,10 @@ class DroneGateEnv(VecEnv):
         self.filtered_actions = np.zeros((num_envs, num_motors), dtype=np.float32)
 
         self.step_counts = np.zeros(num_envs, dtype=int)
-        self.actions = np.zeros((num_envs,num_motors), dtype=np.float32)
-        self.prev_actions = np.zeros((num_envs,num_motors), dtype=np.float32)
+        self.actions = np.full((num_envs,num_motors), self.u_hover, dtype=np.float32)
+        self.prev_actions = np.full((num_envs,num_motors), self.u_hover, dtype=np.float32)
+        self.raw_actions = np.zeros((num_envs,num_motors), dtype=np.float32)
+        self.prev_raw_actions = np.zeros((num_envs,num_motors), dtype=np.float32)
         self.dones = np.zeros(num_envs, dtype=bool)
         self.final_gate_passed = np.zeros(num_envs, dtype=bool)
 
@@ -397,8 +434,28 @@ class DroneGateEnv(VecEnv):
         return self.reset_(np.ones(self.num_envs, dtype=bool))
 
     def step_async(self, actions):
-        self.prev_actions = self.actions
-        self.actions = actions
+        self.prev_actions = self.actions.copy()
+        if hasattr(self, 'raw_actions'):
+            self.prev_raw_actions = self.raw_actions.copy()
+        else:
+            self.prev_raw_actions = np.zeros_like(actions, dtype=np.float32)
+            
+        # Actions from RL are in [-1, 1]. Center them using a smooth Power Curve (Throttle Expo).
+        # We want RL=0 (which maps to x=0.5) to produce U_hover.
+        # U = x^gamma  =>  0.5^gamma = U_hover  =>  gamma = ln(U_hover) / ln(0.5)
+        # This prevents the severe asymmetric heave coupling caused by piecewise linear mapping!
+        
+        clipped_actions = np.clip(actions, -1.0, 1.0)
+        x = (clipped_actions + 1.0) / 2.0
+        
+        safe_U_hover = np.clip(self.U_hover, 1e-4, 0.9999)
+        gamma = np.log(safe_U_hover) / np.log(0.5)
+        
+        U = np.power(x, gamma)
+        centered_actions = 2.0 * U - 1.0
+        
+        self.actions = centered_actions
+        self.raw_actions = actions.copy()
     
     def step_wait(self):
         # Reference-form dynamics: dynamics_func takes the full 12+N state
@@ -445,7 +502,7 @@ class DroneGateEnv(VecEnv):
         d2g_old = np.linalg.norm(pos_old - pos_gate, axis=1)
         d2g_new = np.linalg.norm(pos_new - pos_gate, axis=1)
         rat_penalty = 0.001*np.linalg.norm(new_states[:,9:12], axis=1)
-        action_penalty_delta = 0.001*np.linalg.norm((self.actions-self.prev_actions), axis=1)
+        action_penalty_delta = 0.001*np.linalg.norm((self.raw_actions-self.prev_raw_actions), axis=1)
 
         prog_rewards = d2g_old - d2g_new
         rewards = prog_rewards - rat_penalty - action_penalty_delta
@@ -459,11 +516,11 @@ class DroneGateEnv(VecEnv):
         gate_size = 1.5
         gate_passed = passed_gate_plane & np.all(np.abs(pos_new - pos_gate)<gate_size/2, axis=1)
 
-        # +10 only on the final gate of the lap. Per-gate was tried in
-        # session 2 (10-seed × 10M steps, native fig8) and all 10 seeds
-        # collapsed; final-only is closer to the reference, where the
-        # gate-pass reward path is itself dead code (quad_race_env.py:271,
-        # 479,482 — final_gate_passed is initialized but never updated).
+        # Reward for passing ANY gate in the correct sequence.
+        # This gives a dense spike to offset the sudden drop in `prog_rewards` when the target switches.
+        rewards[gate_passed] += 5.0
+        
+        # Additional +10 only on the final gate of the lap.
         final_gate_passed = gate_passed & (self.target_gates == self.num_gates - 1)
         rewards[final_gate_passed] += 10.0
 

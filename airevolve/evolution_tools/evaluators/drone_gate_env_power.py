@@ -285,13 +285,18 @@ class PowerAwareDroneEnv(DroneGateEnv):
 
         bat_ref = self._batteries[0]  # constants are the same for all batteries
         for i in range(self.num_envs):
-            requested_rpms = safe_actions[i]
+            # Raw actions are in [-1, 1]. Convert to normalized RPMs [0, 1] for the ECM.
+            requested_rpms = (safe_actions[i] + 1.0) / 2.0
+            
             i_theoretical = bat_ref.compute_current_from_rpms(
                 requested_rpms, self._max_rpm
             )
             if i_theoretical > LiPoBatteryModel.BATTERY_MAX_CURRENT:
                 scale = LiPoBatteryModel.BATTERY_MAX_CURRENT / i_theoretical
-                safe_actions[i] = requested_rpms * np.sqrt(scale)
+                # Scale the [0, 1] RPMs, then convert back to [-1, 1] for physics
+                scaled_rpms = requested_rpms * np.sqrt(scale)
+                safe_actions[i] = (scaled_rpms * 2.0) - 1.0
+                
                 delta_i = i_theoretical - LiPoBatteryModel.BATTERY_MAX_CURRENT
                 overdraw_penalties[i] = self._overdraw_penalty_weight * delta_i
 
@@ -305,9 +310,11 @@ class PowerAwareDroneEnv(DroneGateEnv):
 
         for i in range(self.num_envs):
             if not pre_depleted[i]:
+                # Pass normalized [0, 1] RPMs to the battery step
+                rpm_normalized = (safe_actions[i] + 1.0) / 2.0
                 self._batteries[i].step(
                     float(self.dt),
-                    safe_actions[i],
+                    rpm_normalized,
                     self._max_rpm,
                 )
 

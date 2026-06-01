@@ -46,7 +46,7 @@ class backandforth():
     gate_yaw = np.array([0,0,2,2], dtype=np.float32) * np.pi / 2
     x_bounds = np.array([-2, 12], dtype=np.float32)
     y_bounds = np.array([-5, 5], dtype=np.float32)
-    z_bounds = np.array([-7, 0], dtype=np.float32)
+    z_bounds = np.array([-15, 0], dtype=np.float32)
     starting_pos = np.array([0.0, 0.0, GATE_ALT])
 
 class figure8():
@@ -63,7 +63,7 @@ class figure8():
     gate_yaw = np.array([0,-1,0,1,2,-1,2,1], dtype=np.float32) * np.pi / 2
     x_bounds = np.array([-5, 5], dtype=np.float32)
     y_bounds = np.array([-5, 5], dtype=np.float32)
-    z_bounds = np.array([-7, 0], dtype=np.float32)
+    z_bounds = np.array([-15, 0], dtype=np.float32)
     starting_pos = np.array([0.0, -1.5, GATE_ALT])
 
 class circle():
@@ -76,7 +76,7 @@ class circle():
     gate_yaw = np.array([0,1,2,3], dtype=np.float32) * np.pi / 2
     x_bounds = np.array([-5, 5], dtype=np.float32)
     y_bounds = np.array([-5, 5], dtype=np.float32)
-    z_bounds = np.array([-7, 0], dtype=np.float32)
+    z_bounds = np.array([-15, 0], dtype=np.float32)
     starting_pos = np.array([-1.5, -1.5, GATE_ALT])
 
 class slalom():
@@ -88,7 +88,7 @@ class slalom():
     gate_yaw = np.tile([1, 0, -1, 0], ng) * np.pi / 2
     x_bounds = np.array([-2, 82+1], dtype=np.float32)
     y_bounds = np.array([-5, 5], dtype=np.float32)
-    z_bounds = np.array([-7, 0], dtype=np.float32)
+    z_bounds = np.array([-15, 0], dtype=np.float32)
     starting_pos = np.array([0, -1, GATE_ALT])
     
 # ANIMATION FUNCTION
@@ -160,7 +160,7 @@ class FullStatsCallback(BaseCallback):
         # Force flush for debugging; can remove later
         self.logger.dump(self.num_timesteps)
 
-def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cuda:0", num=None, max_steps=1200, verbose=1, progress_bar=True):
+def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True):
 
     if gate_cfg == "backandforth":
         gate_pos = backandforth.gate_pos
@@ -216,6 +216,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         y_bounds=y_bounds,
         z_bounds=z_bounds,
         gates_ahead=2,
+        initialize_at_random_gates=random_start,
         num_state_history=0,
         num_action_history=0,
         history_step_size=1,
@@ -253,23 +254,27 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     # custom_logger = configure(save_dir, ["stdout", "csv", "tensorboard"])
 
     # MODEL DEFINITION (matches optimal_quad_control_RL/train.py:149-161).
-    policy_kwargs = dict(
-        activation_fn=torch.nn.ReLU,
-        net_arch=dict(pi=[64, 64], vf=[64, 64]),
-        log_std_init=0.0,
-    )
-    model = PPO(
-        "MlpPolicy",
-        env,
-        policy_kwargs=policy_kwargs,
-        verbose=verbose,
-        tensorboard_log=save_dir,
-        n_steps=1000,
-        batch_size=5000,
-        n_epochs=10,
-        gamma=0.999,
-        device=device,
-    )
+    if load_policy is not None:
+        print(f"[diag] Loading existing policy from {load_policy}", flush=True)
+        model = PPO.load(load_policy, env=env, device=device)
+    else:
+        policy_kwargs = dict(
+            activation_fn=torch.nn.ReLU,
+            net_arch=dict(pi=[64, 64], vf=[64, 64]),
+            log_std_init=0.0,
+        )
+        model = PPO(
+            "MlpPolicy",
+            env,
+            policy_kwargs=policy_kwargs,
+            verbose=verbose,
+            tensorboard_log=save_dir,
+            n_steps=1000,
+            batch_size=5000,
+            n_epochs=10,
+            gamma=0.999,
+            device=device,
+        )
     # model.set_logger(custom_logger)
     print(f"[diag] PPO.learn total_timesteps={total_timesteps} env.num_envs={env.num_envs} expected_rollouts={total_timesteps/(env.num_envs*1000):.0f}", flush=True)
     # TRAINING
@@ -341,8 +346,16 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     
     return continuous_fitness
 
-def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cuda:0", num=None, max_steps=1200, verbose=1, progress_bar=True) -> list:
+def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True) -> list:
     start_time = time.time()
+    os.makedirs(ind_save_dir, exist_ok=True)
+    
+    # Always save the genome so it can be loaded later for visualization
+    try:
+        np.save(os.path.join(ind_save_dir, "genome.npy"), individual)
+    except Exception as e:
+        print(f"[warn] Could not save genome.npy: {e}")
+    
     sim = get_sim(individual)
     sim.compute_hover(verbose=False)
     if sim.static_success == False:
@@ -376,7 +389,7 @@ def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cf
         plt.savefig(ind_save_dir + "/morphology.png")
     plt.close()
 
-    num_gates_passed = train(individual, gate_cfg, total_timesteps=int(float(training_ts)), save_dir=ind_save_dir, num_envs=int(num_envs), device=device, num=num, max_steps=max_steps, verbose=verbose, progress_bar=progress_bar)
+    num_gates_passed = train(individual, gate_cfg, total_timesteps=int(float(training_ts)), save_dir=ind_save_dir, num_envs=int(num_envs), device=device, num=num, max_steps=max_steps, random_start=random_start, load_policy=load_policy, verbose=verbose, progress_bar=progress_bar)
 
     fig = plt.figure(figsize=plt.figaspect(0.5))
     ax = fig.add_subplot(111, projection='3d')
@@ -403,6 +416,9 @@ if __name__ == "__main__":
     parser.add_argument('--gate_cfg', default='figure8')
     parser.add_argument('--device', default='cuda:0')
     parser.add_argument('--num', default=None)
+    parser.add_argument('--max_steps', default=1200, type=int)
+    parser.add_argument('--no_random_start', action='store_true')
+    parser.add_argument('--load_policy', default=None, type=str)
     args = parser.parse_args()
 
     # Load Bf and Bm from directory
@@ -422,6 +438,9 @@ if __name__ == "__main__":
     out_dir = os.path.join(project_root, "results_training", ind_name)
     os.makedirs(out_dir, exist_ok=True)
 
-    num_gates_passed = evaluate_individual(individual, out_dir, args.training_timesteps, args.num_envs, args.gate_cfg, args.device, num=num)
+    num_gates_passed = evaluate_individual(
+        individual, out_dir, args.training_timesteps, args.num_envs, args.gate_cfg, args.device, 
+        num=num, max_steps=args.max_steps, random_start=not args.no_random_start, load_policy=args.load_policy
+    )
 
     print(num_gates_passed)

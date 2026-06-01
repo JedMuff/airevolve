@@ -34,8 +34,8 @@ from airevolve.simulator.simulation.battery_model import LiPoBatteryModel
 VIDEOS_DIR = "__data__/evolved_videos"
 
 GENOME_PATHS = {
-    "ind0903": (
-        "/Users/mikolajduchlinski/Desktop/results_folder_update/check/individual_0065/genome.npy"
+    "ind0091": (
+        "/Users/mikolajduchlinski/Desktop/airevolve/results_training/standard_hexa/genome.npy"
     ),
 }
 
@@ -70,8 +70,8 @@ class Target:
 
 TARGETS = [
     Target(
-        "ind0903", "finalgate",
-        "/Users/mikolajduchlinski/Desktop/results_folder_update/check/individual_0065/policy.zip",
+        "ind0091", "finalgate",
+        "/Users/mikolajduchlinski/Desktop/airevolve/results_training/standard_hexa/policy.zip",
         5, 1001, 31,
     ),
 ]
