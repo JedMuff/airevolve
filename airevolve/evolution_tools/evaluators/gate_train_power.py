@@ -90,6 +90,7 @@ class _SingleDroneEnv(gym.Env):
         sparse_weight: float,
         use_power_env: bool,
         overdraw_penalty_weight: float = 0.0,
+        random_start: bool = True,
     ) -> None:
         super().__init__()
 
@@ -103,6 +104,7 @@ class _SingleDroneEnv(gym.Env):
             y_bounds=y_bounds,
             z_bounds=z_bounds,
             gates_ahead=2,
+            initialize_at_random_gates=random_start,
             num_state_history=0,
             num_action_history=0,
             history_step_size=1,
@@ -155,6 +157,7 @@ def _env_init(
     sparse_weight,
     use_power_env,
     overdraw_penalty_weight=0.0,
+    random_start=True,
 ):
     """Top-level (non-closure) factory — picklable for 'spawn' start method."""
     return _SingleDroneEnv(
@@ -170,6 +173,7 @@ def _env_init(
         sparse_weight=sparse_weight,
         use_power_env=use_power_env,
         overdraw_penalty_weight=overdraw_penalty_weight,
+        random_start=random_start,
     )
 
 
@@ -194,6 +198,8 @@ def train_power(
     overdraw_penalty_weight: float = 0.0,
     verbose: int = 1,
     progress_bar: bool = True,
+    random_start: bool = True,
+    load_policy=None,
 ):
     """Train a PPO policy for gate racing and return bi-objective fitness.
 
@@ -258,6 +264,7 @@ def train_power(
         sparse_weight=sparse_weight,
         use_power_env=use_power_env,
         overdraw_penalty_weight=overdraw_penalty_weight,
+        random_start=random_start,
     )
     env = SubprocVecEnv(
         [_factory] * num_envs,
@@ -267,23 +274,27 @@ def train_power(
     monitor_file = save_dir + (f"m{num}" if num is not None else "")
     env = VecMonitor(env, filename=monitor_file)
 
-    policy_kwargs = dict(
-        activation_fn=torch.nn.ReLU,
-        net_arch=dict(pi=[64, 64], vf=[64, 64]),
-        log_std_init=0.0,
-    )
-    model = PPO(
-        "MlpPolicy",
-        env,
-        policy_kwargs=policy_kwargs,
-        verbose=verbose,
-        tensorboard_log=save_dir,
-        n_steps=1000,
-        batch_size=5000,
-        n_epochs=10,
-        gamma=0.999,
-        device=device,
-    )
+    if load_policy is not None:
+        print(f"[diag] Loading existing policy from {load_policy}", flush=True)
+        model = PPO.load(load_policy, env=env, device=device)
+    else:
+        policy_kwargs = dict(
+            activation_fn=torch.nn.ReLU,
+            net_arch=dict(pi=[64, 64], vf=[64, 64]),
+            log_std_init=0.0,
+        )
+        model = PPO(
+            "MlpPolicy",
+            env,
+            policy_kwargs=policy_kwargs,
+            verbose=verbose,
+            tensorboard_log=save_dir,
+            n_steps=1000,
+            batch_size=5000,
+            n_epochs=10,
+            gamma=0.999,
+            device=device,
+        )
     # ── Train then unconditionally release worker processes ──────────────────
     # SubprocVecEnv creates one OS pipe pair per worker.  Without an explicit
     # env.close(), those pipes accumulate across evaluations in the same OS
@@ -304,6 +315,7 @@ def train_power(
         sparse_weight=0.0,
         use_power_env=use_power_env,
         overdraw_penalty_weight=0.0,
+        random_start=False,
     )])
     # Wrap in VecMonitor so EvalCallback can read episode stats and SB3 stops
     # warning about an unmonitored eval environment.
@@ -374,9 +386,9 @@ def train_power(
     # no reward shaping during eval, battery always starts at full charge for a
     # fair and deterministic 12-second measurement window.
     #
-    # Energy is tracked by an independent LiPoBatteryModel stepped in lockstep
-    # with the physics, so that it accumulates across the full max_steps window
-    # regardless of any mid-flight episode resets.
+    # Energy is tracked by the env's built-in vectorized battery model.  Since
+    # DroneGateEnv resets bat_energy_j on episode boundary, we accumulate
+    # total energy across resets by snapshotting before each step.
     #
     # IMPORTANT: we use the observation *returned* by reset() / step() rather
     # than test_env.states.  For PowerAwareDroneEnv, self.states holds only the
@@ -411,6 +423,10 @@ def train_power(
         )
     else:
         test_env = DroneGateEnv(**_test_kwargs)
+        # Enable strict voltage kill for NSGA-II eval: voltage sag below 12.8 V
+        # triggers battery depletion (current → 0, dynamic_w_max collapses,
+        # drone loses thrust and eventually goes OOB).
+        test_env.strict_voltage_kill = True
 
     # Initialise return values before the try block so that a mid-eval crash
     # still yields a well-typed, dominated tuple rather than an UnboundLocalError.
@@ -418,28 +434,35 @@ def train_power(
     total_energy_j   = _FAIL_ENERGY
 
     try:
-        obs = test_env.reset()   
-        battery = LiPoBatteryModel(strict_voltage_kill=True)
-        battery.reset()
-
-        dt = float(test_env.dt)
+        obs = test_env.reset()
 
         # Track the maximum gates passed across the whole eval window: if the
         # drone crashes mid-flight the env resets and num_gates_passed drops back
         # to 0, so reading infos only after the loop would lose the count. We also
         # snapshot distance_to_gate / target_gate_idx at the moment the max was
         # reached (and keep the closest approach toward the next gate) so the
-        # continuous fitness fraction reflects real progress. The battery, by
-        # contrast, is stepped every iteration so energy accumulates over the full
-        # max_steps window regardless of any mid-flight resets.
+        # continuous fitness fraction reflects real progress.
+        #
+        # Energy is read from the env's built-in battery model (bat_energy_j).
+        # Since reset_() zeros bat_energy_j, we accumulate across resets by
+        # snapshotting the value before each step.
         max_gates_passed = 0
         best_distance_to_gate = float(np.linalg.norm(test_env.gate_pos[0] - test_env.start_pos))
         best_target_idx = 0
+        cumulative_energy_j = 0.0
+        prev_energy_snapshot = 0.0
         for _ in range(max_steps):
             actions, _ = model.predict(obs, deterministic=True)
-            motor_rpms = np.asarray(actions).flatten()
             obs, _rewards, _dones, infos = test_env.step(actions)
-            battery.step(dt, motor_rpms, max_rpm=1.0)
+
+            # Accumulate energy across resets: when the env resets a done episode,
+            # bat_energy_j drops back to ~0.  Detect this and bank the pre-reset
+            # total.  At most one dt's worth of energy is lost per reset (the
+            # battery step that triggered the reset is already zeroed out).
+            current_energy = float(test_env.bat_energy_j[0])
+            if current_energy < prev_energy_snapshot:
+                cumulative_energy_j += prev_energy_snapshot
+            prev_energy_snapshot = current_energy
 
             gates_passed = int(infos[0]["num_gates_passed"][0])
             current_d2g = float(infos[0]["distance_to_gate"])
@@ -451,8 +474,11 @@ def train_power(
                 best_distance_to_gate = current_d2g
                 best_target_idx = int(infos[0]["target_gate_idx"])
 
+        # Add the final segment's energy (from the last reset to end of loop)
+        cumulative_energy_j += prev_energy_snapshot
+
         num_gates_passed = max_gates_passed
-        total_energy_j   = float(battery.get_total_energy_consumed())
+        total_energy_j   = cumulative_energy_j
 
         distance_to_gate = best_distance_to_gate
         target_idx = best_target_idx
@@ -467,7 +493,7 @@ def train_power(
         continuous_fitness = float(num_gates_passed) + fraction
 
     finally:
-        test_env.close()  
+        test_env.close()
 
     return continuous_fitness, total_energy_j
 
@@ -486,6 +512,8 @@ def evaluate_individual(
     overdraw_penalty_weight: float = 0.0,
     verbose: int = 1,
     progress_bar: bool = True,
+    random_start: bool = True,
+    load_policy=None,
 ) -> tuple:
     """Hover-check, train, and evaluate one morphology.
 
@@ -565,6 +593,8 @@ def evaluate_individual(
         overdraw_penalty_weight=overdraw_penalty_weight,
         verbose=verbose,
         progress_bar=progress_bar,
+        random_start=random_start,
+        load_policy=load_policy,
     )
 
     # Post-training morphology plot
@@ -606,6 +636,8 @@ if __name__ == "__main__":
     parser.add_argument("--sparse_weight",    default=0.002, type=float)
     parser.add_argument("--overdraw_weight",  default=0.0,   type=float)
     parser.add_argument("--no_power_env",     action="store_true")
+    parser.add_argument("--no_random_start",  action="store_true")
+    parser.add_argument("--load_policy",      default=None,  type=str)
     args = parser.parse_args()
 
     try:
@@ -632,6 +664,8 @@ if __name__ == "__main__":
         sparse_weight=args.sparse_weight,
         use_power_env=not args.no_power_env,
         overdraw_penalty_weight=args.overdraw_weight,
+        random_start=not args.no_random_start,
+        load_policy=args.load_policy,
     )
 
     # Subprocess contract: print "gates energy_j" on stdout

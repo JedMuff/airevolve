@@ -6,7 +6,6 @@ TensorBoard + CSV telemetry callback for the three power-aware PPO experiments.
 Logged every `window` env-steps
 ---------------------------------
 TensorBoard scalars (prefix  battery/):
-  mode_pct_Ground / Takeoff / Hover / Move   — % of steps in each mode
   mean_final_soc_pct                         — mean SoC at episode end [%]
   mean_final_voltage                         — mean terminal voltage [V]
   mean_remaining_cap_mah                     — mean remaining capacity [mAh]
@@ -23,8 +22,7 @@ TensorBoard scalars (prefix  train_ext/):
 CSV file (one row per window):
   timestep, gate_passes, mean_ep_reward, mean_ep_length, n_episodes,
   mean_final_soc_pct, mean_final_voltage, mean_ep_energy_j,
-  battery_died_rate, mode_pct_Ground, mode_pct_Takeoff,
-  mode_pct_Hover, mode_pct_Move
+  battery_died_rate
 
 Trajectory (env 0 only):
   Saved as  <save_dir>/traj/traj_<timestep>.npy  every `traj_save_interval` steps.
@@ -50,10 +48,6 @@ import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
 
 from airevolve.simulator.simulation.battery_model import LiPoBatteryModel
-
-
-_MODES = ["Ground", "Takeoff", "Hover", "Move"]
-
 
 class PowerStatsCallback(BaseCallback):
     """
@@ -112,10 +106,6 @@ class PowerStatsCallback(BaseCallback):
         self._ep_energy_j:  list[float] = []
         self._ep_died:      list[bool]  = []
 
-        # Mode step counts (across all envs, all steps in window)
-        self._mode_steps: dict[str, int] = defaultdict(int)
-        self._total_mode_steps = 0
-
         # Instantaneous power accumulator (for mean power estimation)
         self._power_sum   = 0.0
         self._power_count = 0
@@ -136,8 +126,6 @@ class PowerStatsCallback(BaseCallback):
                 "mean_ep_reward", "mean_ep_length", "n_episodes",
                 "mean_final_soc_pct", "mean_final_voltage",
                 "mean_ep_energy_j", "battery_died_rate",
-                "mode_pct_Ground", "mode_pct_Takeoff",
-                "mode_pct_Hover",  "mode_pct_Move",
             ])
 
         self._traj_dir = os.path.join(save_dir, "traj")
@@ -160,14 +148,8 @@ class PowerStatsCallback(BaseCallback):
         """Called once per PPO step (= one call to env.step_wait())."""
         power_env = self._get_power_env()
 
-        # ── Mode distribution across all envs this step ───────────────────────
-        for bat in power_env._batteries:
-            mode = bat._last_mode or "Hover"     # fallback if not yet set
-            self._mode_steps[mode] += 1
-        self._total_mode_steps += power_env.num_envs
-
         # ── Instantaneous power (env 0 only) for mean power estimate ─────────
-        p = power_env._batteries[0]._last_power
+        p = power_env.bat_power[0]
         self._power_sum   += p
         self._power_count += 1
 
@@ -210,14 +192,6 @@ class PowerStatsCallback(BaseCallback):
         """Flush window accumulators to TensorBoard + CSV."""
         t = self.num_timesteps
 
-        # ── Mode distribution ─────────────────────────────────────────────────
-        total = self._total_mode_steps or 1
-        mode_pcts: dict[str, float] = {}
-        for mode in _MODES:
-            pct = self._mode_steps[mode] / total * 100.0
-            mode_pcts[mode] = pct
-            self.logger.record(f"battery/mode_pct_{mode}", pct)
-
         # ── Episode-level battery metrics ─────────────────────────────────────
         mean_soc   = float(np.mean(self._ep_final_soc)) * 100.0 if self._ep_final_soc else float("nan")
         mean_v     = float(np.mean(self._ep_final_v))             if self._ep_final_v   else float("nan")
@@ -253,8 +227,6 @@ class PowerStatsCallback(BaseCallback):
                 mean_r, mean_l, n_eps,
                 mean_soc, mean_v,
                 mean_ej, died_rate,
-                mode_pcts["Ground"], mode_pcts["Takeoff"],
-                mode_pcts["Hover"],  mode_pcts["Move"],
             ])
 
         # ── Reset window accumulators ─────────────────────────────────────────
@@ -265,8 +237,6 @@ class PowerStatsCallback(BaseCallback):
         self._ep_final_v.clear()
         self._ep_energy_j.clear()
         self._ep_died.clear()
-        self._mode_steps   = defaultdict(int)
-        self._total_mode_steps = 0
         self._power_sum    = 0.0
         self._power_count  = 0
         self._last_log     = t

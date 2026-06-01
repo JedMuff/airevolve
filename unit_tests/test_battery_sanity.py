@@ -18,11 +18,9 @@ print()
 for i in range(200):
     obs, r, d, info = env.step(np.ones((1, env.num_motors)))
     if i % 25 == 0:
-        bat = env._batteries[0]
-        print(f'Step {i:3d}: V={bat.voltage:.2f}V  SoC={bat.soc:.4f}  w_max={env.dynamic_w_max[0]:.1f}  depleted={bat.is_depleted}')
+        print(f'Step {i:3d}: V={env.bat_voltage[0]:.2f}V  SoC={env.bat_soc[0]:.4f}  w_max={env.dynamic_w_max[0]:.1f}  depleted={env.bat_is_depleted[0]}')
 print()
-bat = env._batteries[0]
-print(f'Final: V={bat.voltage:.2f}V  SoC={bat.soc:.4f}  w_max={env.dynamic_w_max[0]:.1f} (nominal: {env._base_w_max:.1f})  ratio={env.dynamic_w_max[0]/env._base_w_max:.3f}  depleted={bat.is_depleted}')
+print(f'Final: V={env.bat_voltage[0]:.2f}V  SoC={env.bat_soc[0]:.4f}  w_max={env.dynamic_w_max[0]:.1f} (nominal: {env._base_w_max:.1f})  ratio={env.dynamic_w_max[0]/env._base_w_max:.3f}  depleted={env.bat_is_depleted[0]}')
 
 # Also verify the PowerAwareDroneEnv still works
 print('\n--- PowerAwareDroneEnv check ---')
@@ -32,7 +30,6 @@ obs = penv.reset()
 print(f'Obs shape: {obs.shape} (expected: (2, {env.obs_len + 3}))')
 for i in range(50):
     obs, r, d, info = penv.step(np.ones((2, penv.num_motors)))
-bat = penv._batteries[0]
-print(f'Step 50: V={bat.voltage:.2f}V  SoC={bat.soc:.4f}  w_max={penv.dynamic_w_max[0]:.1f}')
-print(f'Battery strict_voltage_kill: {bat.strict_voltage_kill}')
+print(f'Step 50: V={penv.bat_voltage[0]:.2f}V  SoC={penv.bat_soc[0]:.4f}  w_max={penv.dynamic_w_max[0]:.1f}')
+print(f'Battery strict_voltage_kill: {penv.strict_voltage_kill}')
 print('\nAll checks passed!')

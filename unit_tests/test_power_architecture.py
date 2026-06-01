@@ -111,10 +111,9 @@ def test_rl_ppo_branch():
     env_zero.step_async(action_batch)
     _, rewards_zero, dones_zero, infos_zero = env_zero.step_wait()
 
-    bat_with = env_with._batteries[0]
-    actual_current  = bat_with._last_current
-    terminal_voltage = bat_with._last_voltage
-    battery_alive   = not bat_with.is_depleted
+    actual_current  = env_with.bat_current[0]
+    terminal_voltage = env_with.bat_voltage[0]
+    battery_alive   = not env_with.bat_is_depleted[0]
 
     measured_step_penalty = float(rewards_zero[0]) - float(rewards_with[0])
 
@@ -125,7 +124,7 @@ def test_rl_ppo_branch():
     print(f"  Limiter fired                 : {'YES ✓' if i_theoretical > BATTERY_MAX_A else 'NO ✗'}")
     print()
     print(f"  Terminal voltage              : {terminal_voltage:.4f} V")
-    print(f"  battery.is_depleted           : {bat_with.is_depleted}  "
+    print(f"  battery.is_depleted           : {env_with.bat_is_depleted[0]}  "
           f"({'alive ✓' if battery_alive else 'dead ✗'})")
     print()
     print(f"  Delta I (overdraw)            : {delta_i:.4f} A")

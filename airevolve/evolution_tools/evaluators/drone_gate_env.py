@@ -243,10 +243,14 @@ class DroneGateEnv(VecEnv):
         # One LiPoBatteryModel per parallel env.  strict_voltage_kill=False so
         # battery depletion never *terminates* the episode — it only removes
         # thrust (BMS cutoff → I=0 → dynamic_w_max→0 → drone falls → OOB).
-        self._batteries: list[LiPoBatteryModel] = [
-            LiPoBatteryModel(strict_voltage_kill=False, track_history=False)
-            for _ in range(num_envs)
-        ]
+        self.strict_voltage_kill = False
+        self.bat_soc = np.ones(num_envs, dtype=np.float64)
+        self.bat_capacity_ah = np.full(num_envs, LiPoBatteryModel.CAPACITY_AH, dtype=np.float64)
+        self.bat_voltage = np.full(num_envs, LiPoBatteryModel.VOLTAGE_FULL, dtype=np.float64)
+        self.bat_current = np.zeros(num_envs, dtype=np.float64)
+        self.bat_power = np.zeros(num_envs, dtype=np.float64)
+        self.bat_energy_j = np.zeros(num_envs, dtype=np.float64)
+        self.bat_is_depleted = np.zeros(num_envs, dtype=bool)
         # Normalised RPM convention for the battery ECM (actions [-1,1] → [0,1])
         self._max_rpm: float = 1.0
         # Nominal w_max used to scale voltage→w_max
@@ -443,8 +447,14 @@ class DroneGateEnv(VecEnv):
         self.filtered_actions[dones] = 0.0
 
         # Reset batteries for done envs (full charge, no SoC randomisation).
-        for i in np.where(dones)[0]:
-            self._batteries[int(i)].reset()
+        if np.any(dones):
+            self.bat_soc[dones] = 1.0
+            self.bat_capacity_ah[dones] = LiPoBatteryModel.CAPACITY_AH
+            self.bat_voltage[dones] = LiPoBatteryModel.VOLTAGE_FULL
+            self.bat_current[dones] = 0.0
+            self.bat_power[dones] = 0.0
+            self.bat_energy_j[dones] = 0.0
+            self.bat_is_depleted[dones] = False
         # Restore nominal dynamic_w_max for freshly-reset envs.
         self.dynamic_w_max[dones] = self._base_w_max
         
@@ -496,34 +506,105 @@ class DroneGateEnv(VecEnv):
         else:
             action_for_dynamics = self.actions
 
-        # ── Betaflight-style current limiter ──────────────────────────────
-        # Clamp RPMs before physics if the theoretical current draw exceeds
-        # the battery's continuous discharge limit (71.25 A).  No reward
-        # penalty here — that belongs in PowerAwareDroneEnv.
+        # ── Betaflight-style current limiter & Battery Step ───────────────
         safe_actions = action_for_dynamics.copy()
-        bat_ref = self._batteries[0]  # constants are identical across envs
-        for i in range(self.num_envs):
-            requested_rpms = (safe_actions[i] + 1.0) / 2.0
-            i_theoretical = bat_ref.compute_current_from_rpms(
-                requested_rpms, self._max_rpm
+        requested_rpms = (safe_actions + 1.0) / 2.0
+
+        # 1. Compute theoretical current (vectorized)
+        rpm_ratio = np.clip(requested_rpms / self._max_rpm, 0.0, 1.0)
+        motor_currents = (
+            LiPoBatteryModel.MOTOR_IDLE_CURRENT
+            + (LiPoBatteryModel.MOTOR_MAX_CURRENT - LiPoBatteryModel.MOTOR_IDLE_CURRENT) * rpm_ratio ** 2
+        )
+        i_theoretical = LiPoBatteryModel.FC_BASELINE_CURRENT + np.sum(motor_currents, axis=1)
+
+        # 2. Voltage-aware current limit: prevent terminal voltage from dropping
+        #    below the depletion threshold.
+        #      V_terminal = V_ideal - I * R_int >= V_DEPLETION_THRESHOLD
+        #      => I <= (V_ideal - V_DEPLETION_THRESHOLD) / R_int
+        v_ideal = 13.0 + 3.8 * np.sqrt(np.clip(self.bat_soc, 0.0, 1.0))
+        i_max_voltage = (
+            (v_ideal - LiPoBatteryModel.VOLTAGE_DEPLETION_THRESHOLD)
+            / LiPoBatteryModel.INTERNAL_RESISTANCE
+        )
+        effective_i_max = np.minimum(
+            float(LiPoBatteryModel.BATTERY_MAX_CURRENT),
+            np.maximum(i_max_voltage, 0.0),
+        )
+
+        # 3. Current limiter: scale all motor throttles uniformly so that total
+        #    current does not exceed effective_i_max.  Accounts for the constant
+        #    idle-current component so the scaling is exact:
+        #      I_total = I_const + (I_MAX_M - I_IDLE_M) * Σ throttle_i²
+        #    Scaling each throttle_i by α gives:
+        #      I_new = I_const + α² * (I_total - I_const)  = effective_i_max
+        #      => α = sqrt((effective_i_max - I_const) / (I_total - I_const))
+        _i_const = (
+            LiPoBatteryModel.FC_BASELINE_CURRENT
+            + self.num_motors * LiPoBatteryModel.MOTOR_IDLE_CURRENT
+        )
+        exceeds = i_theoretical > effective_i_max
+        if np.any(exceeds):
+            i_var = i_theoretical[exceeds] - _i_const
+            i_var_allowed = np.maximum(effective_i_max[exceeds] - _i_const, 0.0)
+            alpha = np.sqrt(
+                np.where(i_var > 0, np.clip(i_var_allowed / i_var, 0.0, 1.0), 0.0)
             )
-            if i_theoretical > LiPoBatteryModel.BATTERY_MAX_CURRENT:
-                scale = LiPoBatteryModel.BATTERY_MAX_CURRENT / i_theoretical
-                scaled_rpms = requested_rpms * np.sqrt(scale)
-                safe_actions[i] = (scaled_rpms * 2.0) - 1.0
+            safe_actions[exceeds] = (requested_rpms[exceeds] * alpha[:, None] * 2.0) - 1.0
+
+            # Recalculate physical values for the battery step
+            requested_rpms[exceeds] = (safe_actions[exceeds] + 1.0) / 2.0
+            rpm_ratio[exceeds] = np.clip(requested_rpms[exceeds] / self._max_rpm, 0.0, 1.0)
+            motor_currents[exceeds] = (
+                LiPoBatteryModel.MOTOR_IDLE_CURRENT
+                + (LiPoBatteryModel.MOTOR_MAX_CURRENT - LiPoBatteryModel.MOTOR_IDLE_CURRENT) * rpm_ratio[exceeds] ** 2
+            )
+            i_theoretical[exceeds] = LiPoBatteryModel.FC_BASELINE_CURRENT + np.sum(motor_currents[exceeds], axis=1)
+
         action_for_dynamics = safe_actions
 
-        # ── Battery step (clamped motor RPMs) ─────────────────────────────
-        for i in range(self.num_envs):
-            if not self._batteries[i].is_depleted:
-                rpm_normalized = (safe_actions[i] + 1.0) / 2.0
-                self._batteries[i].step(
-                    float(self.dt), rpm_normalized, self._max_rpm
-                )
+        # 3. Vectorized Battery Step
+        active = ~self.bat_is_depleted
+        if np.any(active):
+            current = i_theoretical[active]
+            
+            # Capacity drain
+            delta_ah = current * (float(self.dt) / 3600.0)
+            self.bat_capacity_ah[active] = np.maximum(0.0, self.bat_capacity_ah[active] - delta_ah)
+            self.bat_soc[active] = np.clip(self.bat_capacity_ah[active] / LiPoBatteryModel.CAPACITY_AH, 0.0, 1.0)
+            
+            # ECM voltage: V_ideal = 13.0 + 3.8 * √SoC
+            v_ideal = 13.0 + 3.8 * np.sqrt(self.bat_soc[active])
+            v_terminal = v_ideal - (current * LiPoBatteryModel.INTERNAL_RESISTANCE)
+            self.bat_voltage[active] = v_terminal
+            
+            # Power & Energy
+            power_w = v_terminal * current
+            self.bat_power[active] = power_w
+            self.bat_current[active] = current
+            self.bat_energy_j[active] += power_w * float(self.dt)
+            
+            # Depletion check
+            soc_depleted = self.bat_soc[active] < LiPoBatteryModel.SOC_DEPLETION_THRESHOLD
+            if self.strict_voltage_kill:
+                v_depleted = v_terminal < LiPoBatteryModel.VOLTAGE_DEPLETION_THRESHOLD
+            else:
+                v_depleted = np.zeros_like(soc_depleted, dtype=bool)
+                
+            depleted_now = soc_depleted | v_depleted
+            
+            # Update global depleted mask
+            new_depleted = np.zeros_like(self.bat_is_depleted)
+            new_depleted[active] = depleted_now
+            self.bat_is_depleted |= new_depleted
+            
+            # If depleted now, zero out current/power
+            just_depleted = active & new_depleted
+            self.bat_current[just_depleted] = 0.0
+            self.bat_power[just_depleted] = 0.0
 
-        # ── Voltage sag → dynamic w_max ───────────────────────────────────
-        voltages = np.array([b.voltage for b in self._batteries])
-        self.dynamic_w_max = voltages * (self._base_w_max / 14.8)
+        # 4. Voltage sag -> dynamic w_max
+        self.dynamic_w_max = self.bat_voltage * (self._base_w_max / 14.8)
 
         full_state = self.world_states
         w_max_array = self.dynamic_w_max

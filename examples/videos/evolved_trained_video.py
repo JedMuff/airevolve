@@ -467,12 +467,11 @@ def render_target(t: Target, device: str, steps: int) -> str:
         gates_passed = int(env.num_gates_passed[0])
         gate_just_passed = bool(infos[0].get("gate_passed", False))
 
-        env_bat = env._batteries[0]
         bat = {
-            "soc": env_bat.soc,
-            "voltage": env_bat.voltage,
-            "current": env_bat.current,
-            "power": env_bat._last_power,
+            "soc": env.bat_soc[0],
+            "voltage": env.bat_voltage[0],
+            "current": env.bat_current[0],
+            "power": env.bat_power[0],
         }
 
         dashboard.push(step, ws, prev_u, bat, gate_just_passed)
