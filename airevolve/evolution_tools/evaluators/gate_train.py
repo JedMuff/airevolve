@@ -160,7 +160,7 @@ class FullStatsCallback(BaseCallback):
         # Force flush for debugging; can remove later
         self.logger.dump(self.num_timesteps)
 
-def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True):
+def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, phys_max_rate_rp=15.0, phys_max_rate_yaw=15.0):
 
     if gate_cfg == "backandforth":
         gate_pos = backandforth.gate_pos
@@ -223,6 +223,10 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         render_mode=None,
         device=device,
         max_steps=max_steps,
+        action_filter_alpha=action_filter_alpha,
+        k_quad_drag=k_quad_drag,
+        phys_max_rate_rp=phys_max_rate_rp,
+        phys_max_rate_yaw=phys_max_rate_yaw,
     )
     test_env = DroneGateEnv(
         num_envs=1,
@@ -241,6 +245,10 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         render_mode=None,
         device=device,
         max_steps=max_steps,
+        action_filter_alpha=action_filter_alpha,
+        k_quad_drag=k_quad_drag,
+        phys_max_rate_rp=phys_max_rate_rp,
+        phys_max_rate_yaw=phys_max_rate_yaw,
     )
 
     # Wrap the environment in a Monitor wrapper
@@ -346,7 +354,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     
     return continuous_fitness
 
-def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True) -> list:
+def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, phys_max_rate_rp=15.0, phys_max_rate_yaw=15.0) -> list:
     start_time = time.time()
     os.makedirs(ind_save_dir, exist_ok=True)
     
@@ -389,7 +397,7 @@ def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cf
         plt.savefig(ind_save_dir + "/morphology.png")
     plt.close()
 
-    num_gates_passed = train(individual, gate_cfg, total_timesteps=int(float(training_ts)), save_dir=ind_save_dir, num_envs=int(num_envs), device=device, num=num, max_steps=max_steps, random_start=random_start, load_policy=load_policy, verbose=verbose, progress_bar=progress_bar)
+    num_gates_passed = train(individual, gate_cfg, total_timesteps=int(float(training_ts)), save_dir=ind_save_dir, num_envs=int(num_envs), device=device, num=num, max_steps=max_steps, random_start=random_start, load_policy=load_policy, verbose=verbose, progress_bar=progress_bar, action_filter_alpha=action_filter_alpha, k_quad_drag=k_quad_drag, phys_max_rate_rp=phys_max_rate_rp, phys_max_rate_yaw=phys_max_rate_yaw)
 
     fig = plt.figure(figsize=plt.figaspect(0.5))
     ax = fig.add_subplot(111, projection='3d')

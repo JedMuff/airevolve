@@ -62,6 +62,9 @@ class DroneGateEnv(VecEnv):
                  dt=0.01,
                  action_filter_alpha=1.0,
                  max_steps=1200,
+                 k_quad_drag=0.05,
+                 phys_max_rate_rp=15.0,
+                 phys_max_rate_yaw=15.0,
                  ):
         
         # Set device
@@ -257,7 +260,68 @@ class DroneGateEnv(VecEnv):
         self._base_w_max: float = float(self.drone_sim.params["w_max"])
         # Per-env dynamic RPM limit (starts at nominal; updated each step)
         self.dynamic_w_max: np.ndarray = np.full(num_envs, self._base_w_max, dtype=np.float64)
-    
+
+        # Gyroscopic coupling coefficients from the drone's inertia tensor.
+        # The lambdified dynamics use d_p = Mx (torque/Ixx) without the ω×(Iω) term.
+        # For the full Euler rigid-body equation I·dω/dt = τ − ω×(Iω) with
+        # diagonal inertia, the missing per-step correction is:
+        #   Δp = (Iyy - Izz)/Ixx · q · r · dt
+        #   Δq = (Izz - Ixx)/Iyy · p · r · dt
+        #   Δr = (Ixx - Iyy)/Izz · p · q · dt
+        Ixx_f = float(self.drone_sim.inertia[0, 0])
+        Iyy_f = float(self.drone_sim.inertia[1, 1])
+        Izz_f = float(self.drone_sim.inertia[2, 2])
+        self._gyro_coeff_p = (Iyy_f - Izz_f) / Ixx_f
+        self._gyro_coeff_q = (Izz_f - Ixx_f) / Iyy_f
+        self._gyro_coeff_r = (Ixx_f - Iyy_f) / Izz_f
+        # Quadratic aerodynamic drag coefficient (m⁻¹); tunable at construction.
+        # Adds F_drag_quad = -k_quad * v_body * |v_body| on all 3 body axes.
+        self._k_quad_drag = float(k_quad_drag)
+
+        # ── Morphology-aware per-axis angular rate caps ────────────────────
+        # Tuning knobs (all exposed as __init__ kwargs):
+        #   k_quad_drag       — quadratic translational drag coeff (m⁻¹)
+        #   phys_max_rate_rp  — hard ceiling for roll/pitch (rad/s)
+        #   phys_max_rate_yaw — hard ceiling for yaw (rad/s); yaw torque is small
+        # Plus the fixed constant below:
+        #   _tau_settle = 0.04 s — motor settling time constant; matches the
+        #                          supervisor's previous paper (don't change for
+        #                          scientific consistency across baselines).
+        #
+        # Formula: max_rate = min(alpha_max · tau_settle, phys_ceiling)
+        #   alpha_max = sum(|k_axis_signed[i]|) · w_max²
+        # k_p/q/r_signed are already (torque / I_axis), i.e. angular accel per W².
+        # Relative scaling is preserved: a heavier / shorter-armed drone has
+        # smaller k values → lower cap.  IMPORTANT: alpha_max for roll/pitch on
+        # small prop3 drones is ~3000-4000 rad/s², so even with tau=0.04 s the
+        # raw cap (~130 rad/s) is unrealistic; the phys ceiling clamps it.
+        # To target ~24 gates/12s, tune phys_max_rate_rp downward (try 26 rad/s
+        # ≈ 1500 deg/s for realistic racing) and/or increase k_quad_drag.
+        _tau_settle = 0.04
+        self._phys_max_rp  = float(phys_max_rate_rp)
+        self._phys_max_yaw = float(phys_max_rate_yaw)
+        _w_max = self.drone_sim.params["w_max"]
+        _k_p_s = self.drone_sim.params["k_p_signed"]
+        _k_q_s = self.drone_sim.params["k_q_signed"]
+        _k_r_s = self.drone_sim.params["k_r_signed"]
+        self.max_rate_roll  = min(sum(abs(k) for k in _k_p_s) * _w_max**2 * _tau_settle, self._phys_max_rp)
+        self.max_rate_pitch = min(sum(abs(k) for k in _k_q_s) * _w_max**2 * _tau_settle, self._phys_max_rp)
+        self.max_rate_yaw   = min(sum(abs(k) for k in _k_r_s) * _w_max**2 * _tau_settle, self._phys_max_yaw)
+        print(
+            f"[DroneGateEnv] tuning: k_quad_drag={self._k_quad_drag:.4f}  "
+            f"phys_max_rp={self._phys_max_rp:.1f} rad/s  "
+            f"phys_max_yaw={self._phys_max_yaw:.1f} rad/s  "
+            f"tau_settle={_tau_settle:.3f}s",
+            flush=True,
+        )
+        print(
+            f"[DroneGateEnv] morphology caps: "
+            f"roll={np.degrees(self.max_rate_roll):.0f} "
+            f"pitch={np.degrees(self.max_rate_pitch):.0f} "
+            f"yaw={np.degrees(self.max_rate_yaw):.0f} deg/s",
+            flush=True,
+        )
+
     def _convert_individual_to_propellers(self, individual):
         """
         Convert legacy individual array to propeller configuration.
@@ -613,11 +677,60 @@ class DroneGateEnv(VecEnv):
             full_state.T, action_for_dynamics.T, w_max_array
         ).T  # (num_envs, 12+N)
         new_states = (full_state + self.dt * full_state_dot).astype(np.float32)
+        dt_f = float(self.dt)
+
+        # ── Quadratic aerodynamic drag ────────────────────────────────────
+        # The lambdified dynamics already apply linear drag: -k_x * v_b * sum_W.
+        # This block adds the quadratic term: -k_quad * v_b * |v_b| on all three
+        # body-frame axes.  Equivalent to a pre-integration force in Euler scheme.
+        phi_n   = new_states[:, 6].astype(np.float64)
+        theta_n = new_states[:, 7].astype(np.float64)
+        psi_n   = new_states[:, 8].astype(np.float64)
+        vw_x    = new_states[:, 3].astype(np.float64)
+        vw_y    = new_states[:, 4].astype(np.float64)
+        vw_z    = new_states[:, 5].astype(np.float64)
+        cphi = np.cos(phi_n);  sphi = np.sin(phi_n)
+        cth  = np.cos(theta_n); sth  = np.sin(theta_n)
+        cpsi = np.cos(psi_n);  spsi = np.sin(psi_n)
+        # World → body  (R^T @ v_world)
+        vbx_q = cpsi*cth*vw_x + spsi*cth*vw_y - sth*vw_z
+        vby_q = (cpsi*sphi*sth - spsi*cphi)*vw_x + (spsi*sphi*sth + cpsi*cphi)*vw_y + sphi*cth*vw_z
+        vbz_q = (cpsi*cphi*sth + spsi*sphi)*vw_x + (spsi*cphi*sth - cpsi*sphi)*vw_y + cphi*cth*vw_z
+        kq = self._k_quad_drag
+        Fq_bx = -kq * vbx_q * np.abs(vbx_q)
+        Fq_by = -kq * vby_q * np.abs(vby_q)
+        Fq_bz = -kq * vbz_q * np.abs(vbz_q)
+        # Body → world  (R @ F_body)
+        dv_wx = cpsi*cth*Fq_bx + (cpsi*sphi*sth - spsi*cphi)*Fq_by + (cpsi*cphi*sth + spsi*sphi)*Fq_bz
+        dv_wy = spsi*cth*Fq_bx + (spsi*sphi*sth + cpsi*cphi)*Fq_by + (spsi*cphi*sth - cpsi*sphi)*Fq_bz
+        dv_wz = -sth*Fq_bx + sphi*cth*Fq_by + cphi*cth*Fq_bz
+        new_states[:, 3] += (dv_wx * dt_f).astype(np.float32)
+        new_states[:, 4] += (dv_wy * dt_f).astype(np.float32)
+        new_states[:, 5] += (dv_wz * dt_f).astype(np.float32)
 
         # Detect numerical divergence (NaN, Inf, or excessively large finite values)
         diverged = np.any(~np.isfinite(new_states) | (np.abs(new_states) > 1e6), axis=1)
         if np.any(diverged):
             new_states[diverged] = self.world_states[diverged]
+
+        # ── Gyroscopic coupling correction ────────────────────────────────
+        # Completes the Euler rigid-body equation I·dω/dt = τ − ω×(Iω).
+        # Applied before the rate cap so asymmetric drones must expend torque
+        # fighting precession before the cap has any effect.
+        p0 = self.world_states[:, 9]
+        q0 = self.world_states[:, 10]
+        r0 = self.world_states[:, 11]
+        new_states[:, 9]  += (self._gyro_coeff_p * q0 * r0 * dt_f).astype(np.float32)
+        new_states[:, 10] += (self._gyro_coeff_q * p0 * r0 * dt_f).astype(np.float32)
+        new_states[:, 11] += (self._gyro_coeff_r * p0 * q0 * dt_f).astype(np.float32)
+
+        # ── Morphology-aware angular rate cap ────────────────────────────
+        # Per-axis limits derived from drone's own k_signed parameters in __init__:
+        #   max_rate = sum(|k_axis_signed|) * w_max² * tau_settle
+        # Heavier / shorter-armed drones get a lower cap automatically.
+        new_states[:, 9]  = np.clip(new_states[:, 9],  -self.max_rate_roll,  self.max_rate_roll)
+        new_states[:, 10] = np.clip(new_states[:, 10], -self.max_rate_pitch, self.max_rate_pitch)
+        new_states[:, 11] = np.clip(new_states[:, 11], -self.max_rate_yaw,   self.max_rate_yaw)
 
         self.step_counts += 1
 
@@ -629,8 +742,8 @@ class DroneGateEnv(VecEnv):
         # Rewards
         d2g_old = np.linalg.norm(pos_old - pos_gate, axis=1)
         d2g_new = np.linalg.norm(pos_new - pos_gate, axis=1)
-        rat_penalty = 0.001*np.linalg.norm(new_states[:,9:12], axis=1)
-        action_penalty_delta = 0.001*np.linalg.norm((self.raw_actions-self.prev_raw_actions), axis=1)
+        rat_penalty = 0.003*np.linalg.norm(new_states[:,9:12], axis=1)
+        action_penalty_delta = 0.003*np.linalg.norm((self.raw_actions-self.prev_raw_actions), axis=1)
 
         prog_rewards = d2g_old - d2g_new
         rewards = prog_rewards - rat_penalty - action_penalty_delta
