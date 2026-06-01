@@ -445,7 +445,6 @@ def render_target(t: Target, device: str, steps: int) -> str:
     out_path = os.path.join(out_dir, out_name)
     print(f"Rendering dashboard -> {out_path}", flush=True)
 
-    battery = LiPoBatteryModel(strict_voltage_kill=False)
     iso_view = ViewRenderer("iso", propellers, env.gate_pos, env.gate_yaw)
     top_view = ViewRenderer("top", propellers, env.gate_pos, env.gate_yaw)
     dashboard = DashboardPlotter(
@@ -458,7 +457,6 @@ def render_target(t: Target, device: str, steps: int) -> str:
     out = cv2.VideoWriter(out_path, fourcc, FPS, (OUT_W, OUT_H))
 
     obs = env.reset()
-    battery.reset()
 
     for step in range(steps):
         actions, _ = model.predict(obs, deterministic=True)
@@ -469,9 +467,13 @@ def render_target(t: Target, device: str, steps: int) -> str:
         gates_passed = int(env.num_gates_passed[0])
         gate_just_passed = bool(infos[0].get("gate_passed", False))
 
-        w_norm = np.clip(ws[12:12 + num_motors], -1.0, 1.0)
-        motor_rpms = ((w_norm + 1.0) / 2.0) * wmax
-        bat = battery.step(dt=env.dt, motor_rpms=motor_rpms, max_rpm=wmax)
+        env_bat = env._batteries[0]
+        bat = {
+            "soc": env_bat.soc,
+            "voltage": env_bat.voltage,
+            "current": env_bat.current,
+            "power": env_bat._last_power,
+        }
 
         dashboard.push(step, ws, prev_u, bat, gate_just_passed)
 

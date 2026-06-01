@@ -1,28 +1,20 @@
 """
 drone_gate_env_power.py — PowerAwareDroneEnv
 
-DroneGateEnv extended with motor-level ECM LiPo battery dynamics and three
-power-aware PPO reward-shaping strategies, plus a Betaflight-style current
-limiter that caps RPMs before they reach the physics engine.
+DroneGateEnv extended with power-aware RL reward shaping, battery
+observation augmentation, domain randomisation, and configurable
+battery-depletion episode termination.
 
 Class hierarchy
 ---------------
 VecEnv (SB3 abstract)
-└── DroneGateEnv          (existing env — physics, gates, base reward)
-    └── PowerAwareDroneEnv  (this file — battery, power rewards, domain rand.)
+└── DroneGateEnv          (base — physics, gates, base reward,
+│                          battery model, current limiter, voltage sag)
+    └── PowerAwareDroneEnv  (this file — RL rewards, obs, domain rand.)
 
-Additions over the base env
-----------------------------
-Battery (per env)
-  • One LiPoBatteryModel instance per parallel environment.
-  • Stepped every tick using per-motor RPMs and max_rpm via the quadratic ECM.
-  • Episode terminates when battery.is_depleted  (SoC < 15% OR V < 12.8 V
-    when strict_voltage_kill=True; SoC < 15% only when False).
-
-Current Limiter (Betaflight-style)
-  • Pre-physics: if I_theoretical > BATTERY_MAX_CURRENT (71.25 A),
-    RPMs are scaled by sqrt(BATTERY_MAX_CURRENT / I_theoretical).
-  • Overdraw penalty: reward -= OVERDRAW_PENALTY_WEIGHT * delta_I.
+Battery physics (current limiter, battery stepping, voltage-sag
+dynamic_w_max) live in DroneGateEnv.  This subclass adds only the
+RL-specific layer on top:
 
 Observation extension (always the LAST 3 dims of the obs vector)
   obs[−3] = SoC                ∈ [0, 1]
@@ -39,6 +31,10 @@ Reward shaping  (experiment_type / penalty_weights)
   3  Hybrid : −dense_weight  × P_instant           every step
               +sparse_bonus  × SoC_final_%          at episode end
                                                    (only if battery survived)
+
+Overdraw penalty
+  • reward -= overdraw_penalty_weight × delta_I   when the base-class
+    current limiter clamps actions.
 """
 from __future__ import annotations
 
@@ -63,8 +59,17 @@ from airevolve.simulator.simulation.battery_model import LiPoBatteryModel
 
 class PowerAwareDroneEnv(DroneGateEnv):
     """
-    DroneGateEnv + motor-level ECM battery + Betaflight current limiter +
-    power-aware reward shaping.
+    DroneGateEnv + power-aware RL reward shaping + battery observations +
+    domain randomisation + battery-depletion episode termination.
+
+    Battery physics (current limiter, battery step, voltage sag) are
+    handled by the parent DroneGateEnv.  This subclass:
+      • Reconfigures the parent's batteries (strict_voltage_kill setting)
+      • Extends the observation space by 3 battery dims
+      • Applies Dense / Sparse / Hybrid power rewards
+      • Applies an overdraw penalty when the parent's current limiter fires
+      • Optionally randomises starting SoC (domain randomisation)
+      • Terminates episodes when the battery depletes (configurable)
 
     Parameters
     ----------
@@ -109,7 +114,8 @@ class PowerAwareDroneEnv(DroneGateEnv):
         if experiment_type not in (1, 2, 3):
             raise ValueError(f"experiment_type must be 1, 2, or 3 — got {experiment_type!r}")
 
-        # Parent sets up drone physics, world_states, obs/action spaces, etc.
+        # Parent sets up drone physics, world_states, obs/action spaces,
+        # AND batteries (strict_voltage_kill=False by default in the base).
         super().__init__(**kwargs)
 
         self.experiment_type   = experiment_type
@@ -117,13 +123,6 @@ class PowerAwareDroneEnv(DroneGateEnv):
         self._default_rand_soc = randomize_soc  # preserve for reset_random()
         self._strict_voltage_kill = strict_voltage_kill
 
-        # Actions are normalised to [-1, 1] (the reference-form motor convention:
-        # w_i ∈ [-1, 1] maps to W_i ∈ [0, W_MAX_N]).  We use max_rpm = 1.0 so
-        # that the quadratic RPM curve treats each action element directly as a
-        # fraction of maximum throttle.  Negative values are clamped to 0 inside
-        # compute_current_from_rpms() via np.clip, which correctly represents
-        # below-idle commands drawing only the per-motor idle current.
-        self._max_rpm = 1.0
         self._overdraw_penalty_weight = (
             float(overdraw_penalty_weight)
             if overdraw_penalty_weight is not None
@@ -135,11 +134,11 @@ class PowerAwareDroneEnv(DroneGateEnv):
         self._sparse_weight = float(pw.get("sparse_weight", 0.0))
         self._sparse_bonus  = float(pw.get("sparse_bonus",  0.0))
 
-        # ── Battery array — one instance per parallel environment ──────────────
-        self._batteries: list[LiPoBatteryModel] = [
-            LiPoBatteryModel(strict_voltage_kill=strict_voltage_kill, track_history=False)
-            for _ in range(self.num_envs)
-        ]
+        # ── Reconfigure parent batteries with subclass settings ───────────────
+        # The parent creates batteries with strict_voltage_kill=False.
+        # We override that here to match the subclass's desired behaviour.
+        for bat in self._batteries:
+            bat.strict_voltage_kill = strict_voltage_kill
 
         # ── Terminal-state buffers (written by reset_(), read by step_wait()) ──
         # reset_() is called BEFORE physics reset, so these capture the genuine
@@ -173,15 +172,14 @@ class PowerAwareDroneEnv(DroneGateEnv):
             self._batt_obs[i, 1] = (bat.voltage - self._V_MIN) / (self._V_MAX - self._V_MIN)
             self._batt_obs[i, 2] = bat._last_power / self._P_MAX
 
-    def _reset_single_battery(self, i: int) -> None:
+    def _apply_soc_randomisation(self, i: int) -> None:
         """
-        Reset battery i.  If randomize_soc is active, draw a random starting
-        SoC ∈ [0.5, 1.0] after resetting to force the policy to generalise
-        across different charge levels (domain randomisation).
+        If randomize_soc is active, draw a random starting SoC ∈ [0.5, 1.0]
+        for battery i (domain randomisation).  Called AFTER the parent's
+        reset_ has already reset the battery to full charge.
         """
-        bat = self._batteries[i]
-        bat.reset()
         if self._randomize_soc:
+            bat = self._batteries[i]
             soc = float(np.random.uniform(0.5, 1.0))
             bat._soc                   = soc
             bat._capacity_remaining_ah = soc * bat.CAPACITY_AH
@@ -217,16 +215,13 @@ class PowerAwareDroneEnv(DroneGateEnv):
         Extended reset hook called by the parent for every environment that
         finishes an episode.
 
-        The method runs in two phases:
+        Phases:
         1. PRE-RESET  — capture terminal battery state into _ep_terminal_*
                         buffers so step_wait() can apply the sparse reward.
-        2. PHYSICS RESET — delegate to DroneGateEnv.reset_() (resets kinematics).
-        3. POST-RESET — reset batteries (optionally with random SoC), refresh
-                        battery obs, and return the extended observation.
-
-        NOTE: The return value is used when reset() is called externally.
-              When called internally by step_wait(), the return value is
-              discarded — self.states is what step_wait() ultimately returns.
+        2. PHYSICS RESET — delegate to DroneGateEnv.reset_() which resets
+                          kinematics AND batteries (full charge).
+        3. POST-RESET — apply SoC randomisation on top of the parent's
+                        battery reset, refresh battery obs.
         """
         # Phase 1: capture terminal state BEFORE any battery reset
         for i in np.where(dones)[0]:
@@ -235,12 +230,13 @@ class PowerAwareDroneEnv(DroneGateEnv):
             self._ep_terminal_soc[i]      = bat.soc
             self._ep_terminal_voltage[i]  = bat.voltage
 
-        # Phase 2: parent resets kinematic state, world_states, step_counts
+        # Phase 2: parent resets kinematic state, world_states, step_counts,
+        #          AND batteries (to full charge).
         base_obs = super().reset_(dones)    # → self.states updated here
 
-        # Phase 3: reset batteries for done envs
+        # Phase 3: apply SoC randomisation on top of the parent's battery reset
         for i in np.where(dones)[0]:
-            self._reset_single_battery(int(i))
+            self._apply_soc_randomisation(int(i))
 
         self._update_batt_obs()
         return np.concatenate([base_obs, self._batt_obs], axis=1)
@@ -258,16 +254,14 @@ class PowerAwareDroneEnv(DroneGateEnv):
         """
         Extended step:
 
-        0. Current Limiter — intercept requested RPMs; if I_theoretical exceeds
-           BATTERY_MAX_CURRENT, scale RPMs by sqrt(scale) and apply overdraw penalty.
-        1. Step batteries with the (possibly clamped) motor RPMs.
-        2. Run parent step_wait() — physics, base rewards, base dones.
-           Internally, parent calls reset_(base_dones) → our override fires,
-           saving terminal state and resetting batteries for physics-done envs.
-        3. Terminate any envs whose battery just depleted (not caught by parent).
-        4. Apply power-aware reward shaping (dense / sparse / hybrid).
-        5. Augment info dicts with battery telemetry for done episodes.
-        6. Append battery observations to the returned obs.
+        1. Capture pre-depletion state (before parent's battery step).
+        2. Compute overdraw penalties from current actions (before parent clamps).
+        3. Run parent step_wait() — current limiter + battery step + voltage sag
+           + physics + base rewards + base resets (which calls our reset_() override).
+        4. Detect battery-depletion terminations (not caught by parent).
+        5. Apply power-aware reward shaping (dense / sparse / hybrid + overdraw).
+        6. Augment info dicts with battery telemetry.
+        7. Extend observations with battery state.
 
         Returns
         -------
@@ -276,85 +270,51 @@ class PowerAwareDroneEnv(DroneGateEnv):
         dones     : (num_envs,) bool
         infos     : list of dicts — each done env includes battery telemetry
         """
-        # ── 0. Betaflight-style current limiter ───────────────────────────────
-        # actions holds the raw RPM commands from the policy (shape: num_envs × n_motors).
-        # We must intercept BEFORE the physics step so the dynamics engine never
-        # sees a physically impossible command.
-        overdraw_penalties = np.zeros(self.num_envs, dtype=np.float64)
-        safe_actions = self.actions.copy()  # self.actions set by step_async()
+        # ── 1. Capture pre-depletion state ────────────────────────────────────
+        pre_depleted = np.array([b.is_depleted for b in self._batteries])
 
-        bat_ref = self._batteries[0]  # constants are the same for all batteries
+        # ── 2. Compute overdraw penalties from current actions ────────────────
+        # The parent's step_wait() will clamp actions, but we need to know the
+        # penalty BEFORE that happens.  We read self.actions (or filtered) to
+        # compute the theoretical current; the parent will then clamp them.
+        overdraw_penalties = np.zeros(self.num_envs, dtype=np.float64)
+        if self.action_filter_alpha < 1.0:
+            check_actions = (
+                self.action_filter_alpha * self.actions
+                + (1.0 - self.action_filter_alpha) * self.filtered_actions
+            )
+        else:
+            check_actions = self.actions
+
+        bat_ref = self._batteries[0]
         for i in range(self.num_envs):
-            # Raw actions are in [-1, 1]. Convert to normalized RPMs [0, 1] for the ECM.
-            requested_rpms = (safe_actions[i] + 1.0) / 2.0
-            
+            requested_rpms = (check_actions[i] + 1.0) / 2.0
             i_theoretical = bat_ref.compute_current_from_rpms(
                 requested_rpms, self._max_rpm
             )
             if i_theoretical > LiPoBatteryModel.BATTERY_MAX_CURRENT:
-                scale = LiPoBatteryModel.BATTERY_MAX_CURRENT / i_theoretical
-                # Scale the [0, 1] RPMs, then convert back to [-1, 1] for physics
-                scaled_rpms = requested_rpms * np.sqrt(scale)
-                safe_actions[i] = (scaled_rpms * 2.0) - 1.0
-                
                 delta_i = i_theoretical - LiPoBatteryModel.BATTERY_MAX_CURRENT
                 overdraw_penalties[i] = self._overdraw_penalty_weight * delta_i
 
-        # Write clamped actions back so the parent physics step uses them.
-        self.actions = safe_actions
-
-        # ── 1. Battery step (clamped motor RPMs) ─────────────────────────────
-        # Using the clamped RPMs ensures battery current is consistent with
-        # the forces actually applied to the drone.
-        pre_depleted = np.array([b.is_depleted for b in self._batteries])
-
-        for i in range(self.num_envs):
-            if not pre_depleted[i]:
-                # Pass normalized [0, 1] RPMs to the battery step
-                rpm_normalized = (safe_actions[i] + 1.0) / 2.0
-                self._batteries[i].step(
-                    float(self.dt),
-                    rpm_normalized,
-                    self._max_rpm,
-                )
-
-        # Detect envs that crossed the depletion threshold THIS step
-        post_depleted  = np.array([b.is_depleted for b in self._batteries])
-        just_depleted  = post_depleted & ~pre_depleted
-
-        # ── 2. Parent physics step ────────────────────────────────────────────
-        # Inside super().step_wait():
-        #   • dynamics computed → world_states updated
-        #   • base_dones determined (max_steps | OOB | diverged)
-        #   • self.reset_(base_dones) called → our override:
-        #       – saves _ep_terminal_* for base_dones envs  ✓
-        #       – resets batteries (optionally random SoC)   ✓
-        #   • self.states updated to post-reset gate-relative obs
-        base_w_max = self.drone_sim.params["w_max"]
-        voltages = np.array([b.voltage for b in self._batteries])
-        self.dynamic_w_max = voltages * (base_w_max / 14.8)
-
+        # ── 3. Parent step (current limiter + battery + physics + resets) ─────
         _obs, rewards, base_dones, infos = super().step_wait()
-        # Note: _obs is self.states (may be stale for batt_dones envs below).
-        # We rebuild obs from self.states at the end.
 
-        # ── 3. Battery-depletion terminations ─────────────────────────────────
-        # Envs that just depleted but were NOT already terminated by the parent.
-        batt_dones = just_depleted & ~base_dones
+        # ── 4. Battery-depletion terminations ─────────────────────────────────
+        post_depleted = np.array([b.is_depleted for b in self._batteries])
+        just_depleted = post_depleted & ~pre_depleted & ~base_dones
+        batt_dones = just_depleted
         if np.any(batt_dones):
-            # reset_() saves terminal state, resets batteries, updates self.states
             self.reset_(batt_dones)
 
         all_dones = base_dones | batt_dones
 
-        # ── 4. Power-aware reward shaping ─────────────────────────────────────
+        # ── 5. Power-aware reward shaping ─────────────────────────────────────
 
         # Overdraw penalty (applied every step where the limiter fired)
         rewards -= overdraw_penalties
 
         if self.experiment_type in (1, 3) and self._dense_weight > 0.0:
             # Dense penalty: every step, for every env (including terminal step).
-            # _last_power is valid because we stepped batteries above (step 1).
             for i in range(self.num_envs):
                 rewards[i] -= self._dense_weight * self._batteries[i]._last_power
 
@@ -366,18 +326,14 @@ class PowerAwareDroneEnv(DroneGateEnv):
 
                 if self.experiment_type == 2:
                     # Sparse penalty: deduct total episode energy from final reward.
-                    # Weight is in units of reward / Joule — sweep to find the
-                    # Pareto frontier between gate-passes and energy efficiency.
                     rewards[i] -= self._sparse_weight * ep_energy
 
                 elif self.experiment_type == 3 and not batt_died:
                     # Hybrid bonus: grant +sparse_bonus × SoC_final_%  if the
-                    # battery survived the episode (agent conserved energy).
-                    # A battery that died earns NO bonus — the agent must learn
-                    # to reach the goal AND land with charge remaining.
+                    # battery survived the episode.
                     rewards[i] += self._sparse_bonus * (ep_soc * 100.0)
 
-        # ── 5. Augment info dicts with battery telemetry ──────────────────────
+        # ── 6. Augment info dicts with battery telemetry ──────────────────────
         for i in np.where(all_dones)[0]:
             infos[i]["battery_final_soc"]     = float(self._ep_terminal_soc[i])
             infos[i]["battery_final_voltage"]  = float(self._ep_terminal_voltage[i])
@@ -400,10 +356,7 @@ class PowerAwareDroneEnv(DroneGateEnv):
                     term_batt_obs
                 ])
 
-        # ── 6. Extend observations ────────────────────────────────────────────
-        # Use self.states (authoritative post-all-resets gate-relative obs).
-        # For done envs this is the fresh reset state; for active envs it is
-        # the current flight state — consistent with standard SB3 VecEnv contract.
+        # ── 7. Extend observations ────────────────────────────────────────────
         self._update_batt_obs()
         obs_ext = np.concatenate([self.states, self._batt_obs], axis=1)
 

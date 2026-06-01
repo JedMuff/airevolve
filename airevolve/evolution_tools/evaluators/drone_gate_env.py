@@ -14,6 +14,7 @@ from stable_baselines3.common.vec_env import VecEnv
 # Import new simulation API
 from airevolve.simulator.simulation.drone_simulator import DroneSimulator
 from airevolve.simulator.simulation.drone_configuration import DroneConfiguration
+from airevolve.simulator.simulation.battery_model import LiPoBatteryModel
 from airevolve.evolution_tools.genome_handlers.mounting_points import (
     generate_disc_mounting_points, assign_nearest_mounting_point
 )
@@ -237,6 +238,21 @@ class DroneGateEnv(VecEnv):
         self.pause = False
         
         self.num_motors = num_motors
+
+        # ── Battery physics (realistic power ceiling for all training) ─────
+        # One LiPoBatteryModel per parallel env.  strict_voltage_kill=False so
+        # battery depletion never *terminates* the episode — it only removes
+        # thrust (BMS cutoff → I=0 → dynamic_w_max→0 → drone falls → OOB).
+        self._batteries: list[LiPoBatteryModel] = [
+            LiPoBatteryModel(strict_voltage_kill=False, track_history=False)
+            for _ in range(num_envs)
+        ]
+        # Normalised RPM convention for the battery ECM (actions [-1,1] → [0,1])
+        self._max_rpm: float = 1.0
+        # Nominal w_max used to scale voltage→w_max
+        self._base_w_max: float = float(self.drone_sim.params["w_max"])
+        # Per-env dynamic RPM limit (starts at nominal; updated each step)
+        self.dynamic_w_max: np.ndarray = np.full(num_envs, self._base_w_max, dtype=np.float64)
     
     def _convert_individual_to_propellers(self, individual):
         """
@@ -425,6 +441,12 @@ class DroneGateEnv(VecEnv):
         # Clear the action-filter memory for envs that just reset, so the
         # next action isn't smoothed against a stale pre-reset action.
         self.filtered_actions[dones] = 0.0
+
+        # Reset batteries for done envs (full charge, no SoC randomisation).
+        for i in np.where(dones)[0]:
+            self._batteries[int(i)].reset()
+        # Restore nominal dynamic_w_max for freshly-reset envs.
+        self.dynamic_w_max[dones] = self._base_w_max
         
         # update states
         self.update_states()
@@ -474,12 +496,37 @@ class DroneGateEnv(VecEnv):
         else:
             action_for_dynamics = self.actions
 
+        # ── Betaflight-style current limiter ──────────────────────────────
+        # Clamp RPMs before physics if the theoretical current draw exceeds
+        # the battery's continuous discharge limit (71.25 A).  No reward
+        # penalty here — that belongs in PowerAwareDroneEnv.
+        safe_actions = action_for_dynamics.copy()
+        bat_ref = self._batteries[0]  # constants are identical across envs
+        for i in range(self.num_envs):
+            requested_rpms = (safe_actions[i] + 1.0) / 2.0
+            i_theoretical = bat_ref.compute_current_from_rpms(
+                requested_rpms, self._max_rpm
+            )
+            if i_theoretical > LiPoBatteryModel.BATTERY_MAX_CURRENT:
+                scale = LiPoBatteryModel.BATTERY_MAX_CURRENT / i_theoretical
+                scaled_rpms = requested_rpms * np.sqrt(scale)
+                safe_actions[i] = (scaled_rpms * 2.0) - 1.0
+        action_for_dynamics = safe_actions
+
+        # ── Battery step (clamped motor RPMs) ─────────────────────────────
+        for i in range(self.num_envs):
+            if not self._batteries[i].is_depleted:
+                rpm_normalized = (safe_actions[i] + 1.0) / 2.0
+                self._batteries[i].step(
+                    float(self.dt), rpm_normalized, self._max_rpm
+                )
+
+        # ── Voltage sag → dynamic w_max ───────────────────────────────────
+        voltages = np.array([b.voltage for b in self._batteries])
+        self.dynamic_w_max = voltages * (self._base_w_max / 14.8)
+
         full_state = self.world_states
-        
-        if hasattr(self, 'dynamic_w_max') and self.dynamic_w_max is not None:
-            w_max_array = self.dynamic_w_max
-        else:
-            w_max_array = np.full(self.num_envs, self.drone_sim.params["w_max"])
+        w_max_array = self.dynamic_w_max
             
         full_state_dot = self.drone_sim.dynamics_func(
             full_state.T, action_for_dynamics.T, w_max_array
