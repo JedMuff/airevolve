@@ -19,6 +19,9 @@ if REPO_ROOT not in sys.path:
 
 from airevolve.evolution_tools.evaluators.drone_gate_env import DroneGateEnv
 from airevolve.evolution_tools.evaluators.drone_gate_env_power import PowerAwareDroneEnv
+from airevolve.evolution_tools.evaluators.gate_train import (
+    figure8, backandforth, circle, slalom,
+)
 from airevolve.simulator.visualization.animation import (
     create_camera, create_gate_geometry, draw_drone_and_forces,
     COLORS_BGR, DEFAULT_WIDTH, DEFAULT_HEIGHT,
@@ -67,6 +70,7 @@ class Target:
     train_seed: int
     env_seed: int
     expected_gates: int
+    gate_cfg: str = "figure8"   # must match the track used during training
 
 TARGETS = [
     Target(
@@ -82,12 +86,27 @@ def _load_genome_arms(path: str) -> np.ndarray:
     arms = inner.arms if hasattr(inner, "arms") else inner
     return np.asarray(arms, dtype=float)
 
+# Map track name → config class
+_TRACK_CFGS = {
+    "figure8": figure8,
+    "backandforth": backandforth,
+    "circle": circle,
+    "slalom": slalom,
+}
+
 def _build_env(morph: str, env_seed: int, device: str, is_power_aware: bool,
-               gates_ahead: int = 1) -> DroneGateEnv:
+               gates_ahead: int = 1, gate_cfg: str = "figure8") -> DroneGateEnv:
+    track = _TRACK_CFGS[gate_cfg]
     common = dict(
         num_envs=1, gates_ahead=gates_ahead, num_state_history=0, num_action_history=0,
         history_step_size=1, render_mode=None, device=device, dt=0.01,
         initialize_at_random_gates=True, seed=env_seed,
+        gates_pos=track.gate_pos,
+        gate_yaw=track.gate_yaw,
+        start_pos=track.starting_pos,
+        x_bounds=track.x_bounds,
+        y_bounds=track.y_bounds,
+        z_bounds=track.z_bounds,
     )
     if is_power_aware:
         common["strict_voltage_kill"] = False
@@ -400,7 +419,7 @@ def render_target(t: Target, device: str, steps: int) -> str:
     data, _, _ = load_from_zip_file(t.policy_zip)
     obs_dim = int(data["observation_space"].shape[0])
 
-    probe_env = _build_env(t.morph, t.env_seed, device, is_power_aware=False)
+    probe_env = _build_env(t.morph, t.env_seed, device, is_power_aware=False, gate_cfg=t.gate_cfg)
     num_motors = len(probe_env.drone_sim.config.propellers)
 
     base = obs_dim - 18 - (num_motors - 6)
@@ -412,7 +431,7 @@ def render_target(t: Target, device: str, steps: int) -> str:
             f"(num_motors={num_motors}, base={base})"
         )
 
-    env = _build_env(t.morph, t.env_seed, device, is_power_aware, gates_ahead)
+    env = _build_env(t.morph, t.env_seed, device, is_power_aware, gates_ahead, gate_cfg=t.gate_cfg)
     model = PPO.load(t.policy_zip, env=env, device=device)
 
     propellers = env.drone_sim.config.propellers

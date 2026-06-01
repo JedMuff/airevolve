@@ -60,7 +60,7 @@ class figure8():
         [ -1.5,  1.5,  GATE_ALT],
         [  0.0,  0.0,  GATE_ALT],
     ], dtype=np.float32)
-    gate_yaw = np.array([0,-1,0,1,2,-1,2,1], dtype=np.float32) * np.pi / 2
+    gate_yaw = np.array([0,1,2,-1,2,1,0,-1], dtype=np.float32) * np.pi / 2
     x_bounds = np.array([-5, 5], dtype=np.float32)
     y_bounds = np.array([-5, 5], dtype=np.float32)
     z_bounds = np.array([-15, 0], dtype=np.float32)
