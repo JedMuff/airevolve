@@ -115,9 +115,11 @@ class BiObjectiveFitness:
         if not can_hover:
             return self._fail_result(phenotype)
 
-        # 5. RL training + 12-second evaluation (standard env: gate_train / DroneGateEnv)
-        from airevolve.evolution_tools.evaluators import gate_train
-        return gate_train.evaluate_individual(
+        # 5. RL training + 12-second evaluation with LiPoBatteryModel energy tracking.
+        #    gate_train_power.evaluate_individual returns (gates_passed, total_energy_j)
+        #    which is what the NSGA-II bi-objective strategy expects.
+        from airevolve.evolution_tools.evaluators import gate_train_power
+        return gate_train_power.evaluate_individual(
             phenotype,
             ind_save_dir,
             self.brain_kwargs["training_ts"],
@@ -125,7 +127,6 @@ class BiObjectiveFitness:
             self.brain_kwargs["gate_cfg"],
             self.brain_kwargs["device"],
             max_steps=self.brain_kwargs.get("max_steps", 1200),
-            z_drag_multiplier=self.brain_kwargs.get("z_drag_multiplier", 5.0),
             verbose=self.brain_kwargs.get("verbose", 1),
             progress_bar=self.brain_kwargs.get("progress_bar", True),
         )
