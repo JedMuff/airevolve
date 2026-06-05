@@ -48,8 +48,8 @@ LOG_DIR="${REPO_ROOT}/logs/exp_standard_ppo_power_ea"
 TRAINING_TIMESTEPS=1000000
 GENERATIONS=32
 POPULATION_SIZE=32
-NUM_WORKERS=8   # ← was 14; 14×(1+4)=70 processes exceeded 128 GB RAM
-NUM_ENVS=2      # ← was  4; 8×(1+2)=24 processes, safe ceiling ~40-50 GB peak
+NUM_WORKERS=4
+NUM_ENVS=2
 DEVICE="cpu"
 GENOME="spherical"
 GATE_CFG="figure8"
