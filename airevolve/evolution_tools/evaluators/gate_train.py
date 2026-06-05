@@ -160,7 +160,7 @@ class FullStatsCallback(BaseCallback):
         # Force flush for debugging; can remove later
         self.logger.dump(self.num_timesteps)
 
-def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, phys_max_rate_rp=15.0, phys_max_rate_yaw=15.0):
+def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, z_drag_multiplier=25.0, phys_max_rate_rp=25.0, phys_max_rate_yaw=10.0):
 
     if gate_cfg == "backandforth":
         gate_pos = backandforth.gate_pos
@@ -225,6 +225,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         max_steps=max_steps,
         action_filter_alpha=action_filter_alpha,
         k_quad_drag=k_quad_drag,
+        z_drag_multiplier=z_drag_multiplier,
         phys_max_rate_rp=phys_max_rate_rp,
         phys_max_rate_yaw=phys_max_rate_yaw,
     )
@@ -247,6 +248,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         max_steps=max_steps,
         action_filter_alpha=action_filter_alpha,
         k_quad_drag=k_quad_drag,
+        z_drag_multiplier=z_drag_multiplier,
         phys_max_rate_rp=phys_max_rate_rp,
         phys_max_rate_yaw=phys_max_rate_yaw,
     )
@@ -354,7 +356,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     
     return continuous_fitness
 
-def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, phys_max_rate_rp=15.0, phys_max_rate_yaw=15.0) -> list:
+def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, z_drag_multiplier=25.0, phys_max_rate_rp=25.0, phys_max_rate_yaw=10.0) -> list:
     start_time = time.time()
     os.makedirs(ind_save_dir, exist_ok=True)
     
@@ -397,7 +399,7 @@ def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cf
         plt.savefig(ind_save_dir + "/morphology.png")
     plt.close()
 
-    num_gates_passed = train(individual, gate_cfg, total_timesteps=int(float(training_ts)), save_dir=ind_save_dir, num_envs=int(num_envs), device=device, num=num, max_steps=max_steps, random_start=random_start, load_policy=load_policy, verbose=verbose, progress_bar=progress_bar, action_filter_alpha=action_filter_alpha, k_quad_drag=k_quad_drag, phys_max_rate_rp=phys_max_rate_rp, phys_max_rate_yaw=phys_max_rate_yaw)
+    num_gates_passed = train(individual, gate_cfg, total_timesteps=int(float(training_ts)), save_dir=ind_save_dir, num_envs=int(num_envs), device=device, num=num, max_steps=max_steps, random_start=random_start, load_policy=load_policy, verbose=verbose, progress_bar=progress_bar, action_filter_alpha=action_filter_alpha, k_quad_drag=k_quad_drag, z_drag_multiplier=z_drag_multiplier, phys_max_rate_rp=phys_max_rate_rp, phys_max_rate_yaw=phys_max_rate_yaw)
 
     fig = plt.figure(figsize=plt.figaspect(0.5))
     ax = fig.add_subplot(111, projection='3d')
@@ -427,6 +429,7 @@ if __name__ == "__main__":
     parser.add_argument('--max_steps', default=1200, type=int)
     parser.add_argument('--no_random_start', action='store_true')
     parser.add_argument('--load_policy', default=None, type=str)
+    parser.add_argument('--z_drag_multiplier', default=25.0, type=float)
     args = parser.parse_args()
 
     # Load Bf and Bm from directory
@@ -448,7 +451,8 @@ if __name__ == "__main__":
 
     num_gates_passed = evaluate_individual(
         individual, out_dir, args.training_timesteps, args.num_envs, args.gate_cfg, args.device, 
-        num=num, max_steps=args.max_steps, random_start=not args.no_random_start, load_policy=args.load_policy
+        num=num, max_steps=args.max_steps, random_start=not args.no_random_start, load_policy=args.load_policy,
+        z_drag_multiplier=args.z_drag_multiplier
     )
 
     print(num_gates_passed)

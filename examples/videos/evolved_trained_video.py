@@ -493,8 +493,13 @@ def render_target(t: Target, device: str, steps: int) -> str:
 
             out.write(frame)
 
-        if step % 100 == 0:
-            print(f"  step {step}/{steps}  gates={gates_passed}", flush=True)
+        roll_deg = np.degrees(obs[0, 6])
+        pitch_deg = np.degrees(obs[0, 7])
+        yaw_deg = np.degrees(obs[0, 8])
+
+        if step % 10 == 0:
+            print(f"step {step:04d} | gates: {gates_passed:2d} | "
+                  f"Roll: {roll_deg:5.1f}° | Pitch: {pitch_deg:5.1f}° | Yaw: {yaw_deg:5.1f}°", flush=True)
 
     out.release()
     plt.close("all")

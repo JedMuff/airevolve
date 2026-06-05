@@ -63,8 +63,9 @@ class DroneGateEnv(VecEnv):
                  action_filter_alpha=1.0,
                  max_steps=1200,
                  k_quad_drag=0.05,
-                 phys_max_rate_rp=15.0,
-                 phys_max_rate_yaw=15.0,
+                 z_drag_multiplier=25.0,
+                 phys_max_rate_rp=25.0,
+                 phys_max_rate_yaw=10.0,
                  ):
         
         # Set device
@@ -276,7 +277,11 @@ class DroneGateEnv(VecEnv):
         self._gyro_coeff_r = (Ixx_f - Iyy_f) / Izz_f
         # Quadratic aerodynamic drag coefficient (m⁻¹); tunable at construction.
         # Adds F_drag_quad = -k_quad * v_body * |v_body| on all 3 body axes.
+        # Z-axis drag is further scaled by z_drag_multiplier to simulate the
+        # parachute-like penalty of exposing the drone's flat top/bottom face
+        # to the airflow (e.g. during inverted or knife-edge flight).
         self._k_quad_drag = float(k_quad_drag)
+        self._z_drag_multiplier = float(z_drag_multiplier)
 
         # ── Morphology-aware per-axis angular rate caps ────────────────────
         # Tuning knobs (all exposed as __init__ kwargs):
@@ -309,6 +314,7 @@ class DroneGateEnv(VecEnv):
         self.max_rate_yaw   = min(sum(abs(k) for k in _k_r_s) * _w_max**2 * _tau_settle, self._phys_max_yaw)
         print(
             f"[DroneGateEnv] tuning: k_quad_drag={self._k_quad_drag:.4f}  "
+            f"z_drag_multiplier={self._z_drag_multiplier:.2f}  "
             f"phys_max_rp={self._phys_max_rp:.1f} rad/s  "
             f"phys_max_yaw={self._phys_max_yaw:.1f} rad/s  "
             f"tau_settle={_tau_settle:.3f}s",
@@ -699,7 +705,9 @@ class DroneGateEnv(VecEnv):
         kq = self._k_quad_drag
         Fq_bx = -kq * vbx_q * np.abs(vbx_q)
         Fq_by = -kq * vby_q * np.abs(vby_q)
-        Fq_bz = -kq * vbz_q * np.abs(vbz_q)
+        # Anisotropic Z drag: the flat top/bottom of the drone acts like a
+        # parachute when exposed to airflow (inverted / knife-edge flight).
+        Fq_bz = -(kq * self._z_drag_multiplier) * vbz_q * np.abs(vbz_q)
         # Body → world  (R @ F_body)
         dv_wx = cpsi*cth*Fq_bx + (cpsi*sphi*sth - spsi*cphi)*Fq_by + (cpsi*cphi*sth + spsi*sphi)*Fq_bz
         dv_wy = spsi*cth*Fq_bx + (spsi*sphi*sth + cpsi*cphi)*Fq_by + (spsi*cphi*sth - cpsi*sphi)*Fq_bz
