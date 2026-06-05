@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=18
 #SBATCH --gpus=1
 #SBATCH -t 48:00:00
-#SBATCH --mem=128G
+#SBATCH --mem=120G
 #SBATCH --array=0-9
 #SBATCH --output=./logs/%x_%A_%a.out
 #SBATCH --error=./logs/%x_%A_%a.err
