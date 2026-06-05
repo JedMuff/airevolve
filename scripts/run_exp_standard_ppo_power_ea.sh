@@ -5,6 +5,10 @@
 # Launch script for: Standard-PPO Training + Power-Aware NSGA-II Evaluation
 # Hardware target  : AMD Threadripper Pro 32c/64t, 128 GB RAM
 #
+# Worker tuning (RAM safety)
+#   num_workers × (1 + num_envs) = peak simultaneous processes
+#   8 × (1+2) = 24 processes — safe on 128 GB (was 14×5=70, caused OOM crash)
+#
 # Architecture
 # ------------
 #   RL  : Standard DroneGateEnv — no power penalties, no voltage kill.
@@ -44,33 +48,35 @@ LOG_DIR="${REPO_ROOT}/logs/exp_standard_ppo_power_ea"
 TRAINING_TIMESTEPS=1000000
 GENERATIONS=32
 POPULATION_SIZE=32
-NUM_WORKERS=14
-NUM_ENVS=4
+NUM_WORKERS=8   # ← was 14; 14×(1+4)=70 processes exceeded 128 GB RAM
+NUM_ENVS=2      # ← was  4; 8×(1+2)=24 processes, safe ceiling ~40-50 GB peak
 DEVICE="cpu"
 GENOME="spherical"
 GATE_CFG="figure8"
 MIN_NARMS=6
 MAX_NARMS=6
 INIT_POP_MODE="hover_repair"
+Z_DRAG_MULTIPLIER=5.0  # Anisotropic Z-axis drag (DroneGateEnv); 5.0 = 5× stronger vertical than lateral
 DRY_RUN=false
 
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --dry-run)               DRY_RUN=true                        ;;
-        --device)                DEVICE="$2";         shift          ;;
-        --training-timesteps)    TRAINING_TIMESTEPS="$2"; shift      ;;
-        --generations)           GENERATIONS="$2";    shift          ;;
-        --population-size)       POPULATION_SIZE="$2"; shift         ;;
-        --num-workers)           NUM_WORKERS="$2";    shift          ;;
-        --num-envs)              NUM_ENVS="$2";       shift          ;;
-        --genome)                GENOME="$2";         shift          ;;
-        --gate-cfg)              GATE_CFG="$2";       shift          ;;
-        --results-dir)           RESULTS_DIR="$2";    shift          ;;
-        --log-dir)               LOG_DIR="$2";        shift          ;;
-        --run-id)                EXTRA_ARGS+=("--run-id" "$2"); shift ;;
-        *)                       EXTRA_ARGS+=("$1")                   ;;
+        --dry-run)               DRY_RUN=true                             ;;
+        --device)                DEVICE="$2";              shift          ;;
+        --training-timesteps)    TRAINING_TIMESTEPS="$2";  shift          ;;
+        --generations)           GENERATIONS="$2";         shift          ;;
+        --population-size)       POPULATION_SIZE="$2";     shift          ;;
+        --num-workers)           NUM_WORKERS="$2";         shift          ;;
+        --num-envs)              NUM_ENVS="$2";            shift          ;;
+        --genome)                GENOME="$2";              shift          ;;
+        --gate-cfg)              GATE_CFG="$2";            shift          ;;
+        --z-drag-multiplier)     Z_DRAG_MULTIPLIER="$2";  shift          ;;
+        --results-dir)           RESULTS_DIR="$2";         shift          ;;
+        --log-dir)               LOG_DIR="$2";             shift          ;;
+        --run-id)                EXTRA_ARGS+=("--run-id" "$2"); shift     ;;
+        *)                       EXTRA_ARGS+=("$1")                        ;;
     esac
     if [[ $# -gt 0 ]]; then
         shift
@@ -87,16 +93,17 @@ echo "════════════════════════�
 echo "  training_timesteps : ${TRAINING_TIMESTEPS}"
 echo "  generations        : ${GENERATIONS}"
 echo "  population_size    : ${POPULATION_SIZE}"
-echo "  num_workers (EA)   : ${NUM_WORKERS}  (≈ ${NUM_WORKERS}×(1+${NUM_ENVS}) procs across 32c/64t)"
+echo "  num_workers (EA)   : ${NUM_WORKERS}  (≈ ${NUM_WORKERS}×(1+${NUM_ENVS})=$(( NUM_WORKERS * (1 + NUM_ENVS) )) peak procs across 32c/64t)"
 echo "  num_envs (PPO)     : ${NUM_ENVS}"
 echo "  device             : ${DEVICE}"
 echo "  genome             : ${GENOME}"
 echo "  gate_cfg           : ${GATE_CFG}"
+echo "  z_drag_multiplier  : ${Z_DRAG_MULTIPLIER}"
 echo "  results_dir        : ${RESULTS_DIR}"
 echo "  log_file           : ${LOG_FILE}"
 echo ""
-echo "  RL flags  : sparse_weight=0.0  overdraw_weight=0.0  strict_kill=False"
-echo "  EA flags  : strict_kill=True   fitness=(gates↑, energy↓)"
+echo "  RL env  : DroneGateEnv (gate_train.py)  — no power penalties"
+echo "  EA eval : BiObjectiveFitness → gate_train.evaluate_individual  fitness=(gates↑, energy↓)"
 echo "════════════════════════════════════════════════════════════════════════"
 
 CMD=(
@@ -112,6 +119,7 @@ CMD=(
     --min-narms           "${MIN_NARMS}"
     --max-narms           "${MAX_NARMS}"
     --init-pop-mode       "${INIT_POP_MODE}"
+    --z-drag-multiplier   "${Z_DRAG_MULTIPLIER}"
     --results-dir         "${RESULTS_DIR}"
     "${EXTRA_ARGS[@]}"
 )
@@ -132,6 +140,7 @@ echo ""
 echo "  Command: ${CMD[*]}"
 echo "  Log    : ${LOG_FILE}"
 echo ""
+
 
 if $DRY_RUN; then
     "${CMD[@]}"

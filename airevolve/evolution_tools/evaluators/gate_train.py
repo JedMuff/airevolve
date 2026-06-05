@@ -160,7 +160,7 @@ class FullStatsCallback(BaseCallback):
         # Force flush for debugging; can remove later
         self.logger.dump(self.num_timesteps)
 
-def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, z_drag_multiplier=25.0, phys_max_rate_rp=25.0, phys_max_rate_yaw=10.0):
+def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, z_drag_multiplier=5.0, phys_max_rate_rp=25.0, phys_max_rate_yaw=10.0):
 
     if gate_cfg == "backandforth":
         gate_pos = backandforth.gate_pos
@@ -286,7 +286,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
             device=device,
         )
     # model.set_logger(custom_logger)
-    print(f"[diag] PPO.learn total_timesteps={total_timesteps} env.num_envs={env.num_envs} expected_rollouts={total_timesteps/(env.num_envs*1000):.0f}", flush=True)
+    #print(f"[diag] PPO.learn total_timesteps={total_timesteps} env.num_envs={env.num_envs} expected_rollouts={total_timesteps/(env.num_envs*1000):.0f}", flush=True)
     # TRAINING
     model.learn(total_timesteps=total_timesteps, reset_num_timesteps=False, log_interval=100, callback=FullStatsCallback(), progress_bar=progress_bar)
     if num is None:
@@ -356,7 +356,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     
     return continuous_fitness
 
-def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, z_drag_multiplier=25.0, phys_max_rate_rp=25.0, phys_max_rate_yaw=10.0) -> list:
+def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, z_drag_multiplier=5.0, phys_max_rate_rp=25.0, phys_max_rate_yaw=10.0) -> list:
     start_time = time.time()
     os.makedirs(ind_save_dir, exist_ok=True)
     
@@ -429,7 +429,7 @@ if __name__ == "__main__":
     parser.add_argument('--max_steps', default=1200, type=int)
     parser.add_argument('--no_random_start', action='store_true')
     parser.add_argument('--load_policy', default=None, type=str)
-    parser.add_argument('--z_drag_multiplier', default=25.0, type=float)
+    parser.add_argument('--z_drag_multiplier', default=5.0, type=float)
     args = parser.parse_args()
 
     # Load Bf and Bm from directory

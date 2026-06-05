@@ -43,15 +43,13 @@ class BiObjectiveFitness:
     handler_class      : genome handler class (for indirect decoding).
     handler_kwargs     : kwargs forwarded to handler_class().
     coordinate_system  : 'spherical' | 'cartesian' | 'cppn' | 'hybrid-cppn'.
-    brain_kwargs       : forwarded to gate_train_power.evaluate_individual():
+    brain_kwargs       : forwarded to gate_train.evaluate_individual() (standard env):
         gate_cfg              : str   — 'figure8', 'circle', etc.
         training_ts           : int   — PPO training timesteps.
         num_envs              : int   — parallel envs during training.
         device                : str   — torch device string.
         max_steps             : int   — evaluation length in env steps (default 1200 → 12 s).
-        sparse_weight         : float — Penalty weight for episodic energy (0.0 = disabled).
-        overdraw_penalty_weight: float — Per-step current-limit penalty weight (0.0 = disabled).
-        use_power_env         : bool  — Whether to use PowerAwareDroneEnv.
+        z_drag_multiplier     : float — Anisotropic Z-axis drag multiplier (default 5.0).
         verbose               : int   — PPO verbosity (default 1; set 0 to silence stdout logging).
         progress_bar          : bool  — Show PPO tqdm progress bar (default True; set False for parallel EA runs).
     """
@@ -117,9 +115,9 @@ class BiObjectiveFitness:
         if not can_hover:
             return self._fail_result(phenotype)
 
-        # 5. RL training + 12-second evaluation
-        from airevolve.evolution_tools.evaluators import gate_train_power
-        return gate_train_power.evaluate_individual(
+        # 5. RL training + 12-second evaluation (standard env: gate_train / DroneGateEnv)
+        from airevolve.evolution_tools.evaluators import gate_train
+        return gate_train.evaluate_individual(
             phenotype,
             ind_save_dir,
             self.brain_kwargs["training_ts"],
@@ -127,9 +125,7 @@ class BiObjectiveFitness:
             self.brain_kwargs["gate_cfg"],
             self.brain_kwargs["device"],
             max_steps=self.brain_kwargs.get("max_steps", 1200),
-            sparse_weight=self.brain_kwargs.get("sparse_weight", 0.0),
-            use_power_env=self.brain_kwargs.get("use_power_env", False),
-            overdraw_penalty_weight=self.brain_kwargs.get("overdraw_penalty_weight", 0.0),
+            z_drag_multiplier=self.brain_kwargs.get("z_drag_multiplier", 5.0),
             verbose=self.brain_kwargs.get("verbose", 1),
             progress_bar=self.brain_kwargs.get("progress_bar", True),
         )

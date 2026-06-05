@@ -159,6 +159,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--init-pop-mode",
                    choices=["random", "hover_repair"], default="random")
 
+    p.add_argument("--z-drag-multiplier", type=float, default=5.0,
+                   help="Anisotropic Z-axis drag multiplier in DroneGateEnv.")
+
     p.add_argument("--results-dir", default="results",
                    help="Root output directory.")
     p.add_argument("--run-id",      default=None,
@@ -181,14 +184,10 @@ def _results_dir(args: argparse.Namespace) -> Path:
 
 def _save_config(args: argparse.Namespace, results_dir: Path) -> None:
     snapshot: dict[str, Any] = vars(args).copy()
-    snapshot["experiment_name"]       = _EXPERIMENT_NAME
-    snapshot["timestamp"]             = datetime.now().isoformat()
-    snapshot["rl_sparse_weight"]      = 0.0
-    snapshot["rl_overdraw_weight"]    = 0.0
-    snapshot["rl_strict_kill"]        = False
-    snapshot["ea_strict_kill"]        = True
-    snapshot["ea_use_power_env"]      = False
-    snapshot["ea_fitness"]            = "(gates_passed, total_energy_j)"
+    snapshot["experiment_name"]   = _EXPERIMENT_NAME
+    snapshot["timestamp"]         = datetime.now().isoformat()
+    snapshot["ea_strict_kill"]    = True
+    snapshot["ea_fitness"]        = "(gates_passed, total_energy_j)"
     with open(results_dir / "config.json", "w") as fh:
         json.dump(snapshot, fh, indent=2)
     print(f"  Config saved → {results_dir / 'config.json'}", flush=True)
@@ -205,20 +204,18 @@ def _build_fitness(args: argparse.Namespace, config: dict) -> BiObjectiveFitness
         handler_kwargs=config["handler_kwargs"],
         coordinate_system=config["coordinate_system"],
         brain_kwargs={
-            "gate_cfg":               args.gate_cfg,
-            "training_ts":            int(args.training_timesteps),
-            "num_envs":               args.num_envs,
-            "device":                 args.device,
-            "max_steps":              max_steps,
-            "sparse_weight":          0.0,
-            "overdraw_penalty_weight": 0.0,
-            "use_power_env":          False,
+            "gate_cfg":           args.gate_cfg,
+            "training_ts":        int(args.training_timesteps),
+            "num_envs":           args.num_envs,
+            "device":             args.device,
+            "max_steps":          max_steps,
+            "z_drag_multiplier": args.z_drag_multiplier,
             # Keep the terminal clean during massive parallel EA runs: silence
             # PPO stdout logging and the per-worker tqdm progress bars. PPO still
-            # logs to TensorBoard. (gate_train* default to verbose=1/progress_bar=True
-            # so running those scripts standalone still shows the bars.)
-            "verbose":                0,
-            "progress_bar":           False,
+            # logs to TensorBoard. (gate_train default to verbose=1/progress_bar=True
+            # so running that script standalone still shows the bars.)
+            "verbose":            0,
+            "progress_bar":       False,
         },
     )
 

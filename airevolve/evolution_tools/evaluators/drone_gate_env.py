@@ -63,7 +63,7 @@ class DroneGateEnv(VecEnv):
                  action_filter_alpha=1.0,
                  max_steps=1200,
                  k_quad_drag=0.05,
-                 z_drag_multiplier=25.0,
+                 z_drag_multiplier=5.0,
                  phys_max_rate_rp=25.0,
                  phys_max_rate_yaw=10.0,
                  ):
