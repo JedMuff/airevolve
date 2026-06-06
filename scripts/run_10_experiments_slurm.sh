@@ -3,9 +3,10 @@
 #SBATCH -p genoa
 #SBATCH -N 1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=72
+#SBATCH --cpus-per-task=192
+#SBATCH --exclusive
 #SBATCH -t 48:00:00
-#SBATCH --mem=120G
+#SBATCH --mem=320G
 #SBATCH --array=0-9
 #SBATCH --output=./logs/%x_%A_%a.out
 #SBATCH --error=./logs/%x_%A_%a.err
@@ -33,7 +34,7 @@ echo "Running STANDARD PPO experiment - Repetition $REP_ID / 10"
 
 srun bash scripts/run_exp_standard_ppo_power_ea.sh \
     --num-workers 32 \
-    --num-envs 1 \
+    --num-envs 5 \
     --device cpu \
     --results-dir "$SCRATCH_DIR/results" \
     --log-dir "$SCRATCH_DIR/logs" \

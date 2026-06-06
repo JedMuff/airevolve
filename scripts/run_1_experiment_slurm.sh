@@ -3,9 +3,10 @@
 #SBATCH -p genoa
 #SBATCH -N 1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=72
+#SBATCH --cpus-per-task=192
+#SBATCH --exclusive
 #SBATCH -t 48:00:00
-#SBATCH --mem=120G
+#SBATCH --mem=320G
 #SBATCH --output=./logs/%x_%j.out
 #SBATCH --error=./logs/%x_%j.err
 
@@ -26,11 +27,11 @@ mkdir -p "$SCRATCH_DIR/results"
 mkdir -p "$SCRATCH_DIR/logs"
 echo "Scratch directory: $SCRATCH_DIR"
 
-echo "Running STANDARD PPO experiment - Single run on GENOA"
+echo "Running STANDARD PPO experiment - Single run on GENOA (full node, 192 cores)"
 
 srun bash scripts/run_exp_standard_ppo_power_ea.sh \
     --num-workers 32 \
-    --num-envs 1 \
+    --num-envs 5 \
     --device cpu \
     --results-dir "$SCRATCH_DIR/results" \
     --log-dir "$SCRATCH_DIR/logs" \
