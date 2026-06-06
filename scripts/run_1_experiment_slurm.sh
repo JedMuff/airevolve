@@ -3,7 +3,7 @@
 #SBATCH -p gpu_a100
 #SBATCH -N 1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=18
+#SBATCH --cpus-per-task=36
 #SBATCH --gpus=1
 #SBATCH -t 48:00:00
 #SBATCH --mem=120G
