@@ -48,15 +48,15 @@ LOG_DIR="${REPO_ROOT}/logs/exp_standard_ppo_power_ea"
 TRAINING_TIMESTEPS=1000000
 GENERATIONS=32
 POPULATION_SIZE=32
-NUM_WORKERS=4
-NUM_ENVS=2
+NUM_WORKERS=32
+NUM_ENVS=1
 DEVICE="cpu"
 GENOME="spherical"
 GATE_CFG="figure8"
 MIN_NARMS=6
 MAX_NARMS=6
 INIT_POP_MODE="hover_repair"
-Z_DRAG_MULTIPLIER=5.0  # Anisotropic Z-axis drag (DroneGateEnv); 5.0 = 5× stronger vertical than lateral
+Z_DRAG_MULTIPLIER=5.0
 DRY_RUN=false
 
 EXTRA_ARGS=()
