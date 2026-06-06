@@ -31,7 +31,7 @@ echo "Running STANDARD PPO experiment - Single run"
 
 srun bash scripts/run_exp_standard_ppo_power_ea.sh \
     --num-workers 16 \
-    --device cuda \
+    --device cpu \
     --results-dir "$SCRATCH_DIR/results" \
     --log-dir "$SCRATCH_DIR/logs" \
     --run-id "exp_standard_ppo_power_ea"

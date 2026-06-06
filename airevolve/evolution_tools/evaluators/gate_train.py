@@ -160,7 +160,7 @@ class FullStatsCallback(BaseCallback):
         # Force flush for debugging; can remove later
         self.logger.dump(self.num_timesteps)
 
-def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, z_drag_multiplier=5.0, phys_max_rate_rp=25.0, phys_max_rate_yaw=10.0):
+def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cpu", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, z_drag_multiplier=5.0, phys_max_rate_rp=25.0, phys_max_rate_yaw=10.0):
 
     if gate_cfg == "backandforth":
         gate_pos = backandforth.gate_pos
@@ -354,9 +354,16 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     fraction = max(0.0, 1.0 - (d2g / gate_dist))
     continuous_fitness = float(num_gates_passed) + fraction
     
+    env.close()
+    test_env.close()
+
+    del model
+    if device != "cpu":
+        torch.cuda.empty_cache()
+        
     return continuous_fitness
 
-def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cuda:0", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, z_drag_multiplier=5.0, phys_max_rate_rp=25.0, phys_max_rate_yaw=10.0) -> list:
+def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cpu", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, z_drag_multiplier=5.0, phys_max_rate_rp=25.0, phys_max_rate_yaw=10.0) -> list:
     start_time = time.time()
     os.makedirs(ind_save_dir, exist_ok=True)
     

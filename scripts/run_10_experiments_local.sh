@@ -21,6 +21,7 @@ for i in {1..10}; do
     LOG_DIR="${REPO_ROOT}/logs_$i"
     
     bash "$EXP_SCRIPT" \
+        --device cpu \
         --results-dir "$RESULTS_DIR" \
         --log-dir "$LOG_DIR"
         
