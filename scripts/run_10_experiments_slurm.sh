@@ -1,10 +1,9 @@
 #!/bin/bash
 #SBATCH -J airevolve_ea_10rep
-#SBATCH -p gpu_a100
+#SBATCH -p genoa
 #SBATCH -N 1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=18
-#SBATCH --gpus=1
+#SBATCH --cpus-per-task=72
 #SBATCH -t 48:00:00
 #SBATCH --mem=120G
 #SBATCH --array=0-9
@@ -33,7 +32,8 @@ REP_ID=$((SLURM_ARRAY_TASK_ID + 1))
 echo "Running STANDARD PPO experiment - Repetition $REP_ID / 10"
 
 srun bash scripts/run_exp_standard_ppo_power_ea.sh \
-    --num-workers 16 \
+    --num-workers 32 \
+    --num-envs 1 \
     --device cpu \
     --results-dir "$SCRATCH_DIR/results" \
     --log-dir "$SCRATCH_DIR/logs" \

@@ -3,9 +3,9 @@
 #SBATCH -p genoa
 #SBATCH -N 1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=64
+#SBATCH --cpus-per-task=72
 #SBATCH -t 48:00:00
-#SBATCH --mem=115G
+#SBATCH --mem=120G
 #SBATCH --output=./logs/%x_%j.out
 #SBATCH --error=./logs/%x_%j.err
 
