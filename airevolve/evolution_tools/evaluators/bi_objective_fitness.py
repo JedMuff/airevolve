@@ -119,7 +119,7 @@ class BiObjectiveFitness:
         #    gate_train_power.evaluate_individual returns (gates_passed, total_energy_j)
         #    which is what the NSGA-II bi-objective strategy expects.
         from airevolve.evolution_tools.evaluators import gate_train_power
-        return gate_train_power.evaluate_individual(
+        gates_passed, total_energy_j = gate_train_power.evaluate_individual(
             phenotype,
             ind_save_dir,
             self.brain_kwargs["training_ts"],
@@ -130,6 +130,11 @@ class BiObjectiveFitness:
             verbose=self.brain_kwargs.get("verbose", 1),
             progress_bar=self.brain_kwargs.get("progress_bar", True),
         )
+
+        if gates_passed < 1.0:
+            total_energy_j = 1e9
+
+        return (gates_passed, total_energy_j)
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

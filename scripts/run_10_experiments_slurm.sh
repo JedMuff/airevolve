@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=192
 #SBATCH --exclusive
-#SBATCH -t 18:00:00
+#SBATCH -t 22:00:00
 #SBATCH --mem=320G
 #SBATCH --array=1-10
 #SBATCH --output=./logs/%x_%A_%a.out
@@ -26,6 +26,7 @@ srun bash scripts/run_exp_standard_ppo_power_ea.sh \
     --num-workers 32 \
     --num-envs 5 \
     --device cpu \
+    --training-timesteps 3000000 \
     --results-dir "$SCRATCH_DIR/results" \
     --log-dir "$SCRATCH_DIR/logs" \
     --run-id "exp_standard_ppo_power_ea_rep${SLURM_ARRAY_TASK_ID}"
