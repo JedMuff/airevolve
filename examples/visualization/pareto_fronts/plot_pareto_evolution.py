@@ -41,6 +41,10 @@ def main():
     finite_mask = np.isfinite(df["total_energy_j"]) & np.isfinite(df["waypoints"])
     df = df[finite_mask]
 
+    # Drop sentinel energy values (1e9 = failed / non-hoverable morphologies) because otherwise it blows up the x-axis scale and hide real differences.
+    _SENTINEL_THRESHOLD = 1e8
+    df = df[df["total_energy_j"] < _SENTINEL_THRESHOLD]
+
     gens = sorted(df["generation"].unique())
     if not gens:
         print("No valid generation data found.")
@@ -48,7 +52,7 @@ def main():
 
     # --- 1. Static Plot with Colormap ---
     fig, ax = plt.subplots(figsize=(10, 7))
-    cmap = cm.get_cmap("viridis", len(gens))
+    cmap = plt.get_cmap("viridis", len(gens))
 
     for i, g in enumerate(gens):
         pop = df[df["generation"] == g]
