@@ -38,7 +38,7 @@ VIDEOS_DIR = "__data__/evolved_videos"
 
 GENOME_PATHS = {
     "test": (
-        "/Users/mikolajduchlinski/Desktop/airevolve/results_training/individual_1010/genome.npy"
+        "/Users/mikolajduchlinski/Desktop/airevolve/results_training/standard_hexa/genome.npy"
     ),
 }
 
@@ -75,7 +75,7 @@ class Target:
 TARGETS = [
     Target(
         "test", "finalgate",
-        "/Users/mikolajduchlinski/Desktop/airevolve/results_training/individual_1010/policy.zip",
+        "/Users/mikolajduchlinski/Desktop/airevolve/results_training/standard_hexa/policy.zip",
         5, 1001, 31,
     ),
 ]
@@ -457,6 +457,7 @@ def render_target(t: Target, device: str, steps: int) -> str:
     out = cv2.VideoWriter(out_path, fourcc, FPS, (OUT_W, OUT_H))
 
     obs = env.reset()
+    total_energy_j = 0.0
 
     for step in range(steps):
         actions, _ = model.predict(obs, deterministic=False)
@@ -473,6 +474,9 @@ def render_target(t: Target, device: str, steps: int) -> str:
             "current": env.bat_current[0],
             "power": env.bat_power[0],
         }
+
+        # Accumulate total energy (Joules = Power * dt), dt is 0.01
+        total_energy_j += float(bat["power"]) * 0.01
 
         dashboard.push(step, ws, prev_u, bat, gate_just_passed)
 
@@ -505,6 +509,7 @@ def render_target(t: Target, device: str, steps: int) -> str:
     out.release()
     plt.close("all")
     _line_cache.clear()
+    print(f"Total energy consumed: {total_energy_j:.2f} J", flush=True)
     print(f"Saved -> {out_path}", flush=True)
     return out_path
 

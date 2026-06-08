@@ -51,10 +51,10 @@ LOG_DIR="${REPO_ROOT}/logs/exp_lamarckian_ppo_power_ea"
 
 # ── Default hyperparameters (tuned for Genoa 192-core node) ──────────────────
 TRAINING_TIMESTEPS=10000000       # Gen 0 Darwinian start (10M ts)
-GENERATIONS=24
+GENERATIONS=32
 POPULATION_SIZE=24
 NUM_WORKERS=24
-NUM_ENVS=25                       # Supercharged SubprocVecEnv parallelism
+NUM_ENVS=5                        # SubprocVecEnv parallelism (24 workers * 5 envs = 120 procs, avoids core thrashing)
 TORCH_THREADS=8                   # 24 workers × 8 threads = 192 cores
 DEVICE="cpu"
 GENOME="spherical"

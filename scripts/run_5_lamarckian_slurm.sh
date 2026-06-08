@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=192
 #SBATCH --exclusive
-#SBATCH -t 12:00:00
+#SBATCH -t 24:00:00
 #SBATCH --mem=320G
 #SBATCH --array=1-5
 #SBATCH --output=./logs/%x_%A_%a.out
@@ -23,7 +23,7 @@ mkdir -p "$SCRATCH_DIR/results"
 mkdir -p "$SCRATCH_DIR/logs"
 
 # The launcher script already contains the optimal Genoa defaults
-# (workers=24, envs=25, torch_threads=8, pop=24, gens=24).
+# (workers=24, envs=5, torch_threads=8, pop=24, gens=32).
 # We only need to pass the dynamic scratch directories.
 srun bash scripts/run_exp_lamarckian_ppo_power_ea.sh \
     --results-dir "$SCRATCH_DIR/results" \
