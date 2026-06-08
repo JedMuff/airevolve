@@ -601,7 +601,7 @@ def main() -> None:
         ids,
         generation,
         all_parent_ids,
-        log_dir_base_arg,
+        log_dir_base,
         num_workers=1,
     ):
         """Lamarckian-aware evaluate_population.
@@ -623,7 +623,7 @@ def main() -> None:
 
                     if parent_id is not None:
                         candidate_path = os.path.join(
-                            log_dir_base_arg,
+                            log_dir_base,
                             f"generation_{generation - 1:02d}",
                             f"individual_{parent_id}",
                             "policy.zip",
@@ -684,7 +684,7 @@ def main() -> None:
                         ids[i],
                         generation,
                         all_parent_ids[i],
-                        log_dir_base_arg,
+                        log_dir_base,
                     )
                     for i, genome in enumerate(population)
                 ]
@@ -697,7 +697,7 @@ def main() -> None:
                         ids[i],
                         generation,
                         all_parent_ids[i],
-                        log_dir_base_arg,
+                        log_dir_base,
                     )
                     for i, genome in enumerate(population)
                 ]
@@ -720,7 +720,7 @@ def main() -> None:
                         evaluated.append(ar.get(timeout=PER_INDIVIDUAL_TIMEOUT))
                     except multiprocessing.TimeoutError:
                         gen_dir = os.path.join(
-                            log_dir_base_arg, f"generation_{generation:02d}"
+                            log_dir_base, f"generation_{generation:02d}"
                         )
                         indiv_log_dir = os.path.join(
                             gen_dir, f"individual_{ids[i]}"
@@ -743,7 +743,7 @@ def main() -> None:
             return pd.DataFrame(evaluated)
         return _evo_components._orig_evaluate_population(
             fitness_function, population, ids, generation,
-            all_parent_ids, log_dir_base_arg, num_workers=1,
+            all_parent_ids, log_dir_base, num_workers=1,
         )
 
     _evo_components._orig_evaluate_population = _evo_components.evaluate_population
