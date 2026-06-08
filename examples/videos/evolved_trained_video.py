@@ -37,8 +37,8 @@ from airevolve.simulator.simulation.battery_model import LiPoBatteryModel
 VIDEOS_DIR = "__data__/evolved_videos"
 
 GENOME_PATHS = {
-    "ind0091": (
-        "/Users/mikolajduchlinski/Desktop/airevolve/results_training/standard_hexa/genome.npy"
+    "test": (
+        "/Users/mikolajduchlinski/Desktop/airevolve/results_training/individual_1010/genome.npy"
     ),
 }
 
@@ -74,8 +74,8 @@ class Target:
 
 TARGETS = [
     Target(
-        "ind0091", "finalgate",
-        "/Users/mikolajduchlinski/Desktop/airevolve/results_training/standard_hexa/policy.zip",
+        "test", "finalgate",
+        "/Users/mikolajduchlinski/Desktop/airevolve/results_training/individual_1010/policy.zip",
         5, 1001, 31,
     ),
 ]
@@ -100,7 +100,7 @@ def _build_env(morph: str, env_seed: int, device: str, is_power_aware: bool,
     common = dict(
         num_envs=1, gates_ahead=gates_ahead, num_state_history=0, num_action_history=0,
         history_step_size=1, render_mode=None, device=device, dt=0.01,
-        initialize_at_random_gates=True, seed=env_seed,
+        initialize_at_random_gates=False, seed=env_seed,
         gates_pos=track.gate_pos,
         gate_yaw=track.gate_yaw,
         start_pos=track.starting_pos,
@@ -459,7 +459,7 @@ def render_target(t: Target, device: str, steps: int) -> str:
     obs = env.reset()
 
     for step in range(steps):
-        actions, _ = model.predict(obs, deterministic=True)
+        actions, _ = model.predict(obs, deterministic=False)
         obs, _, dones, infos = env.step(actions)
 
         ws = env.world_states[0]
@@ -492,7 +492,7 @@ def render_target(t: Target, device: str, steps: int) -> str:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
 
             out.write(frame)
-
+        '''
         roll_deg = np.degrees(obs[0, 6])
         pitch_deg = np.degrees(obs[0, 7])
         yaw_deg = np.degrees(obs[0, 8])
@@ -500,6 +500,7 @@ def render_target(t: Target, device: str, steps: int) -> str:
         if step % 10 == 0:
             print(f"step {step:04d} | gates: {gates_passed:2d} | "
                   f"Roll: {roll_deg:5.1f}° | Pitch: {pitch_deg:5.1f}° | Yaw: {yaw_deg:5.1f}°", flush=True)
+        '''
 
     out.release()
     plt.close("all")
@@ -512,11 +513,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--device",
                    default="cuda:0" if torch.cuda.is_available() else "cpu")
     p.add_argument("--steps", type=int, default=1200)
+    p.add_argument("--task", type=str, default=None, choices=["figure8", "backandforth", "circle", "slalom"],
+                   help="Override the track/task (e.g., circle) to evaluate on.")
     return p.parse_args()
 
 def main() -> None:
     args = parse_args()
     for t in TARGETS:
+        if args.task:
+            t.gate_cfg = args.task
         render_target(t, args.device, args.steps)
     print("done", flush=True)
 

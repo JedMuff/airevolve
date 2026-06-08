@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH -J airevolve_ea_10rep
+#SBATCH -J airevolve_lamarckian_10rep
 #SBATCH -p genoa
 #SBATCH -N 1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=192
 #SBATCH --exclusive
-#SBATCH -t 20:00:00
+#SBATCH -t 12:00:00
 #SBATCH --mem=320G
 #SBATCH --array=1-5
 #SBATCH --output=./logs/%x_%A_%a.out
@@ -22,14 +22,13 @@ SCRATCH_DIR="/scratch-shared/$USER/airevolve_tmp_${SLURM_ARRAY_JOB_ID}_${SLURM_A
 mkdir -p "$SCRATCH_DIR/results"
 mkdir -p "$SCRATCH_DIR/logs"
 
-srun bash scripts/run_exp_standard_ppo_power_ea.sh \
-    --num-workers 32 \
-    --num-envs 5 \
-    --device cpu \
-    --training-timesteps 3000000 \
+# The launcher script already contains the optimal Genoa defaults
+# (workers=24, envs=25, torch_threads=8, pop=24, gens=24).
+# We only need to pass the dynamic scratch directories.
+srun bash scripts/run_exp_lamarckian_ppo_power_ea.sh \
     --results-dir "$SCRATCH_DIR/results" \
     --log-dir "$SCRATCH_DIR/logs" \
-    --run-id "exp_standard_ppo_power_ea_rep${SLURM_ARRAY_TASK_ID}"
+    --run-id "exp_lamarckian_ppo_power_ea_rep${SLURM_ARRAY_TASK_ID}"
 
 mkdir -p "$SLURM_SUBMIT_DIR/results"
 mkdir -p "$SLURM_SUBMIT_DIR/logs"
