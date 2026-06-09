@@ -36,11 +36,7 @@ from airevolve.simulator.simulation.battery_model import LiPoBatteryModel
 
 VIDEOS_DIR = "__data__/evolved_videos"
 
-GENOME_PATHS = {
-    "test": (
-        "/Users/mikolajduchlinski/Desktop/airevolve/results_training/standard_hexa/genome.npy"
-    ),
-}
+GENOME_PATHS = {}
 
 MOTOR_COLORS = ["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6", "#795548"]
 GRID_SIZE = 20
@@ -49,15 +45,16 @@ PROP_RADIUS = 0.0254
 THRUST_SCALE = 0.2
 THRUST_BASE_LEN = 0.0
 
-VIEW_W = 640
-VIEW_H = 400
-PLOT_W = 640
-PLOT_H_MID = 800
-PLOT_H_RIGHT = 800
-BAT_H = 280
+SCALE = 1  # Increase this to make the video bigger (1=1080p, 2=4K, 3=6K)
+VIEW_W = 640 * SCALE
+VIEW_H = 400 * SCALE
+PLOT_W = 640 * SCALE
+PLOT_H_MID = 800 * SCALE
+PLOT_H_RIGHT = 800 * SCALE
+BAT_H = 280 * SCALE
 
-OUT_W = 1920
-OUT_H = 1080
+OUT_W = 1920 * SCALE
+OUT_H = 1080 * SCALE
 FPS = 50
 RENDER_EVERY_N_STEPS = 2
 DPI = 100
@@ -72,13 +69,7 @@ class Target:
     expected_gates: int
     gate_cfg: str = "figure8"   # must match the track used during training
 
-TARGETS = [
-    Target(
-        "test", "finalgate",
-        "/Users/mikolajduchlinski/Desktop/airevolve/results_training/standard_hexa/policy.zip",
-        5, 1001, 31,
-    ),
-]
+TARGETS = []
 
 def _load_genome_arms(path: str) -> np.ndarray:
     obj = np.load(path, allow_pickle=True)
@@ -134,12 +125,12 @@ class ViewRenderer:
         
         # Zoom out to see the full scene
         if view_type == 'top':
-            self.cam.r[0] = -11.0
+            self.cam.r[0] = -5.0
             # To move drone down-right, we move the camera target up-left
-            self.center_offset = np.array([-1.0, 1.0, 0.0])
+            self.center_offset = np.array([-2.0, 0.0, 0.0])
         else:
-            self.cam.r[0] = -11.5
-            self.center_offset = np.array([-2.0, 2.0, 0.0])
+            self.cam.r[0] = -5.0
+            self.center_offset = np.array([-2.0, -1.0, 0.0])
             
         self.gate_pos = gate_pos
         self.gate_yaw = gate_yaw
@@ -194,7 +185,7 @@ class ViewRenderer:
 
         label = f"Gates: {gates_passed}"
         cv2.putText(frame, label, (10, VIEW_H - 12),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLORS_BGR["black"], 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, COLORS_BGR["black"], 2)
 
         return frame
 
@@ -220,8 +211,14 @@ class DashboardPlotter:
     def _build_figure(self):
         n = self.num_motors
         
+        bw = VIEW_W / SCALE
+        bh = BAT_H / SCALE
+        pw = PLOT_W / SCALE
+        pm = PLOT_H_MID / SCALE
+        pr = PLOT_H_RIGHT / SCALE
+        
         # Left bottom figure for Current
-        self.fig_left_bat = plt.figure(figsize=(VIEW_W / DPI, BAT_H / DPI), dpi=DPI)
+        self.fig_left_bat = plt.figure(figsize=(bw / DPI, bh / DPI), dpi=DPI)
         self.fig_left_bat.patch.set_facecolor("white")
         gs_left = gridspec.GridSpec(1, 1, figure=self.fig_left_bat,
                                     top=0.82, bottom=0.25,
@@ -235,7 +232,7 @@ class DashboardPlotter:
         self.ax_curr.set_ylabel("Current (A)", color="black", fontsize=9)
         self.line_curr, = self.ax_curr.plot([], [], color="#d84315", lw=1.5)
 
-        self.fig_mid = plt.figure(figsize=(PLOT_W / DPI, (PLOT_H_MID + BAT_H) / DPI), dpi=DPI)
+        self.fig_mid = plt.figure(figsize=(pw / DPI, (pm + bh) / DPI), dpi=DPI)
         self.fig_mid.patch.set_facecolor("white")
         gs_mid = gridspec.GridSpec(3, 1, figure=self.fig_mid,
                                    height_ratios=[2, 2, 1],
@@ -275,7 +272,7 @@ class DashboardPlotter:
         self.line_soc, = self.ax_soc.plot([], [], color="green", lw=1.5)
 
         self.fig_right = plt.figure(
-            figsize=(PLOT_W / DPI, (PLOT_H_RIGHT + BAT_H) / DPI), dpi=DPI)
+            figsize=(pw / DPI, (pr + bh) / DPI), dpi=DPI)
         self.fig_right.patch.set_facecolor("white")
         self.fig_right.text(
             0.5, 0.97, "Motor Actions Over Time with Gate Passages",
@@ -345,7 +342,8 @@ class DashboardPlotter:
         h = int(self.fig_left_bat.get_figheight() * DPI)
         w = int(self.fig_left_bat.get_figwidth() * DPI)
         img = buf.reshape(h, w, 4)[:, :, :3]
-        return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        return cv2.resize(img_bgr, (VIEW_W, BAT_H), interpolation=cv2.INTER_LINEAR)
 
     def render_mid(self) -> np.ndarray:
         xs = self.steps
@@ -368,7 +366,8 @@ class DashboardPlotter:
         h = int(self.fig_mid.get_figheight() * DPI)
         w = int(self.fig_mid.get_figwidth() * DPI)
         img = buf.reshape(h, w, 4)[:, :, :3]
-        return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        return cv2.resize(img_bgr, (PLOT_W, PLOT_H_MID + BAT_H), interpolation=cv2.INTER_LINEAR)
 
     def render_right(self) -> np.ndarray:
         xs = self.steps
@@ -384,7 +383,8 @@ class DashboardPlotter:
         h = int(self.fig_right.get_figheight() * DPI)
         w = int(self.fig_right.get_figwidth() * DPI)
         img = buf.reshape(h, w, 4)[:, :, :3]
-        return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        return cv2.resize(img_bgr, (PLOT_W, PLOT_H_RIGHT + BAT_H), interpolation=cv2.INTER_LINEAR)
 
 def _style_ax(ax: plt.Axes):
     ax.set_facecolor("white")
@@ -515,6 +515,7 @@ def render_target(t: Target, device: str, steps: int) -> str:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
+    p.add_argument("ind_dir", type=str, help="Path to the individual directory containing genome.npy and policy.zip")
     p.add_argument("--device",
                    default="cuda:0" if torch.cuda.is_available() else "cpu")
     p.add_argument("--steps", type=int, default=1200)
@@ -524,6 +525,26 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    
+    # Dynamically resolve paths and names
+    abs_ind_dir = os.path.abspath(args.ind_dir)
+    morph_name = os.path.basename(abs_ind_dir)
+    genome_path = os.path.join(abs_ind_dir, "genome.npy")
+    policy_path = os.path.join(abs_ind_dir, "policy.zip")
+    
+    # Populate the global dictionaries dynamically
+    GENOME_PATHS[morph_name] = genome_path
+    
+    t = Target(
+        morph=morph_name,
+        reward="finalgate",
+        policy_zip=policy_path,
+        train_seed=5,
+        env_seed=1001,
+        expected_gates=31,
+    )
+    TARGETS.append(t)
+    
     for t in TARGETS:
         if args.task:
             t.gate_cfg = args.task

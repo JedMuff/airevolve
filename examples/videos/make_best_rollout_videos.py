@@ -36,7 +36,7 @@ VIDEOS_DIR = "__data__/test_a_multiseed//videos"
 TEST_A_DIR = "__data__/test_a_multiseed/"
 
 GENOME_PATHS = {
-    "ind0903": ("/Users/mikolajduchlinski/Desktop/results_folder_update/standard_ppo_power_ea/exp_standard_ppo_power_ea/rl_logs/generation_28/individual_0903/genome.npy"),
+    "ind0903": ("/Users/mikolajduchlinski/Desktop/airevolve/results_training/individual_0001/genome.npy"),
 }
 
 
@@ -52,7 +52,7 @@ class Target:
 
 TARGETS = [
     Target("ind0903", "finalgate",
-           "/Users/mikolajduchlinski/Desktop/results_folder_update/standard_ppo_power_ea/exp_standard_ppo_power_ea/rl_logs/generation_28/individual_0903/policy.zip",
+           "/Users/mikolajduchlinski/Desktop/airevolve/results_training/individual_0001/policy.zip",
            5, 1001, 31),
 ]
 
