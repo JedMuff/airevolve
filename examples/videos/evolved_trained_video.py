@@ -45,7 +45,7 @@ PROP_RADIUS = 0.0254
 THRUST_SCALE = 0.2
 THRUST_BASE_LEN = 0.0
 
-SCALE = 1  # Increase this to make the video bigger (1=1080p, 2=4K, 3=6K)
+SCALE = 2  # Increase this to make the video bigger (1=1080p, 2=4K, 3=6K)
 VIEW_W = 640 * SCALE
 VIEW_H = 400 * SCALE
 PLOT_W = 640 * SCALE
@@ -125,11 +125,11 @@ class ViewRenderer:
         
         # Zoom out to see the full scene
         if view_type == 'top':
-            self.cam.r[0] = -5.0
+            self.cam.r[0] = -8.0
             # To move drone down-right, we move the camera target up-left
-            self.center_offset = np.array([-2.0, 0.0, 0.0])
+            self.center_offset = np.array([0.0, -1.0, 0.0])
         else:
-            self.cam.r[0] = -5.0
+            self.cam.r[0] = -8.0
             self.center_offset = np.array([-2.0, -1.0, 0.0])
             
         self.gate_pos = gate_pos

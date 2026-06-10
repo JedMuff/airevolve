@@ -52,7 +52,7 @@ def main():
 
     # --- 1. Static Plot with Colormap ---
     fig, ax = plt.subplots(figsize=(10, 7))
-    cmap = plt.get_cmap("viridis", len(gens))
+    cmap = plt.get_cmap("viridis_r", len(gens))
 
     for i, g in enumerate(gens):
         pop = df[df["generation"] == g]
@@ -64,8 +64,8 @@ def main():
             
         srt = pop.sort_values("total_energy_j")
         
-        # Plot step line for Pareto front
-        ax.step(srt["total_energy_j"], srt["waypoints"], where="post", color=cmap(i), alpha=0.5, linewidth=1.5)
+        # Plot connected data points for Pareto front
+        ax.plot(srt["total_energy_j"], srt["waypoints"], color=cmap(i), alpha=0.5, linewidth=1.5, marker='o', markersize=4)
         
         # Highlight points for first and last generations to avoid clutter
         if i == len(gens) - 1:
@@ -79,6 +79,7 @@ def main():
     ax.set_ylabel("Gates Passed  ↑ Maximize", fontsize=12)
     ax.set_title("Pareto Front Evolution Over All Generations", fontsize=13)
     ax.grid(True, linestyle="--", alpha=0.4)
+    ax.invert_xaxis()
 
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=min(gens), vmax=max(gens)))
     sm.set_array([])
@@ -100,10 +101,10 @@ def main():
     ax_anim.set_title("Pareto Front Evolution", fontsize=13)
     ax_anim.grid(True, linestyle="--", alpha=0.4)
     
-    ax_anim.set_xlim(df["total_energy_j"].min() * 0.95, df["total_energy_j"].max() * 1.05)
+    ax_anim.set_xlim(df["total_energy_j"].max() * 1.05, df["total_energy_j"].min() * 0.95)
     ax_anim.set_ylim(df["waypoints"].min() - 1, df["waypoints"].max() + 1)
 
-    line, = ax_anim.step([], [], where="post", color="blue", linewidth=2.5, zorder=10)
+    line, = ax_anim.plot([], [], color="blue", linewidth=2.5, marker='o', markersize=6, zorder=10)
     scatter = ax_anim.scatter([], [], c="blue", edgecolors="k", s=80, zorder=11)
     title_text = ax_anim.text(0.05, 0.95, "", transform=ax_anim.transAxes, 
                               fontsize=14, fontweight="bold", verticalalignment='top')
@@ -131,8 +132,8 @@ def main():
             if "rank" in prev_pop.columns and prev_pop["rank"].notna().any():
                 prev_pop = prev_pop[prev_pop["rank"] == 0]
                 prev_srt = prev_pop.sort_values("total_energy_j")
-                tr, = ax_anim.step(prev_srt["total_energy_j"], prev_srt["waypoints"], 
-                                   where="post", color="gray", alpha=0.25, linewidth=1, zorder=1)
+                tr, = ax_anim.plot(prev_srt["total_energy_j"], prev_srt["waypoints"], 
+                                   color="gray", alpha=0.25, linewidth=1, marker='o', markersize=3, zorder=1)
                 traces.append(tr)
                 
         line.set_data(srt["total_energy_j"], srt["waypoints"])

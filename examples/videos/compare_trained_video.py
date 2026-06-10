@@ -112,7 +112,7 @@ class ViewRenderer:
         self.gate, _ = create_gate_geometry()
         self.path_pts: list[np.ndarray] = []
 
-    def render(self, ws: np.ndarray, u: np.ndarray, gates_passed: int, follow: bool = True) -> np.ndarray:
+    def render(self, ws: np.ndarray, u: np.ndarray, gates_passed: int, energy_j: float, follow: bool = True) -> np.ndarray:
         pos = ws[0:3]
         ori = ws[6:9]
         self.path_pts.append(pos.copy())
@@ -150,6 +150,11 @@ class ViewRenderer:
 
         label = f"Gates: {gates_passed}"
         cv2.putText(frame, label, (10, VIEW_H - 12),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLORS_BGR["black"], 2)
+
+        label_energy = f"Energy: {energy_j:.1f} J"
+        (tw, th), _ = cv2.getTextSize(label_energy, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+        cv2.putText(frame, label_energy, (VIEW_W - tw - 10, VIEW_H - 12),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLORS_BGR["black"], 2)
 
         return frame
@@ -201,6 +206,11 @@ def render_comparison(dir1: str, dir2: str, gate_cfg: str, device: str, steps: i
     obs1 = env1.reset()
     obs2 = env2.reset()
 
+    cum_energy1 = 0.0
+    prev_energy1 = 0.0
+    cum_energy2 = 0.0
+    prev_energy2 = 0.0
+
     for step in range(steps):
         actions1, _ = model1.predict(obs1, deterministic=False)
         obs1, _, _, _ = env1.step(actions1)
@@ -208,18 +218,30 @@ def render_comparison(dir1: str, dir2: str, gate_cfg: str, device: str, steps: i
         prev_u1 = env1.prev_actions[0]
         gates_passed1 = int(env1.num_gates_passed[0])
 
+        curr_e1 = float(env1.bat_energy_j[0])
+        if curr_e1 < prev_energy1:
+            cum_energy1 += prev_energy1
+        prev_energy1 = curr_e1
+        total_e1 = cum_energy1 + curr_e1
+
         actions2, _ = model2.predict(obs2, deterministic=False)
         obs2, _, _, _ = env2.step(actions2)
         ws2 = env2.world_states[0]
         prev_u2 = env2.prev_actions[0]
         gates_passed2 = int(env2.num_gates_passed[0])
 
+        curr_e2 = float(env2.bat_energy_j[0])
+        if curr_e2 < prev_energy2:
+            cum_energy2 += prev_energy2
+        prev_energy2 = curr_e2
+        total_e2 = cum_energy2 + curr_e2
+
         if step % RENDER_EVERY_N_STEPS == 0:
-            top_frame1 = top_view1.render(ws1, prev_u1, gates_passed1)
-            iso_frame1 = iso_view1.render(ws1, prev_u1, gates_passed1)
+            top_frame1 = top_view1.render(ws1, prev_u1, gates_passed1, total_e1)
+            iso_frame1 = iso_view1.render(ws1, prev_u1, gates_passed1, total_e1)
             
-            top_frame2 = top_view2.render(ws2, prev_u2, gates_passed2)
-            iso_frame2 = iso_view2.render(ws2, prev_u2, gates_passed2)
+            top_frame2 = top_view2.render(ws2, prev_u2, gates_passed2, total_e2)
+            iso_frame2 = iso_view2.render(ws2, prev_u2, gates_passed2, total_e2)
 
             # Left side: top video is top view, bottom video is iso view
             left_col = np.vstack([top_frame1, iso_frame1])
