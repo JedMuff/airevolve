@@ -28,7 +28,7 @@
 #   # Override any hyperparameter:
 #   bash scripts/run_exp_standard_ppo_power_ea.sh \
 #       --population-size 16 --generations 8 \
-#       --training-timesteps 500000 --num-workers 8
+#       --training-timesteps 500000 --num-workers 8 --torch-threads 4
 #
 # Options
 # -------
@@ -45,11 +45,12 @@ RUNNER="${REPO_ROOT}/experimentation/run_exp_standard_ppo_power_ea.py"
 RESULTS_DIR="${REPO_ROOT}/results"
 LOG_DIR="${REPO_ROOT}/logs/exp_standard_ppo_power_ea"
 
-TRAINING_TIMESTEPS=1000000
-GENERATIONS=32
+TRAINING_TIMESTEPS=10000000
+GENERATIONS=1
 POPULATION_SIZE=32
 NUM_WORKERS=32
-NUM_ENVS=1
+NUM_ENVS=4
+TORCH_THREADS=6
 DEVICE="cpu"
 GENOME="spherical"
 GATE_CFG="figure8"
@@ -70,6 +71,7 @@ while [[ $# -gt 0 ]]; do
         --population-size)       POPULATION_SIZE="$2";     shift          ;;
         --num-workers)           NUM_WORKERS="$2";         shift          ;;
         --num-envs)              NUM_ENVS="$2";            shift          ;;
+        --torch-threads)         TORCH_THREADS="$2";       shift          ;;
         --genome)                GENOME="$2";              shift          ;;
         --gate-cfg)              GATE_CFG="$2";            shift          ;;
         --z-drag-multiplier)     Z_DRAG_MULTIPLIER="$2";  shift          ;;
@@ -87,6 +89,9 @@ mkdir -p "${LOG_DIR}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 LOG_FILE="${LOG_DIR}/run_${TIMESTAMP}.log"
 
+TOTAL_CORES=$(( NUM_WORKERS * TORCH_THREADS ))
+PEAK_PROCS=$(( NUM_WORKERS * (1 + NUM_ENVS) ))
+
 echo "════════════════════════════════════════════════════════════════════════"
 echo " Experiment: Standard-PPO + Power-Aware NSGA-II"
 echo "════════════════════════════════════════════════════════════════════════"
@@ -95,6 +100,7 @@ echo "  generations        : ${GENERATIONS}"
 echo "  population_size    : ${POPULATION_SIZE}"
 echo "  num_workers (EA)   : ${NUM_WORKERS}  (≈ ${NUM_WORKERS}×(1+${NUM_ENVS})=$(( NUM_WORKERS * (1 + NUM_ENVS) )) peak procs across 32c/64t)"
 echo "  num_envs (PPO)     : ${NUM_ENVS}"
+echo "  torch_threads      : ${TORCH_THREADS}"
 echo "  device             : ${DEVICE}"
 echo "  genome             : ${GENOME}"
 echo "  gate_cfg           : ${GATE_CFG}"
@@ -113,6 +119,7 @@ CMD=(
     --population-size     "${POPULATION_SIZE}"
     --num-workers         "${NUM_WORKERS}"
     --num-envs            "${NUM_ENVS}"
+    --torch-threads       "${TORCH_THREADS}"
     --device              "${DEVICE}"
     --genome              "${GENOME}"
     --gate-cfg            "${GATE_CFG}"
