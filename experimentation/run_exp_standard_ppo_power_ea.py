@@ -149,6 +149,8 @@ def parse_args() -> argparse.Namespace:
                    help="SubprocVecEnv workers per individual PPO training run.")
     p.add_argument("--device",             default="cpu",
                    help="PyTorch device for PPO (cpu recommended for Threadripper).")
+    p.add_argument("--torch-threads",      type=int,   default=1,
+                   help="Torch threads per worker.")
 
     p.add_argument("--genome",    choices=["spherical", "cartesian"], default="spherical")
     p.add_argument("--min-narms", type=int, default=6)
@@ -424,6 +426,7 @@ def _print_header(args: argparse.Namespace, results_dir: Path) -> None:
     print(f"  Generations         : {args.generations}")
     print(f"  Training timesteps  : {int(args.training_timesteps):,}")
     print(f"  EA parallel workers : {args.num_workers}  (32 physical cores saturated)")
+    print(f"  Torch threads/worker: {args.torch_threads}")
     print(f"  PPO num_envs/indiv  : {args.num_envs}")
     print(f"  PPO device          : {args.device}")
     print()
@@ -439,8 +442,24 @@ def _print_header(args: argparse.Namespace, results_dir: Path) -> None:
     print(sep, flush=True)
 
 
+def _standard_pool_worker_init(torch_threads: int) -> None:
+    t = str(torch_threads)
+    os.environ["OMP_NUM_THREADS"] = t
+    os.environ["MKL_NUM_THREADS"] = t
+    os.environ["OPENBLAS_NUM_THREADS"] = t
+    import torch as _torch
+    _torch.set_num_threads(torch_threads)
+
 def main() -> None:
     args = parse_args()
+    
+    t = str(args.torch_threads)
+    os.environ["OMP_NUM_THREADS"] = t
+    os.environ["MKL_NUM_THREADS"] = t
+    os.environ["OPENBLAS_NUM_THREADS"] = t
+    import torch
+    torch.set_num_threads(args.torch_threads)
+
     results_dir = _results_dir(args)
     _save_config(args, results_dir)
     _print_header(args, results_dir)
@@ -493,9 +512,11 @@ def main() -> None:
                 for i, genome in enumerate(population)
             ]
             PER_INDIVIDUAL_TIMEOUT = 1800  # seconds; ~8 min expected at 1M ts
+            from functools import partial
+            pool_init = partial(_standard_pool_worker_init, args.torch_threads)
             with NonDaemonPool(
                 processes=min(num_workers, len(population)),
-                initializer=_evo_components._pool_worker_init,
+                initializer=pool_init,
             ) as pool:
                 async_results = [
                     pool.apply_async(
