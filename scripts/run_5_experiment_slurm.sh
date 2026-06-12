@@ -7,7 +7,7 @@
 #SBATCH --exclusive
 #SBATCH -t 110:00:00
 #SBATCH --mem=320G
-#SBATCH --array=1-5
+#SBATCH --array=1-10
 #SBATCH --output=./logs/%x_%A_%a.out
 #SBATCH --error=./logs/%x_%A_%a.err
 
@@ -34,10 +34,18 @@ cleanup() {
 # Trap SIGTERM (sent by SLURM before timeout) and SIGINT
 trap cleanup SIGTERM SIGINT
 
-# ==============================================================================
-# RUN 1: Figure 8
-# ==============================================================================
-echo "Starting figure8 experiment..."
+if [ "$SLURM_ARRAY_TASK_ID" -le 5 ]; then
+    GATE_CFG="figure8"
+    REP_ID="$SLURM_ARRAY_TASK_ID"
+    RUN_ID_BASE="figure8"
+else
+    GATE_CFG="backandforth"
+    REP_ID=$(( SLURM_ARRAY_TASK_ID - 5 ))
+    RUN_ID_BASE="shuttlerun"
+fi
+
+echo "Starting $GATE_CFG experiment rep $REP_ID..."
+
 srun bash scripts/run_exp_standard_ppo_power_ea.sh \
     --training-timesteps 10000000 \
     --generations 40 \
@@ -47,36 +55,13 @@ srun bash scripts/run_exp_standard_ppo_power_ea.sh \
     --torch-threads 8 \
     --device cpu \
     --genome spherical \
-    --gate-cfg figure8 \
+    --gate-cfg "$GATE_CFG" \
     --z-drag-multiplier 1.0 \
     --results-dir "$SCRATCH_DIR/results" \
     --log-dir "$SCRATCH_DIR/logs" \
-    --run-id "exp_standard_ppo_power_ea_figure8_rep${SLURM_ARRAY_TASK_ID}"
+    --run-id "exp_standard_ppo_power_ea_${RUN_ID_BASE}_rep${REP_ID}"
 
-# Sync data immediately after run 1 just in case
+# Sync data after run
 mkdir -p "$SLURM_SUBMIT_DIR/results" "$SLURM_SUBMIT_DIR/logs"
-cp -r "$SCRATCH_DIR/results/"* "$SLURM_SUBMIT_DIR/results/" 2>/dev/null || true
-cp -r "$SCRATCH_DIR/logs/"* "$SLURM_SUBMIT_DIR/logs/" 2>/dev/null || true
-
-# ==============================================================================
-# RUN 2: Back and forth (shuttlerun)
-# ==============================================================================
-echo "Starting backandforth experiment..."
-srun bash scripts/run_exp_standard_ppo_power_ea.sh \
-    --training-timesteps 10000000 \
-    --generations 40 \
-    --population-size 24 \
-    --num-workers 24 \
-    --num-envs 5 \
-    --torch-threads 8 \
-    --device cpu \
-    --genome spherical \
-    --gate-cfg backandforth \
-    --z-drag-multiplier 1.0 \
-    --results-dir "$SCRATCH_DIR/results" \
-    --log-dir "$SCRATCH_DIR/logs" \
-    --run-id "exp_standard_ppo_power_ea_shuttlerun_rep${SLURM_ARRAY_TASK_ID}"
-
-# Final sync after run 2
 cp -r "$SCRATCH_DIR/results/"* "$SLURM_SUBMIT_DIR/results/" 2>/dev/null || true
 cp -r "$SCRATCH_DIR/logs/"* "$SLURM_SUBMIT_DIR/logs/" 2>/dev/null || true
