@@ -160,7 +160,7 @@ class FullStatsCallback(BaseCallback):
         # Force flush for debugging; can remove later
         self.logger.dump(self.num_timesteps)
 
-def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cpu", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, z_drag_multiplier=5.0, phys_max_rate_rp=25.0, phys_max_rate_yaw=10.0):
+def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cpu", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, z_drag_multiplier=1.0, phys_max_rate_rp=25.0, phys_max_rate_yaw=10.0):
 
     if gate_cfg == "backandforth":
         gate_pos = backandforth.gate_pos
@@ -351,7 +351,10 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         prev_idx = (target_idx - 1) % test_env.num_gates
         gate_dist = float(np.linalg.norm(test_env.gate_pos[target_idx] - test_env.gate_pos[prev_idx]))
         
-    fraction = max(0.0, 1.0 - (d2g / gate_dist))
+    if gate_dist < 1e-5:
+        fraction = 0.0
+    else:
+        fraction = max(0.0, 1.0 - (d2g / gate_dist))
     continuous_fitness = float(num_gates_passed) + fraction
     
     env.close()
@@ -363,7 +366,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         
     return continuous_fitness
 
-def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cpu", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, z_drag_multiplier=5.0, phys_max_rate_rp=25.0, phys_max_rate_yaw=10.0) -> list:
+def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cpu", num=None, max_steps=1200, random_start=True, load_policy=None, verbose=1, progress_bar=True, action_filter_alpha=1.0, k_quad_drag=0.05, z_drag_multiplier=1.0, phys_max_rate_rp=25.0, phys_max_rate_yaw=10.0) -> list:
     start_time = time.time()
     os.makedirs(ind_save_dir, exist_ok=True)
     
@@ -436,7 +439,7 @@ if __name__ == "__main__":
     parser.add_argument('--max_steps', default=1200, type=int)
     parser.add_argument('--no_random_start', action='store_true')
     parser.add_argument('--load_policy', default=None, type=str)
-    parser.add_argument('--z_drag_multiplier', default=5.0, type=float)
+    parser.add_argument('--z_drag_multiplier', default=1.0, type=float)
     args = parser.parse_args()
 
     # Load Bf and Bm from directory

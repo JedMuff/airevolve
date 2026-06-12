@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=192
 #SBATCH --exclusive
-#SBATCH -t 20:00:00
+#SBATCH -t 110:00:00
 #SBATCH --mem=320G
 #SBATCH --array=1-5
 #SBATCH --output=./logs/%x_%A_%a.out
@@ -22,14 +22,43 @@ SCRATCH_DIR="/scratch-shared/$USER/airevolve_tmp_${SLURM_ARRAY_JOB_ID}_${SLURM_A
 mkdir -p "$SCRATCH_DIR/results"
 mkdir -p "$SCRATCH_DIR/logs"
 
+# ==============================================================================
+# RUN 1: Figure 8
+# ==============================================================================
+echo "Starting figure8 experiment..."
 srun bash scripts/run_exp_standard_ppo_power_ea.sh \
-    --num-workers 32 \
-    --num-envs 5 \
+    --training-timesteps 10000000 \
+    --generations 40 \
+    --population-size 24 \
+    --num-workers 24 \
+    --num-envs 10 \
+    --torch-threads 8 \
     --device cpu \
-    --training-timesteps 3000000 \
+    --genome spherical \
+    --gate-cfg figure8 \
+    --z-drag-multiplier 1.0 \
     --results-dir "$SCRATCH_DIR/results" \
     --log-dir "$SCRATCH_DIR/logs" \
-    --run-id "exp_standard_ppo_power_ea_rep${SLURM_ARRAY_TASK_ID}"
+    --run-id "exp_standard_ppo_power_ea_figure8_rep${SLURM_ARRAY_TASK_ID}"
+
+# ==============================================================================
+# RUN 2: Back and forth (shuttlerun)
+# ==============================================================================
+echo "Starting backandforth experiment..."
+srun bash scripts/run_exp_standard_ppo_power_ea.sh \
+    --training-timesteps 10000000 \
+    --generations 40 \
+    --population-size 24 \
+    --num-workers 24 \
+    --num-envs 10 \
+    --torch-threads 8 \
+    --device cpu \
+    --genome spherical \
+    --gate-cfg backandforth \
+    --z-drag-multiplier 1.0 \
+    --results-dir "$SCRATCH_DIR/results" \
+    --log-dir "$SCRATCH_DIR/logs" \
+    --run-id "exp_standard_ppo_power_ea_shuttlerun_rep${SLURM_ARRAY_TASK_ID}"
 
 mkdir -p "$SLURM_SUBMIT_DIR/results"
 mkdir -p "$SLURM_SUBMIT_DIR/logs"

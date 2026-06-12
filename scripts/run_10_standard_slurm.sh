@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH -J airevolve_standard_5rep
+#SBATCH -J airevolve_standard_10rep
 #SBATCH -p genoa
 #SBATCH -N 1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=192
 #SBATCH --exclusive
-#SBATCH -t 10:00:00
+#SBATCH -t 110:00:00
 #SBATCH --mem=320G
-#SBATCH --array=1
+#SBATCH --array=1-10
 #SBATCH --output=./logs/%x_%A_%a.out
 #SBATCH --error=./logs/%x_%A_%a.err
 

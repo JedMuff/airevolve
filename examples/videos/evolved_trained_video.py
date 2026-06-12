@@ -86,7 +86,7 @@ _TRACK_CFGS = {
 }
 
 def _build_env(morph: str, env_seed: int, device: str, is_power_aware: bool,
-               gates_ahead: int = 1, gate_cfg: str = "figure8") -> DroneGateEnv:
+               gates_ahead: int = 2, gate_cfg: str = "figure8") -> DroneGateEnv:
     track = _TRACK_CFGS[gate_cfg]
     common = dict(
         num_envs=1, gates_ahead=gates_ahead, num_state_history=0, num_action_history=0,
