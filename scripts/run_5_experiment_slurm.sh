@@ -22,6 +22,18 @@ SCRATCH_DIR="/scratch-shared/$USER/airevolve_tmp_${SLURM_ARRAY_JOB_ID}_${SLURM_A
 mkdir -p "$SCRATCH_DIR/results"
 mkdir -p "$SCRATCH_DIR/logs"
 
+# Define a cleanup function to rescue data if the job is killed or times out
+cleanup() {
+    echo "Caught signal! Rescuing data from scratch before exit..."
+    mkdir -p "$SLURM_SUBMIT_DIR/results" "$SLURM_SUBMIT_DIR/logs"
+    cp -r "$SCRATCH_DIR/results/"* "$SLURM_SUBMIT_DIR/results/" 2>/dev/null || true
+    cp -r "$SCRATCH_DIR/logs/"* "$SLURM_SUBMIT_DIR/logs/" 2>/dev/null || true
+    echo "Cleanup finished."
+    exit 1
+}
+# Trap SIGTERM (sent by SLURM before timeout) and SIGINT
+trap cleanup SIGTERM SIGINT
+
 # ==============================================================================
 # RUN 1: Figure 8
 # ==============================================================================
@@ -31,7 +43,7 @@ srun bash scripts/run_exp_standard_ppo_power_ea.sh \
     --generations 40 \
     --population-size 24 \
     --num-workers 24 \
-    --num-envs 10 \
+    --num-envs 5 \
     --torch-threads 8 \
     --device cpu \
     --genome spherical \
@@ -40,6 +52,11 @@ srun bash scripts/run_exp_standard_ppo_power_ea.sh \
     --results-dir "$SCRATCH_DIR/results" \
     --log-dir "$SCRATCH_DIR/logs" \
     --run-id "exp_standard_ppo_power_ea_figure8_rep${SLURM_ARRAY_TASK_ID}"
+
+# Sync data immediately after run 1 just in case
+mkdir -p "$SLURM_SUBMIT_DIR/results" "$SLURM_SUBMIT_DIR/logs"
+cp -r "$SCRATCH_DIR/results/"* "$SLURM_SUBMIT_DIR/results/" 2>/dev/null || true
+cp -r "$SCRATCH_DIR/logs/"* "$SLURM_SUBMIT_DIR/logs/" 2>/dev/null || true
 
 # ==============================================================================
 # RUN 2: Back and forth (shuttlerun)
@@ -50,7 +67,7 @@ srun bash scripts/run_exp_standard_ppo_power_ea.sh \
     --generations 40 \
     --population-size 24 \
     --num-workers 24 \
-    --num-envs 10 \
+    --num-envs 5 \
     --torch-threads 8 \
     --device cpu \
     --genome spherical \
@@ -60,7 +77,6 @@ srun bash scripts/run_exp_standard_ppo_power_ea.sh \
     --log-dir "$SCRATCH_DIR/logs" \
     --run-id "exp_standard_ppo_power_ea_shuttlerun_rep${SLURM_ARRAY_TASK_ID}"
 
-mkdir -p "$SLURM_SUBMIT_DIR/results"
-mkdir -p "$SLURM_SUBMIT_DIR/logs"
+# Final sync after run 2
 cp -r "$SCRATCH_DIR/results/"* "$SLURM_SUBMIT_DIR/results/" 2>/dev/null || true
 cp -r "$SCRATCH_DIR/logs/"* "$SLURM_SUBMIT_DIR/logs/" 2>/dev/null || true
