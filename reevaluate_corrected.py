@@ -19,7 +19,7 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "examples" / "evolution"))
 
 from stable_baselines3 import PPO
-from airevolve.evolution_tools.evaluators.drone_gate_env_power import PowerAwareDroneEnv
+from airevolve.evolution_tools.evaluators.drone_gate_env import DroneGateEnv
 from airevolve.evolution_tools.evaluators.gate_train import (
     backandforth, figure8, circle, slalom,
 )
@@ -67,9 +67,9 @@ def get_gate_cfg_for_run(run_dir: Path) -> str:
     return "figure8"
 
 
-def create_eval_env(genome: np.ndarray, gate_cfg: str) -> PowerAwareDroneEnv:
+def create_eval_env(genome: np.ndarray, gate_cfg: str) -> DroneGateEnv:
     cfg = GATE_CFG_MAP[gate_cfg]
-    env = PowerAwareDroneEnv(
+    env = DroneGateEnv(
         num_envs=1,
         individual=genome,
         gates_pos=cfg.gate_pos,
@@ -86,10 +86,6 @@ def create_eval_env(genome: np.ndarray, gate_cfg: str) -> PowerAwareDroneEnv:
         render_mode=None,
         device="cpu",
         max_steps=MAX_STEPS,
-        experiment_type=2,
-        penalty_weights={},
-        randomize_soc=False,
-        strict_voltage_kill=True,
     )
     return env
 
