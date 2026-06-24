@@ -107,10 +107,11 @@ class DroneGateEnv(VecEnv):
         # Use the raw k_f constant and mass directly (same formula as
         # derive_reference_params) to avoid the dynamics-frame normalisation
         # trap (k_fz_signed is k_f/m and operates on W_MAX_N=3000 scale).
-        k_f = self.drone_sim.config.propellers[0]["constants"][0]
-        mass = float(self.drone_sim.mass)
-        F_hover_per_motor = mass * 9.81 / num_motors
-        W_hover_phys = np.sqrt(F_hover_per_motor / k_f)   # rad/s, physical
+        # Sum the absolute vertical thrust coefficients of all motors (already normalized by mass)
+        sum_k_fz = sum(abs(k) for k in self.drone_sim.params["k_fz_signed"])
+        
+        # W_hover_phys is the precise RPM where total vertical thrust equals gravity (9.81)
+        W_hover_phys = np.sqrt(9.81 / sum_k_fz)
         
         w_min = self.drone_sim.params["w_min"]             # 305.4 for prop3
         w_max = self.drone_sim.params["w_max"]             # 4399  for prop3
@@ -553,10 +554,10 @@ class DroneGateEnv(VecEnv):
         safe_U_hover = np.clip(self.U_hover, 1e-4, 0.9999)
         gamma = np.log(safe_U_hover) / np.log(0.5)
         
+        # BYPASSED HOVER CENTERING:
         U = np.power(x, gamma)
-        centered_actions = 2.0 * U - 1.0
+        self.actions = 2.0 * U - 1.0
         
-        self.actions = centered_actions
         self.raw_actions = actions.copy()
     
     def step_wait(self):
@@ -728,9 +729,9 @@ class DroneGateEnv(VecEnv):
         p0 = self.world_states[:, 9]
         q0 = self.world_states[:, 10]
         r0 = self.world_states[:, 11]
-        new_states[:, 9]  += (self._gyro_coeff_p * q0 * r0 * dt_f).astype(np.float32)
-        new_states[:, 10] += (self._gyro_coeff_q * p0 * r0 * dt_f).astype(np.float32)
-        new_states[:, 11] += (self._gyro_coeff_r * p0 * q0 * dt_f).astype(np.float32)
+        #new_states[:, 9]  += (self._gyro_coeff_p * q0 * r0 * dt_f).astype(np.float32)
+        #new_states[:, 10] += (self._gyro_coeff_q * p0 * r0 * dt_f).astype(np.float32)
+        #new_states[:, 11] += (self._gyro_coeff_r * p0 * q0 * dt_f).astype(np.float32)
 
         # ── Morphology-aware angular rate cap ────────────────────────────
         # Per-axis limits derived from drone's own k_signed parameters in __init__:
@@ -750,11 +751,11 @@ class DroneGateEnv(VecEnv):
         # Rewards
         d2g_old = np.linalg.norm(pos_old - pos_gate, axis=1)
         d2g_new = np.linalg.norm(pos_new - pos_gate, axis=1)
-        rat_penalty = 0.003*np.linalg.norm(new_states[:,9:12], axis=1)
-        action_penalty_delta = 0.003*np.linalg.norm((self.raw_actions-self.prev_raw_actions), axis=1)
+        rat_penalty = 0.001 * np.linalg.norm(new_states[:, 9:11], axis=1)
+        action_penalty_delta = 0.001*np.linalg.norm((self.raw_actions-self.prev_raw_actions), axis=1)
 
         prog_rewards = d2g_old - d2g_new
-        rewards = prog_rewards - rat_penalty - action_penalty_delta
+        rewards = prog_rewards - action_penalty_delta - rat_penalty
 
         # Gate passing/collision
         normal = np.array([np.cos(yaw_gate), np.sin(yaw_gate)]).T
