@@ -25,8 +25,10 @@ for TASK_ID in "${!CRASHED_RUNS[@]}"; do
         
         # Loop through 0024 to 0055 and rename them to 1272 to 1303
         GLOBAL_ID=1272
-        for LOCAL_ID in {24..55}; local_formatted=$(printf "%04d" $LOCAL_ID); do
+        for LOCAL_ID in {24..55}; do
+            local_formatted=$(printf "%04d" $LOCAL_ID)
             SOURCE_FOLDER="${RESUME_SCRATCH}/rl_logs/generation_01/individual_${local_formatted}"
+            
             if [ -d "$SOURCE_FOLDER" ]; then
                 global_formatted=$(printf "%04d" $GLOBAL_ID)
                 cp -r "$SOURCE_FOLDER" "${TARGET_RL_LOGS}/individual_${global_formatted}"

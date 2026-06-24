@@ -51,7 +51,7 @@ def main():
     ]
     
     rl_data = [
-        ["Algorithm", "Lamarckian PPO"],
+        ["Algorithm", "Standard PPO"],
         ["Gen 0 Training Timesteps", "10 000 000"],
         ["Gen 1+ Lamarckian Timesteps", "2 000 000"],
         ["Fallback Timesteps ", "3 000 000"],

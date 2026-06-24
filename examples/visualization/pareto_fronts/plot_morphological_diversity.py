@@ -53,6 +53,7 @@ def main():
         print("No valid generation data found.")
         return
 
+    valid_gens = []
     mean_diversities = []
     std_diversities = []
 
@@ -64,13 +65,9 @@ def main():
             pop_genomes = np.stack(pop["genome_parsed"].values)
         except ValueError:
             # Skip if genomes are not uniform length (rare, but possible if corrupted)
-            mean_diversities.append(0.0)
-            std_diversities.append(0.0)
             continue
             
         if len(pop_genomes) < 2:
-            mean_diversities.append(0.0)
-            std_diversities.append(0.0)
             continue
 
         # Morphological Diversity calculation:
@@ -83,9 +80,11 @@ def main():
         mean_div = np.mean(distances)
         std_div = np.std(distances)
         
+        valid_gens.append(g)
         mean_diversities.append(mean_div)
         std_diversities.append(std_div)
 
+    gens = np.array(valid_gens)
     mean_diversities = np.array(mean_diversities)
     std_diversities = np.array(std_diversities)
 

@@ -1,5 +1,6 @@
 import os
 import glob
+import argparse
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -17,10 +18,15 @@ def extract_metrics(csv_path):
         l = df['l'].values
         cum_timesteps = np.cumsum(l)
         
+        # Filter out incomplete/crashed runs
+        if cum_timesteps[-1] < 500000:
+            return None
+        
         r_smooth = pd.Series(r).rolling(window=100, min_periods=1).mean().values
         
         max_rew = np.max(r_smooth)
         min_rew = np.min(r_smooth)
+        min_idx = np.argmin(r_smooth)
         
         improvement = max_rew - min_rew
         if improvement == 0:
@@ -28,12 +34,16 @@ def extract_metrics(csv_path):
         else:
             threshold = min_rew + 0.9 * improvement
             
-        burn_in_indices = np.where(r_smooth >= threshold)[0]
-        if len(burn_in_indices) > 0:
-            burn_in_idx = burn_in_indices[0]
+        burn_in_candidates = np.where(r_smooth[min_idx:] >= threshold)[0]
+        if len(burn_in_candidates) > 0:
+            burn_in_idx = min_idx + burn_in_candidates[0]
             burn_in_point = cum_timesteps[burn_in_idx]
         else:
             burn_in_idx = len(r) - 1
+            burn_in_point = cum_timesteps[-1]
+            
+        # Prevent division by tiny values if it happened to burn in immediately
+        if burn_in_point < 10000:
             burn_in_point = cum_timesteps[-1]
             
         learning_speed = improvement / burn_in_point if burn_in_point > 0 else 0
@@ -72,20 +82,29 @@ def process_run(run_dir):
     run_metrics = {'max_reward': [], 'learning_speed': [], 'volatility': [], 'burn_in_point': []}
     
     for idx, gen_dir in enumerate(gen_dirs):
+        # Extract generation number from directory name
+        try:
+            gen_num = int(os.path.basename(gen_dir).split("_")[1])
+        except Exception:
+            gen_num = idx
+            
         metrics = process_generation(gen_dir)
         if metrics is not None:
-            generations.append(idx)
+            generations.append(gen_num)
             for k in run_metrics.keys():
                 run_metrics[k].append(metrics[k])
                 
     return generations, run_metrics
 
 def main():
-    base_dir = "/Users/mikolajduchlinski/Desktop/results_final/results"
-    runs = [f"exp_lamarckian_ppo_power_ea_rep{rep}" for rep in range(1, 6)]
-    run_dirs = [os.path.join(base_dir, r) for r in runs if os.path.exists(os.path.join(base_dir, r))]
+    parser = argparse.ArgumentParser(description="Plot learning metrics for all runs of a task.")
+    parser.add_argument("--base_dir", required=True, help="Base results directory")
+    parser.add_argument("--task_name", required=True, help="Name of the task (e.g. figure8)")
+    parser.add_argument("--run_dirs", nargs='+', required=True, help="List of run directories")
+    args = parser.parse_args()
     
-    print(f"Found {len(run_dirs)} run directories.")
+    run_dirs = [r for r in args.run_dirs if os.path.exists(r)]
+    print(f"Found {len(run_dirs)} valid run directories out of {len(args.run_dirs)}.")
     
     all_metrics = {'max_reward': {}, 'learning_speed': {}, 'volatility': {}, 'burn_in_point': {}}
     
@@ -98,13 +117,12 @@ def main():
             all_metrics[k][i] = pd.Series(metrics[k], index=gens)
             
     metrics_info = {
-        'max_reward': ('Maximum Reward Achieved', 'max_reward.png', 'Asymptotic performance'),
-        'learning_speed': ('Learning Speed', 'learning_speed.png', 'Learning Speed'),
-        'volatility': ('Stability of Learning', 'volatility.png', 'Stability of learning'),
-        'burn_in_point': ('Point of Burn-in', 'burn_in_point.png', 'Time of burning phase')
+        'max_reward': (f'Maximum Reward Achieved ({args.task_name})', f'max_reward_{args.task_name}.png', 'Asymptotic performance'),
+        'learning_speed': (f'Learning Speed ({args.task_name})', f'learning_speed_{args.task_name}.png', 'Learning Speed'),
+        'volatility': (f'Stability of Learning ({args.task_name})', f'volatility_{args.task_name}.png', 'Stability of learning'),
+        'burn_in_point': (f'Point of Burn-in ({args.task_name})', f'burn_in_point_{args.task_name}.png', 'Time of burning phase')
     }
     
-    plt.style.use('ggplot')
     color = '#4c72b0'
     
     for metric_key, (title, filename, ylabel) in metrics_info.items():
@@ -117,20 +135,22 @@ def main():
         mean_series = df.mean(axis=1)
         std_series = df.std(axis=1)
         
-        plt.plot(df.index, mean_series, linewidth=2, color=color)
+        plt.plot(df.index, mean_series, linewidth=2, color=color, label="Mean")
         plt.fill_between(df.index, 
                          mean_series - std_series,
                          mean_series + std_series, 
-                         color=color, alpha=0.2)
+                         color=color, alpha=0.2, label="± 1 Std Dev")
                          
         plt.title(title, fontweight='bold')
         plt.xlabel('Generations')
         plt.ylabel(ylabel)
+        plt.legend()
         plt.grid(True, linestyle='--', alpha=0.7)
         plt.tight_layout()
-        plt.savefig(filename, dpi=300)
+        out_path = os.path.join(args.base_dir, filename)
+        plt.savefig(out_path, dpi=300)
         plt.close()
-        print(f"Saved {filename}")
+        print(f"Saved {out_path}")
 
 if __name__ == '__main__':
     main()

@@ -1,5 +1,6 @@
 import os
 import re
+import argparse
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -32,18 +33,21 @@ def _load_csv(path: str) -> pd.DataFrame:
     return df
 
 def main():
-    base_dir = "/Users/mikolajduchlinski/Desktop/results_final/results"
-    run_names = [f"exp_lamarckian_ppo_power_ea_rep{i}" for i in range(1, 6)]
+    parser = argparse.ArgumentParser(description="Plot morphological diversity for all runs of a task.")
+    parser.add_argument("--base_dir", required=True, help="Base results directory")
+    parser.add_argument("--task_name", required=True, help="Name of the task (e.g. figure8)")
+    parser.add_argument("--run_dirs", nargs='+', required=True, help="List of run directories")
+    args = parser.parse_args()
     
-    all_run_diversities = {} # gen -> list of diversities
+    all_run_distances = {} # gen -> list of all distances
     
-    for run in run_names:
-        csv_path = os.path.join(base_dir, run, "evolution_data.csv")
+    for run in args.run_dirs:
+        csv_path = os.path.join(run, "evolution_data_repaired.csv")
         if not os.path.exists(csv_path):
             print(f"File not found: {csv_path}")
             continue
             
-        print(f"Processing {run}...")
+        print(f"Processing {os.path.basename(run)}...")
         df = _load_csv(csv_path)
         gens = sorted(df["generation"].unique())
         
@@ -65,13 +69,12 @@ def main():
             
             # Calculate Euclidean distance of each drone's physical body to the centroid
             distances = np.linalg.norm(pop_genomes - centroid, axis=1)
-            mean_div = np.mean(distances)
             
-            if g not in all_run_diversities:
-                all_run_diversities[g] = []
-            all_run_diversities[g].append(mean_div)
+            if g not in all_run_distances:
+                all_run_distances[g] = []
+            all_run_distances[g].extend(distances.tolist())
             
-    gens = sorted(all_run_diversities.keys())
+    gens = sorted(all_run_distances.keys())
     if not gens:
         print("No valid generation data found across runs.")
         return
@@ -80,10 +83,11 @@ def main():
     std_of_means = []
     
     for g in gens:
-        divs = all_run_diversities[g]
-        mean_of_means.append(np.mean(divs))
-        std_of_means.append(np.std(divs))
+        dists = all_run_distances[g]
+        mean_of_means.append(np.mean(dists))
+        std_of_means.append(np.std(dists))
         
+    gens = np.array(gens)
     mean_of_means = np.array(mean_of_means)
     std_of_means = np.array(std_of_means)
     
@@ -101,7 +105,7 @@ def main():
     
     ax.set_xlabel("Generation", fontsize=14)
     ax.set_ylabel("Diversity (Euclidean Distance)", fontsize=14)
-    ax.set_title("Morphological Diversity Over Generations (5 Runs)", fontsize=15)
+    ax.set_title(f"Morphological Diversity Over Generations ({len(args.run_dirs)} Runs - {args.task_name})", fontsize=15)
     
     # Format grid and ticks similar to the requested style
     ax.grid(True, linestyle="-", alpha=0.7)
@@ -113,10 +117,9 @@ def main():
     ax.set_ylim([y_min, y_max])
 
     fig.tight_layout()
-    out_dir = os.path.dirname(os.path.abspath(__file__))
-    out_png = os.path.join(out_dir, "morphological_diversity_all.png")
-    fig.savefig(out_png, dpi=300, bbox_inches="tight")
-    print(f"Saved Morphological Diversity plot -> {out_png}")
+    out_path = os.path.join(args.base_dir, f"morphological_diversity_all_{args.task_name}.png")
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    print(f"Saved Morphological Diversity plot -> {out_path}")
     plt.close(fig)
 
 if __name__ == "__main__":

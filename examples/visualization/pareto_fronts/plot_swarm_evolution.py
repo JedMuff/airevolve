@@ -42,8 +42,8 @@ def main():
     out_dir = os.path.dirname(os.path.abspath(csv_path))
     df = _load_csv(csv_path)
 
-    finite_mask = np.isfinite(df["total_energy_j"]) & np.isfinite(df["gates_passed"])
-    df = df[finite_mask]
+    valid_mask = np.isfinite(df["total_energy_j"]) & np.isfinite(df["gates_passed"]) & (df["total_energy_j"] < 1e8)
+    df = df[valid_mask]
     
     # 1. Drop duplicates so each individual ID is only plotted once. 
     # Since they survive with the same ID, their fitness doesn't change.

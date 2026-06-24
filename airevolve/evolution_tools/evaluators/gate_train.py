@@ -383,7 +383,7 @@ def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cf
     else:  
         spinning_success = False
 
-    success = sim.static_success# or spinning_success
+    success = sim.static_success or spinning_success
     if not success:
         try:
             fig = plt.figure(figsize=plt.figaspect(0.5))

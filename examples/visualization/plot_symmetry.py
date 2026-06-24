@@ -1,5 +1,6 @@
 import os
 import re
+import argparse
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -76,19 +77,23 @@ def process_run(csv_path):
     return generations, central_asym_means, bilateral_asym_means
 
 def main():
-    base_dir = "/Users/mikolajduchlinski/Desktop/results_final/results"
+    parser = argparse.ArgumentParser(description="Plot symmetry metrics for all runs of a task.")
+    parser.add_argument("--base_dir", required=True, help="Base results directory")
+    parser.add_argument("--task_name", required=True, help="Name of the task (e.g. figure8)")
+    parser.add_argument("--run_dirs", nargs='+', required=True, help="List of run directories")
+    args = parser.parse_args()
     
     all_central = {}
     all_bilateral = {}
     
-    for rep in range(1, 6):
-        run_name = f"exp_lamarckian_ppo_power_ea_rep{rep}"
-        csv_path = os.path.join(base_dir, run_name, "evolution_data.csv")
+    for run_dir in args.run_dirs:
+        csv_path = os.path.join(run_dir, "evolution_data_repaired.csv")
+        run_name = os.path.basename(run_dir)
         if os.path.exists(csv_path):
             print(f"Processing {run_name}...")
             gens, c_means, b_means = process_run(csv_path)
-            all_central[rep] = pd.Series(c_means, index=gens)
-            all_bilateral[rep] = pd.Series(b_means, index=gens)
+            all_central[run_name] = pd.Series(c_means, index=gens)
+            all_bilateral[run_name] = pd.Series(b_means, index=gens)
         else:
             print(f"File not found: {csv_path}")
             
@@ -104,12 +109,14 @@ def main():
                      df_central.mean(axis=1) - df_central.std(axis=1),
                      df_central.mean(axis=1) + df_central.std(axis=1), 
                      color='#4c72b0', alpha=0.2, label='Std Dev')
-    plt.title('Central Asymmetry over Generations', fontweight='bold')
+    plt.title(f'Central Asymmetry over Generations ({args.task_name})', fontweight='bold')
     plt.xlabel('Generations')
     plt.ylabel('Central Asymmetry')
+    plt.legend()
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
-    plt.savefig('central_asymmetry.png', dpi=300)
+    out_path_central = os.path.join(args.base_dir, f'central_asymmetry_{args.task_name}.png')
+    plt.savefig(out_path_central, dpi=300)
     plt.close()
     
     # Plot 2: Bilateral Asymmetry
@@ -121,15 +128,17 @@ def main():
                      df_bilateral.mean(axis=1) - df_bilateral.std(axis=1),
                      df_bilateral.mean(axis=1) + df_bilateral.std(axis=1), 
                      color='#c44e52', alpha=0.2, label='Std Dev')
-    plt.title('Bilateral Asymmetry over Generations', fontweight='bold')
+    plt.title(f'Bilateral Asymmetry over Generations ({args.task_name})', fontweight='bold')
     plt.xlabel('Generations')
     plt.ylabel('Bilateral Asymmetry (Mean Error in Radians)')
+    plt.legend()
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
-    plt.savefig('bilateral_asymmetry.png', dpi=300)
+    out_path_bilateral = os.path.join(args.base_dir, f'bilateral_asymmetry_{args.task_name}.png')
+    plt.savefig(out_path_bilateral, dpi=300)
     plt.close()
     
-    print("Plots saved as central_asymmetry.png and bilateral_asymmetry.png")
+    print(f"Plots saved as {out_path_central} and {out_path_bilateral}")
 
 if __name__ == "__main__":
     main()

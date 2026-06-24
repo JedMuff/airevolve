@@ -1,5 +1,6 @@
 import os
 import ast
+import argparse
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -7,22 +8,30 @@ import numpy as np
 import pandas as pd
 
 def main():
-    base_dir = "/Users/mikolajduchlinski/Desktop/results_final/results"
-    run_names = [f"exp_lamarckian_ppo_power_ea_rep{i}" for i in range(1, 6)]
+    parser = argparse.ArgumentParser(description="Plot objectives for all runs of a task.")
+    parser.add_argument("--base_dir", required=True, help="Base results directory")
+    parser.add_argument("--task_name", required=True, help="Name of the task (e.g. figure8)")
+    parser.add_argument("--run_dirs", nargs='+', required=True, help="List of run directories")
+    args = parser.parse_args()
+
+    # Per-generation aggregates across runs
+    all_max_g = {}        # gen -> [max_gates per run]  (for dashed line)
+    all_mean_g = {}       # gen -> [mean_gates per run] (for solid line)
+    all_gates_pooled = {} # gen -> [ALL individual gates from ALL runs] (for population std)
+    all_min_e = {}        # gen -> [min_energy per run]  (for dashed line)
+    all_mean_e = {}       # gen -> [mean_energy per run] (for solid line)
+    all_energy_pooled = {} # gen -> [ALL individual energies from ALL runs] (for population std)
     
-    all_max_g = {}
-    all_min_e = {}
-    
-    for run in run_names:
-        csv_path = os.path.join(base_dir, run, "evolution_data.csv")
+    for run in args.run_dirs:
+        csv_path = os.path.join(run, "evolution_data_repaired.csv")
         if not os.path.exists(csv_path):
             print(f"File not found: {csv_path}")
             continue
             
-        print(f"Processing {run}...")
+        print(f"Processing {os.path.basename(run)}...")
         df = pd.read_csv(csv_path)
         
-        # Some scripts might not have "gates_passed" and "total_energy_j" already parsed
+        # Parse fitness if needed
         if "gates_passed" not in df.columns or "total_energy_j" not in df.columns:
             if "fitness" in df.columns:
                 def parse_fitness(f, idx):
@@ -41,50 +50,95 @@ def main():
         gens = sorted(df["generation"].unique())
         for g in gens:
             pop = df[df["generation"] == g]
+            
+            # Max/Min per run (for dashed lines)
             max_gates = pop["gates_passed"].max()
-            min_energy = pop["total_energy_j"].apply(lambda x: x if np.isfinite(x) else np.nan).min()
+            energy_vals = pop["total_energy_j"].apply(lambda x: x if np.isfinite(x) and x < 1e8 else np.nan)
+            min_energy = energy_vals.min()
+            
+            # Mean per run (for solid lines showing variance across runs instead of pooled population)
+            mean_gates = pop["gates_passed"].mean()
+            mean_energy = energy_vals.mean()
             
             if g not in all_max_g:
                 all_max_g[g] = []
+                all_mean_g[g] = []
+                all_gates_pooled[g] = []
                 all_min_e[g] = []
+                all_mean_e[g] = []
+                all_energy_pooled[g] = []
                 
             all_max_g[g].append(max_gates)
             all_min_e[g].append(min_energy)
+            all_mean_g[g].append(mean_gates)
+            all_mean_e[g].append(mean_energy)
+            
+            # Pool ALL individual values (for population std)
+            all_gates_pooled[g].extend(pop["gates_passed"].dropna().tolist())
+            all_energy_pooled[g].extend(energy_vals.dropna().tolist())
             
     gens = sorted(all_max_g.keys())
     if not gens:
         print("No valid generation data found across runs.")
         return
         
-    # Calculate means and standard deviations
-    mean_max_g = np.array([np.mean(all_max_g[g]) for g in gens])
-    std_max_g = np.array([np.std(all_max_g[g]) for g in gens])
+    # Max/Min: mean and std across the 5 runs (for dashed lines, run-to-run variance)
+    mean_of_max_g = np.array([np.mean(all_max_g[g]) for g in gens])
+    std_of_max_g  = np.array([np.std(all_max_g[g]) for g in gens])
     
-    mean_min_e = np.array([np.mean(all_min_e[g]) for g in gens])
-    std_min_e = np.array([np.std(all_min_e[g]) for g in gens])
+    mean_of_min_e = np.array([np.nanmean(all_min_e[g]) for g in gens])
+    std_of_min_e  = np.array([np.nanstd(all_min_e[g]) for g in gens])
+    
+    # Mean: computed over the run-means
+    mean_of_mean_g = np.array([np.mean(all_mean_g[g]) for g in gens])
+    mean_of_mean_e = np.array([np.nanmean(all_mean_e[g]) for g in gens])
+    
+    # Std: computed over ALL pooled individuals to show population spread
+    std_of_mean_g  = np.array([np.std(all_gates_pooled[g]) for g in gens])
+    std_of_mean_e  = np.array([np.nanstd(all_energy_pooled[g]) for g in gens])
     
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
     
-    # Plot Max Gates Passed
-    ax1.plot(gens, mean_max_g, marker="o", markersize=3, linewidth=1.5, color="steelblue", label="Mean Max Gates")
-    ax1.fill_between(gens, mean_max_g - std_max_g, mean_max_g + std_max_g, color="steelblue", alpha=0.2, label="± 1 Std Dev")
-    ax1.set_xlabel("Generation")
-    ax1.set_ylabel("Max Gates Passed")
-    ax1.set_title("Task Performance over Generations (5 Runs)")
+    color_gates = "tab:red"
+    color_energy = "tab:red"
+    
+    # ── Gates Passed ──
+    # Mean (solid line + darker shading)
+    ax1.plot(gens, mean_of_mean_g, linewidth=1.5, color=color_gates, linestyle="-", label="Mean")
+    ax1.fill_between(gens, mean_of_mean_g - std_of_mean_g, mean_of_mean_g + std_of_mean_g,
+                     color=color_gates, alpha=0.15)
+    
+    # Max (dashed line + lighter shading)
+    ax1.plot(gens, mean_of_max_g, linewidth=1.5, color=color_gates, linestyle="--", label="Max")
+    ax1.fill_between(gens, mean_of_max_g - std_of_max_g, mean_of_max_g + std_of_max_g,
+                     color=color_gates, alpha=0.10)
+    
+    ax1.set_xlabel("Generation", fontsize=12)
+    ax1.set_ylabel("Number of Waypoints Passed", fontsize=12)
+    ax1.set_title(f"Task Performance over Generations ({len(args.run_dirs)} Runs)", fontsize=13)
     ax1.grid(True, linestyle="--", alpha=0.4)
+    ax1.legend(loc="lower right", fontsize=10)
 
-    # Plot Min Energy
-    ax2.plot(gens, mean_min_e, marker="o", markersize=3, linewidth=1.5, color="darkorange", label="Mean Min Energy")
-    ax2.fill_between(gens, mean_min_e - std_min_e, mean_min_e + std_min_e, color="darkorange", alpha=0.2, label="± 1 Std Dev")
-    ax2.set_xlabel("Generation")
-    ax2.set_ylabel("Min Energy (J)")
-    ax2.set_title("Best Power Efficiency over Generations (5 Runs)")
+    # ── Power Efficiency ──
+    # Mean (solid line + darker shading)
+    ax2.plot(gens, mean_of_mean_e, linewidth=1.5, color=color_energy, linestyle="-", label="Mean")
+    ax2.fill_between(gens, mean_of_mean_e - std_of_mean_e, mean_of_mean_e + std_of_mean_e,
+                     color=color_energy, alpha=0.15)
+    
+    # Min (dashed line + lighter shading)
+    ax2.plot(gens, mean_of_min_e, linewidth=1.5, color=color_energy, linestyle="--", label="Best (Min)")
+    ax2.fill_between(gens, mean_of_min_e - std_of_min_e, mean_of_min_e + std_of_min_e,
+                     color=color_energy, alpha=0.10)
+    
+    ax2.set_xlabel("Generation", fontsize=12)
+    ax2.set_ylabel("Total Energy (J)", fontsize=12)
+    ax2.set_title(f"Power Efficiency over Generations ({len(args.run_dirs)} Runs)", fontsize=13)
     ax2.grid(True, linestyle="--", alpha=0.4)
+    ax2.legend(loc="upper right", fontsize=10)
 
-    fig.suptitle("Lamarckian Standard-PPO + Power-Aware NSGA-II", fontsize=11)
+    fig.suptitle(f"Standard-PPO + Power-Aware NSGA-II ({args.task_name})", fontsize=11)
     fig.tight_layout()
-    out_dir = os.path.dirname(os.path.abspath(__file__))
-    out_path = os.path.join(out_dir, "objectives_over_generations_all.png")
+    out_path = os.path.join(args.base_dir, f"objectives_over_generations_all_{args.task_name}.png")
     fig.savefig(out_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved Objectives plot -> {out_path}")
