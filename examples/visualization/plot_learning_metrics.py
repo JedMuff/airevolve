@@ -6,6 +6,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+plt.rcParams.update({'font.size': 20, 'axes.titlesize': 24, 'axes.labelsize': 22, 'xtick.labelsize': 18, 'ytick.labelsize': 18, 'legend.fontsize': 18})
 from multiprocessing import Pool
 
 def extract_metrics(csv_path):

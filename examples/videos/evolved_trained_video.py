@@ -147,7 +147,7 @@ class ViewRenderer:
         self.gate, _ = create_gate_geometry()
         self.path_pts: list[np.ndarray] = []
 
-    def render(self, ws: np.ndarray, u: np.ndarray, gates_passed: int, follow: bool = True) -> np.ndarray:
+    def render(self, ws: np.ndarray, u: np.ndarray, gates_passed: int, energy_j: float = None, show_gates: bool = True, follow: bool = True) -> np.ndarray:
         pos = ws[0:3]
         ori = ws[6:9]
         self.path_pts.append(pos.copy())
@@ -183,9 +183,16 @@ class ViewRenderer:
             self.gate.rotate([0, 0, gyaw])
             self.gate.draw(frame, self.cam, color=(0, 140, 255), pt=4)
 
-        label = f"Gates: {gates_passed}"
-        cv2.putText(frame, label, (10, VIEW_H - 12),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, COLORS_BGR["black"], 2)
+        if show_gates:
+            label = f"Gates: {gates_passed}"
+            cv2.putText(frame, label, (10, VIEW_H - 12),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, COLORS_BGR["black"], 2)
+
+        if energy_j is not None:
+            label_energy = f"Energy: {energy_j:.1f} J"
+            (tw, th), _ = cv2.getTextSize(label_energy, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 2)
+            cv2.putText(frame, label_energy, (VIEW_W - tw - 10, VIEW_H - 12),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, COLORS_BGR["black"], 2)
 
         return frame
 
@@ -440,7 +447,7 @@ def render_target(t: Target, device: str, steps: int) -> str:
 
     out_dir = os.path.join(REPO_ROOT, VIDEOS_DIR)
     os.makedirs(out_dir, exist_ok=True)
-    out_name = (f"dashboard_{t.morph}_{t.reward}_seed{t.train_seed}"
+    out_name = (f"dashboard_{t.morph}_{t.gate_cfg}"
                 f"_env{t.env_seed}_{t.expected_gates}gates.mp4")
     out_path = os.path.join(out_dir, out_name)
     print(f"Rendering dashboard -> {out_path}", flush=True)
@@ -460,7 +467,7 @@ def render_target(t: Target, device: str, steps: int) -> str:
     total_energy_j = 0.0
 
     for step in range(steps):
-        actions, _ = model.predict(obs, deterministic=False)
+        actions, _ = model.predict(obs, deterministic=True)
         obs, _, dones, infos = env.step(actions)
 
         ws = env.world_states[0]
@@ -481,8 +488,8 @@ def render_target(t: Target, device: str, steps: int) -> str:
         dashboard.push(step, ws, prev_u, bat, gate_just_passed)
 
         if step % RENDER_EVERY_N_STEPS == 0:
-            iso_frame = iso_view.render(ws, prev_u, gates_passed)
-            top_frame = top_view.render(ws, prev_u, gates_passed)
+            iso_frame = iso_view.render(ws, prev_u, gates_passed, show_gates=False)
+            top_frame = top_view.render(ws, prev_u, gates_passed, energy_j=total_energy_j, show_gates=True)
             curr_img = dashboard.render_left_bat()
 
             left_col = np.vstack([iso_frame, top_frame, curr_img])

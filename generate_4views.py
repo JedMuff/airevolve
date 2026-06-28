@@ -10,8 +10,8 @@ from airevolve.evolution_tools.genome_handlers.spherical_angular_genome_handler 
 from airevolve.evolution_tools.inspection_tools.drone_visualizer import DroneVisualizer
 
 def main():
-    file_path = "results_training/shuttlerun/individual_0355/genome.npy"
-    output_path = "results_training/shuttlerun/individual_0355/morphology_4views.png"
+    file_path = "results_training/figure8/fig8_individual_1280/genome.npy"
+    output_path = "results_training/figure8/fig8_individual_1280/morphology_4views.png"
 
     print(f"Loading genome from {file_path}...")
     

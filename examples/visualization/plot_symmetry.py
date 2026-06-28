@@ -6,6 +6,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+plt.rcParams.update({'font.size': 20, 'axes.titlesize': 24, 'axes.labelsize': 22, 'xtick.labelsize': 18, 'ytick.labelsize': 18, 'legend.fontsize': 18})
 from scipy.optimize import linear_sum_assignment
 
 def parse_genome(genome_str):
@@ -130,7 +131,7 @@ def main():
                      color='#c44e52', alpha=0.2, label='Std Dev')
     plt.title(f'Bilateral Asymmetry over Generations ({args.task_name})', fontweight='bold')
     plt.xlabel('Generations')
-    plt.ylabel('Bilateral Asymmetry (Mean Error in Radians)')
+    plt.ylabel('Bilateral Asymmetry')
     plt.legend()
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()

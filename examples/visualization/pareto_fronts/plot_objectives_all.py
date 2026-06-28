@@ -4,6 +4,7 @@ import argparse
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+plt.rcParams.update({'font.size': 20, 'axes.titlesize': 24, 'axes.labelsize': 22, 'xtick.labelsize': 18, 'ytick.labelsize': 18, 'legend.fontsize': 18})
 import numpy as np
 import pandas as pd
 
@@ -113,11 +114,11 @@ def main():
     ax1.fill_between(gens, mean_of_max_g - std_of_max_g, mean_of_max_g + std_of_max_g,
                      color=color_gates, alpha=0.10)
     
-    ax1.set_xlabel("Generation", fontsize=12)
-    ax1.set_ylabel("Number of Waypoints Passed", fontsize=12)
-    ax1.set_title(f"Task Performance over Generations ({len(args.run_dirs)} Runs)", fontsize=13)
+    ax1.set_xlabel("Generation")
+    ax1.set_ylabel("Gates passed")
+    ax1.set_title(f"Task performance ({len(args.run_dirs)} runs)")
     ax1.grid(True, linestyle="--", alpha=0.4)
-    ax1.legend(loc="lower right", fontsize=10)
+    ax1.legend(loc="lower right")
 
     # ── Power Efficiency ──
     # Mean (solid line + darker shading)
@@ -130,13 +131,13 @@ def main():
     ax2.fill_between(gens, mean_of_min_e - std_of_min_e, mean_of_min_e + std_of_min_e,
                      color=color_energy, alpha=0.10)
     
-    ax2.set_xlabel("Generation", fontsize=12)
-    ax2.set_ylabel("Total Energy (J)", fontsize=12)
-    ax2.set_title(f"Power Efficiency over Generations ({len(args.run_dirs)} Runs)", fontsize=13)
+    ax2.set_xlabel("Generation")
+    ax2.set_ylabel("Total Energy (J)")
+    ax2.set_title(f"Power efficiency ({len(args.run_dirs)} runs)")
     ax2.grid(True, linestyle="--", alpha=0.4)
-    ax2.legend(loc="upper right", fontsize=10)
+    ax2.legend(loc="upper right")
 
-    fig.suptitle(f"Standard-PPO + Power-Aware NSGA-II ({args.task_name})", fontsize=11)
+    fig.suptitle(f"Standard-PPO + Power-Aware NSGA-II ({args.task_name})", fontsize=26)
     fig.tight_layout()
     out_path = os.path.join(args.base_dir, f"objectives_over_generations_all_{args.task_name}.png")
     fig.savefig(out_path, dpi=200, bbox_inches="tight")

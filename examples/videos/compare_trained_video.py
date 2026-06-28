@@ -212,7 +212,7 @@ def render_comparison(dir1: str, dir2: str, gate_cfg: str, device: str, steps: i
     prev_energy2 = 0.0
 
     for step in range(steps):
-        actions1, _ = model1.predict(obs1, deterministic=False)
+        actions1, _ = model1.predict(obs1, deterministic=True)
         obs1, _, _, _ = env1.step(actions1)
         ws1 = env1.world_states[0]
         prev_u1 = env1.prev_actions[0]
@@ -224,7 +224,7 @@ def render_comparison(dir1: str, dir2: str, gate_cfg: str, device: str, steps: i
         prev_energy1 = curr_e1
         total_e1 = cum_energy1 + curr_e1
 
-        actions2, _ = model2.predict(obs2, deterministic=False)
+        actions2, _ = model2.predict(obs2, deterministic=True)
         obs2, _, _, _ = env2.step(actions2)
         ws2 = env2.world_states[0]
         prev_u2 = env2.prev_actions[0]

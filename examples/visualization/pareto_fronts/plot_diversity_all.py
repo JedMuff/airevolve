@@ -4,6 +4,7 @@ import argparse
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+plt.rcParams.update({'font.size': 20, 'axes.titlesize': 24, 'axes.labelsize': 22, 'xtick.labelsize': 18, 'ytick.labelsize': 18, 'legend.fontsize': 18})
 import numpy as np
 import pandas as pd
 
@@ -103,13 +104,13 @@ def main():
                     mean_of_means + std_of_means, 
                     color='red', alpha=0.2, label="± 1 Std Dev")
     
-    ax.set_xlabel("Generation", fontsize=14)
-    ax.set_ylabel("Diversity (Euclidean Distance)", fontsize=14)
-    ax.set_title(f"Morphological Diversity Over Generations ({len(args.run_dirs)} Runs - {args.task_name})", fontsize=15)
+    ax.set_xlabel("Generation")
+    ax.set_ylabel("Diversity")
+    ax.set_title(f"Morphological Diversity Over Generations ({len(args.run_dirs)} Runs - {args.task_name})")
     
     # Format grid and ticks similar to the requested style
     ax.grid(True, linestyle="-", alpha=0.7)
-    ax.tick_params(axis='both', which='major', labelsize=12)
+    ax.tick_params(axis='both', which='major')
     
     # Optional: adjust y-limit if the bottom hits 0
     y_min = max(0, min(mean_of_means - std_of_means) * 0.9)
