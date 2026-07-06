@@ -42,7 +42,7 @@ MOTOR_COLORS = ["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6", "#795548"
 GRID_SIZE = 20
 DRONE_BOX = [0.02, 0.02, 0.02]
 PROP_RADIUS = 0.0254
-THRUST_SCALE = 0.2
+THRUST_SCALE = 0.0
 THRUST_BASE_LEN = 0.0
 
 SCALE = 2  # Increase this to make the video bigger (1=1080p, 2=4K, 3=6K)

@@ -154,3 +154,7 @@ results_training/
 individual_*/
 
 *.png
+
+re-train/
+final_runs/
+standard_hexa/
