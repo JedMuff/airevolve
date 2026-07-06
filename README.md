@@ -33,7 +33,7 @@ pip install -e ".[vis]"
 
 ## Quick Start: Reproducing the Research Paper
 
-The following examples demonstrate how to reproduce the experiments described in our paper using the strictly Darwinian, bi-objective NSGA-II evolutionary algorithm.
+The following examples demonstrate how to reproduce the experiments described in our paper using the strictly Darwinian, bi-objective NSGA-II evolutionary algorithm. Lamarckian approach script, and power aware PPO policy environment are also available.
 
 ### 1. Run a Single Experiment (Local/Interactive)
 
