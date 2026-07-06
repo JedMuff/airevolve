@@ -406,7 +406,9 @@ class DroneSimulator:
         k_f, k_m = first_prop["constants"]
         w_max = first_prop["wmax"]
         hover_thrust_per_motor = (self.mass * self.g) / self.num_motors
-        w_hover = np.sqrt(hover_thrust_per_motor / k_f)
+        
+        sum_abs_kfz = sum(abs(kfz) for kfz in self.params["k_fz_signed"])
+        w_hover = np.sqrt(self.g / sum_abs_kfz) if sum_abs_kfz > 0 else 0.0
 
         return {
             "mB": self.mass, "g": self.g, "IB": self.inertia, "invI": np.linalg.inv(self.inertia),

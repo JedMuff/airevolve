@@ -31,34 +31,84 @@ For trimesh-based 3D visualisation, install the optional extra:
 pip install -e ".[vis]"
 ```
 
-## Quick Start
+## Quick Start: Reproducing the Research Paper
 
-Run a complete evolution experiment:
+The following examples demonstrate how to reproduce the experiments described in our paper using the strictly Darwinian, bi-objective NSGA-II evolutionary algorithm.
+
+### 1. Run a Single Experiment (Local/Interactive)
+
+To run a single repetition of the standard PPO + Power-Aware NSGA-II evaluation matching the paper's exact setup (μ=24, λ=32, 1×10^7 training steps):
 
 ```bash
-python examples/evolution/run_evolution.py --brain lee --genome spherical --fitness gate --population-size 50 --generations 100 --gate-cfg figure8
+python experimentation/run_exp_standard_ppo_power_ea.py \
+    --population-size 24 \
+    --num-mutate 32 \
+    --generations 40 \
+    --training-timesteps 10000000 \
+    --gate-cfg figure8 \
+    --num-workers 24
 ```
-## Examples
+*Note: This script initializes every individual from scratch (pure Darwinian approach) and leaves power/energy constraints exclusively to the evolutionary grading phase.*
 
-The `examples/` directory is organised by purpose:
+### 2. Run the Full Experiment Suite (SLURM Cluster)
 
-- `examples/evolution/` — end-to-end evolution runner and morphology
-  repair demo (`run_evolution.py`, `optimization_repair_demo.py`). The
-  unified runner picks brain (RL or Lee), genome encoding, fitness mode,
-  and init-pop strategy via CLI flags — see `--help`.
-- `examples/learning/` — single-drone reinforcement learning
-  (`run_rl_figure8.py` — PPO trains a canonical 4-motor 2-inch quad on
-  the figure-8 task using `DroneGateEnv` and the reference-form runtime).
-- `examples/simulation/` — single-drone simulation demos
-  (`run_3D_simulation_lee_ctrl.py`).
-- `examples/tuning/` — controller gain tuning
-  (`tune_lee_controller_gates.py`, `tune_lee_controller_gates_matched.py`).
-- `examples/videos/` — render flight videos
-  (`make_video.py`, `make_lee_video.py`).
-- `examples/visualization/` — morphology / genome visualisation
-  (`genome_visualizer_demo.py`, `sample_genomes.py`, `draw_blueprint.py`,
-  `visualize_cppn_genome.py`, `visualize_initial_bspline.py`,
-  `generate_drone_stl_from_genome.py`).
+To execute the full, rigorous experiment suite (5 repetitions of `figure8` and 5 repetitions of `backandforth`) on a SLURM cluster, submit the provided bash script:
+
+```bash
+sbatch scripts/run_5_experiment_slurm.sh
+```
+*This uses an array job (1-10) of 10 nodes to parallelize repetitions across nodes. Expected computation time 115 hours for an array*
+
+### 3. Standalone Training for Evaluation
+
+To train a single morphology manually (when evaluating learned controllers of indivudals independently from the evolutionary loop), this script can be used with the battery model enabled (but controller not aware of the battery consumption, just the environment models the physics of electronics):
+
+```bash
+python airevolve/evolution_tools/evaluators/gate_train.py \
+    --gate-cfg figure8 \
+    --training-timesteps 100000000 \
+    --num-envs 5
+```
+
+*On a Macbook M2 pro computation time ~30-35 minutes with 50 000 it/s, because the environment has been vectorized to numpy arrays*
+## Visualization & Analysis
+
+Once you have generated results, you can use the following scripts to analyze the population, plot pareto fronts, and generate flight videos. 
+
+### Plotting Experimental Results
+
+The analysis pipeline parses the `results/` folder for `evolution_data.csv` and generates learning metrics, morphological diversity plots, and pareto fronts. Run it directly from the repository root:
+
+```bash
+python analyze_results.py
+```
+
+### Rendering Flight Videos
+
+You can generate MP4 videos of a trained policy navigating the track. The video scripts require a directory containing a morphology (`genome.npy`) and a trained model (`policy.zip`).
+
+**Single Drone Flight:**
+To generate a flight video (top-down view, isometric view, and real-time battery constraints) of a specific evolved individual:
+
+```bash
+python examples/videos/evolved_trained_video.py \
+    path/to/results/exp_standard_ppo_power_ea_figure8_rep1/rl_logs/generation_40/individual_1234 \
+    --task figure8
+
+python examples/videos/evolved_trained_video.py \
+    path/to/results/exp_standard_ppo_power_ea_figure8_rep1/rl_logs/generation_40/individual_1234 \
+    --task backandforth
+```
+
+**Side-by-Side Comparison:**
+To compare two different trained morphologies flying the track simultaneously:
+
+```bash
+python examples/videos/compare_trained_video.py \
+    path/to/individual_A \
+    path/to/individual_B \
+    --gate_cfg figure8
+```
 
 ## Architecture
 
@@ -87,7 +137,7 @@ The `examples/` directory is organised by purpose:
 
 ### Genome Representations
 
-1. **Spherical Angular**: `[magnitude, arm_rotation, arm_pitch, motor_rotation, motor_pitch, direction]`
+1. **Spherical Angular**: `[magnitude, arm_rotation, arm_pitch, motor_rotation, motor_pitch, direction]` (Used in the my research paper)
 2. **Cartesian Euler**: Standard 3D Cartesian coordinates with Euler angles
 
 ## Configuration Options
@@ -100,6 +150,7 @@ The `examples/` directory is organised by purpose:
 - `--num-mutate`: Number of mutation operations per generation
 - `--strategy-type`: Evolution strategy ('plus' or 'comma')
 - `--symmetry`: Bilateral symmetry plane ('xy', 'xz', 'yz', 'none')
+- `--init-pop-mode`: Random or hover repair
 
 ### Gate Training Parameters
 
@@ -121,19 +172,6 @@ Individual test modules are available in the `unit_tests/` directory.
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Citation
-
-If you use AirEvolve in your research, please cite:
-
-```bibtex
-@software{airevolve2025,
-  title={Unconventional Hexacopters via Evolution and Learning: Performance Gains and New Insights},
-  author={---},
-  year={2025},
-  url={---}
-}
-```
 
 # TODO
 - Add remaining parts to assembly as optional parameter for full aesthetics: landing legs, battery, control board+stand offs, rasperry pi holder and raspberry pi, motor intermediary part, motors, propellers.

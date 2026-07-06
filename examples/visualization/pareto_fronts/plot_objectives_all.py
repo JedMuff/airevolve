@@ -24,7 +24,7 @@ def main():
     all_energy_pooled = {} # gen -> [ALL individual energies from ALL runs] (for population std)
     
     for run in args.run_dirs:
-        csv_path = os.path.join(run, "evolution_data_repaired.csv")
+        csv_path = os.path.join(run, "evolution_data.csv")
         if not os.path.exists(csv_path):
             print(f"File not found: {csv_path}")
             continue

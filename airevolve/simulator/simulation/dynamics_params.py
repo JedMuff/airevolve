@@ -37,13 +37,8 @@ def derive_reference_params(
     Izz = float(inertia[2, 2])
     m = float(mass)
 
-    F_hover_per_motor = m * gravity / n
-    if F_hover_per_motor <= 0 or k_f <= 0:
-        raise ValueError(
-            f"derive_reference_params: invalid hover-thrust calc "
-            f"(F_hover={F_hover_per_motor}, k_f={k_f})"
-        )
-    W_hover = float(np.sqrt(F_hover_per_motor / k_f))
+    if k_f <= 0:
+        raise ValueError(f"derive_reference_params: invalid k_f={k_f}")
 
     k_fx_signed = []
     k_fy_signed = []

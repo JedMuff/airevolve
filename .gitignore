@@ -158,3 +158,5 @@ individual_*/
 re-train/
 final_runs/
 standard_hexa/
+
+*.tex

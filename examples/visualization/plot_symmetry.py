@@ -88,7 +88,7 @@ def main():
     all_bilateral = {}
     
     for run_dir in args.run_dirs:
-        csv_path = os.path.join(run_dir, "evolution_data_repaired.csv")
+        csv_path = os.path.join(run_dir, "evolution_data.csv")
         run_name = os.path.basename(run_dir)
         if os.path.exists(csv_path):
             print(f"Processing {run_name}...")

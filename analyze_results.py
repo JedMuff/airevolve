@@ -4,7 +4,8 @@ import glob
 import subprocess
 
 def main():
-    base_dir = "/Users/mikolajduchlinski/Desktop/results_final/results"
+    # SLURM script outputs to $SLURM_SUBMIT_DIR/results/ which defaults to "results" relative to repo root
+    base_dir = "results"
     
     # We have two main tasks
     tasks = ["figure8", "shuttlerun"]
@@ -64,7 +65,7 @@ def main():
         run_name = os.path.basename(run_dir)
         print(f"\n--- Analyzing Run: {run_name} ---")
         
-        csv_path = os.path.join(run_dir, "evolution_data_repaired.csv")
+        csv_path = os.path.join(run_dir, "evolution_data.csv")
         if not os.path.exists(csv_path):
             print(f"  [WARNING] {csv_path} not found. Skipping...")
             continue
