@@ -105,6 +105,7 @@ class DroneSimulator:
             inertia=np.asarray(self.inertia),
             prop_size=prop_size,
             gravity=gravity,
+            cg=np.asarray(self.center_of_gravity),
         )
 
         self.dt = dt
@@ -188,13 +189,12 @@ class DroneSimulator:
         U = [(u_i + 1) / 2 for u_i in control_syms]
 
         p_dict = self.params
-        k_w = p_dict["k_w"]
         k_x = p_dict["k_x"]
         k_y = p_dict["k_y"]
-        k_p_signed = p_dict["k_p_signed"]
-        k_q_signed = p_dict["k_q_signed"]
-        k_r_signed = p_dict["k_r_signed"]
-        k_r_react_signed = p_dict["k_r_react_signed"]
+        f_coef = p_dict["f_coef"]
+        m_thr_coef = p_dict["m_thr_coef"]
+        m_spin_coef = p_dict["m_spin_coef"]
+        m_react_coef = p_dict["m_react_coef"]
         tau = p_dict["tau"]
         k = p_dict["k"]
         w_min = p_dict["w_min"]
@@ -207,22 +207,24 @@ class DroneSimulator:
         # Convert dW (rad/s²) back to normalized derivative (1/s).
         d_w = [d_W_i / (W_MAX_N - W_MIN_N) * 2 for d_W_i in d_W]
 
-        # Forces (treated as accelerations directly — mass implicit in k_w).
+        # Forces (treated as accelerations directly — mass implicit in f_coef).
         sum_W = sum(W)
-        sum_W2 = sum(W_i**2 for W_i in W)
-        T = -k_w * sum_W2
+        # Thrust along each motor's actual (possibly canted) direction.
+        Fx, Fy, Fz = (
+            sum(f_coef[i][j] * W[i]**2 for i in range(n)) for j in range(3)
+        )
         Dx = -k_x * vbx * sum_W
         Dy = -k_y * vby * sum_W
 
         # Moments (treated as angular accelerations directly — inertia
-        # absorbed into k_p/k_q/k_r). Signs are baked into the per-motor
-        # coefficients by derive_reference_params (so the symbolic build
-        # is morphology-agnostic).
-        Mx = sum(k_p_signed[i] * W[i]**2 for i in range(n))
-        My = sum(k_q_signed[i] * W[i]**2 for i in range(n))
-        Mz = (
-            sum(k_r_signed[i] * W[i] for i in range(n))
-            + sum(k_r_react_signed[i] * d_W[i] for i in range(n))
+        # absorbed into the coefficients). Lever-arm (r × F), steady prop
+        # drag and motor reaction torques, each along the motor's own axis,
+        # with signs baked in by derive_reference_params.
+        Mx, My, Mz = (
+            sum(m_thr_coef[i][j] * W[i]**2 for i in range(n))
+            + sum(m_spin_coef[i][j] * W[i] for i in range(n))
+            + sum(m_react_coef[i][j] * d_W[i] for i in range(n))
+            for j in range(3)
         )
 
         # Translational kinematics.
@@ -231,7 +233,7 @@ class DroneSimulator:
         d_z = vz
 
         # Translational dynamics: gravity + body-frame forces rotated to world.
-        accel = Matrix([0, 0, self.g]) + R @ Matrix([Dx, Dy, T])
+        accel = Matrix([0, 0, self.g]) + R @ Matrix([Dx + Fx, Dy + Fy, Fz])
         d_vx, d_vy, d_vz = accel
 
         # Euler-angle kinematics (singular at theta=±π/2; reset envs guard against this).

@@ -22,6 +22,19 @@ runtime pulls those signs out of the formula and into the parameter dict.
 * `k_r_signed[i] = spin_i · 2 · k_m · W_hover / Izz` for the linear-W yaw term.
 * `k_r_react_signed[i] = spin_i · k_r_react_borrow` for the dW yaw term.
 
+The scalar keys above assume every motor thrusts along body -z. The runtime
+dynamics use their tilt-aware 3-vector generalization instead, so canted
+motors produce lateral force and lever-arm moments (e.g. yaw from tilt):
+
+* `f_coef[i]       = k_f / m · d_i`                         (× W_i²)
+* `m_thr_coef[i]   = Iinv ⊙ (k_f · r_i × d_i)`              (× W_i²)
+* `m_spin_coef[i]  = Iinv ⊙ (spin_i · 2 · k_m · W_hover · a_i)` (× W_i)
+* `m_react_coef[i] = spin_i · k_r_react_borrow · a_i`       (× dW_i)
+
+with `d_i` the unit thrust direction, `a_i = -d_i` the prop axis,
+`r_i = loc_i - cg` and `Iinv = (1/Ixx, 1/Iyy, 1/Izz)`. For a flat motor
+(`d_i = (0, 0, -1)`) these reduce exactly to the scalar keys.
+
 Where spin_i = +1 for "ccw", -1 for "cw" (the convention is verified via
 the per-step parity test in unit_tests/test_dynamics_parity.py).
 
@@ -50,6 +63,7 @@ def derive_reference_params(
     inertia: np.ndarray,
     prop_size,
     gravity: float = 9.81,
+    cg=None,
 ) -> dict:
     """Derive a reference-form parameter dict for an airevolve drone config.
 
@@ -60,6 +74,8 @@ def derive_reference_params(
         prop_size: prop size for fetching aerodynamic constants
             (k_drag, k_r_react, k, w_min). All propellers assumed same size.
         gravity: m/s².
+        cg: centre of gravity in body frame; lever arms are measured from
+            it. Defaults to the origin.
 
     Returns:
         dict with keys:
@@ -70,6 +86,8 @@ def derive_reference_params(
             k_q_signed (list[float]): per-motor pitch-moment coefficient (signed)
             k_r_signed (list[float]): per-motor yaw-moment coefficient (linear W, signed)
             k_r_react_signed (list[float]): per-motor yaw-moment from dW (signed)
+            f_coef, m_thr_coef, m_spin_coef, m_react_coef (list[list[float]]):
+                per-motor tilt-aware 3-vector force/moment coefficients
             tau, k, w_min, w_max (float): motor model parameters
 
     Notes:
@@ -109,6 +127,13 @@ def derive_reference_params(
     k_q_signed = []
     k_r_signed = []
     k_r_react_signed = []
+    f_coef = []
+    m_thr_coef = []
+    m_spin_coef = []
+    m_react_coef = []
+    I_inv = np.array([1.0 / Ixx, 1.0 / Iyy, 1.0 / Izz])
+    cg = np.zeros(3) if cg is None else np.asarray(cg, dtype=float)
+    k_r_react = float(extended["k_r_react"])
     for prop in propellers:
         x_i = float(prop["loc"][0])
         y_i = float(prop["loc"][1])
@@ -121,7 +146,17 @@ def derive_reference_params(
         # M_z (steady, linearized at hover): spin_i · 2 · k_m · W_hover / Izz
         k_r_signed.append(spin * 2.0 * k_m * W_hover / Izz)
         # M_z (motor-acceleration reaction): spin_i · k_r_react
-        k_r_react_signed.append(spin * float(extended["k_r_react"]))
+        k_r_react_signed.append(spin * k_r_react)
+
+        # Tilt-aware generalization (see module docstring).
+        d = np.asarray(prop["dir"][:3], dtype=float)
+        d = d / np.linalg.norm(d)
+        a = -d  # prop axis; (0, 0, 1) for a flat motor
+        r = np.asarray(prop["loc"], dtype=float) - cg
+        f_coef.append((k_f / m * d).tolist())
+        m_thr_coef.append((I_inv * np.cross(r, k_f * d)).tolist())
+        m_spin_coef.append((I_inv * spin * 2.0 * k_m * W_hover * a).tolist())
+        m_react_coef.append((spin * k_r_react * a).tolist())
 
     return {
         "n_motors": n,
@@ -132,6 +167,10 @@ def derive_reference_params(
         "k_q_signed": k_q_signed,
         "k_r_signed": k_r_signed,
         "k_r_react_signed": k_r_react_signed,
+        "f_coef": f_coef,
+        "m_thr_coef": m_thr_coef,
+        "m_spin_coef": m_spin_coef,
+        "m_react_coef": m_react_coef,
         "tau": float(extended["tau"]),
         "k": float(extended["k"]),
         "w_min": float(extended["w_min"]),
