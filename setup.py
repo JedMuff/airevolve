@@ -26,7 +26,7 @@ setup(
         "dronehover @ git+https://github.com/elijahanghw/drone-hover.git@small_drone",
     ],  # List your dependencies here
     extras_require={
-        "vis": ["trimesh"],
+        "vis": ["trimesh", "pyvista"],
     },
     python_requires=">=3.7",  # Specify the Python version requirement
     classifiers=[
