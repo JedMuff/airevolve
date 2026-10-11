@@ -198,7 +198,8 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
 
     Args:
         individual: Evolved drone morphology (genome array)
-        pos_gain, vel_gain, att_gain, rate_gain: Controller gains
+        pos_gain, vel_gain, att_gain, rate_gain: Controller gains, each a
+            scalar or a per-axis sequence of 3
         gate_config: Gate configuration class
         sim_time: Simulation time in seconds
         dt: Time step in seconds
@@ -243,12 +244,17 @@ def simulate_with_gains(individual, pos_gain, vel_gain, att_gain, rate_gain,
 
         quad = DroneInterface(0, propellers=propellers)
 
-        # Create Lee controller with specified gains
+        # Create Lee controller with specified gains. Each gain is a scalar
+        # (same on all three axes) or a per-axis sequence of 3, e.g. the
+        # inertia-scaled att/rate gains from LeeGeometricControl's auto-scaling.
+        def _per_axis(gain):
+            return np.broadcast_to(np.asarray(gain, dtype=float), (3,)).copy()
+
         lee_gains = {
-            'pos_P_gain': np.array([pos_gain] * 3),
-            'vel_P_gain': np.array([vel_gain] * 3),
-            'att_P_gain': np.array([att_gain] * 3),
-            'rate_P_gain': np.array([rate_gain] * 3)
+            'pos_P_gain': _per_axis(pos_gain),
+            'vel_P_gain': _per_axis(vel_gain),
+            'att_P_gain': _per_axis(att_gain),
+            'rate_P_gain': _per_axis(rate_gain)
         }
         ctrl = LeeGeometricControl(quad, yawType=1, orient='NED',
                                    auto_scale_gains=False, **lee_gains)
