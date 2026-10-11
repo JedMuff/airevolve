@@ -425,21 +425,22 @@ class DroneVisualizer:
         orientation: npt.NDArray, 
         config: VisualizationConfig
     ) -> None:
-        """Draw motor orientation vector in 3D."""
+        """Draw the motor's thrust direction in 3D."""
         x, y, z = position
         roll, pitch, yaw = orientation
         
         # Create rotation matrix using drone's coordinate system
         R = u.create_rotation_matrix_euler(roll, pitch, yaw)
         
-        # Create unit z-axis vector and rotate it
-        z_axis = np.array([0, 0, config.circle_radius * 2])
-        rotated_z = R @ z_axis
+        # Thrust acts along the rotated −z axis (the simulator's convention,
+        # see orientation_to_unit_vector / genome_to_propellers), so
+        # motor_pitch = π points the line up.
+        thrust = R @ np.array([0, 0, -config.circle_radius * 2])
         
-        # Draw orientation vector
-        ax.plot([x, x + rotated_z[0]], 
-               [y, y + rotated_z[1]], 
-               [z, z + rotated_z[2]], 
+        # Draw thrust vector
+        ax.plot([x, x + thrust[0]], 
+               [y, y + thrust[1]], 
+               [z, z + thrust[2]], 
                color=config.orientation_color)
     
     def _draw_propeller_3d(
@@ -531,14 +532,15 @@ class DroneVisualizer:
         orientation: npt.NDArray, 
         config: VisualizationConfig
     ) -> None:
-        """Draw motor orientation in 2D."""
+        """Draw the motor's thrust direction projected onto the XY plane."""
         x, y, z = position
         roll, pitch, yaw = orientation
         
-        # Project 3D orientation to 2D
+        # Thrust is the rotated −z axis (see _draw_motor_orientation_3d).
         scale = config.circle_radius * 1.25
-        x_proj = scale * np.sin(pitch) * np.cos(yaw)
-        y_proj = scale * np.sin(pitch) * np.sin(yaw)
+        thrust = u.create_rotation_matrix_euler(roll, pitch, yaw) @ np.array([0, 0, -1.0])
+        x_proj = scale * thrust[0]
+        y_proj = scale * thrust[1]
         
         # Draw orientation vector
         ax.quiver(x, y, x_proj, y_proj, 
