@@ -14,6 +14,7 @@ from stable_baselines3.common.vec_env import VecEnv
 # Import new simulation API
 from airevolve.simulator.simulation.drone_simulator import DroneSimulator
 from airevolve.simulator.simulation.drone_configuration import DroneConfiguration
+from airevolve.simulator.simulation.propeller_data import genome_to_propellers
 from airevolve.evolution_tools.genome_handlers.mounting_points import (
     generate_disc_mounting_points, assign_nearest_mounting_point
 )
@@ -214,41 +215,8 @@ class DroneGateEnv(VecEnv):
             (propellers, mounting_points): Propeller configs and disc mounting points,
             matching the conventions used by get_sim() in hovering_info.py.
         """
-        # Remove NaN rows
-        valid_rows = ~np.isnan(individual).any(axis=1)
-        individual_clean = individual[valid_rows]
-
-        propellers = []
-        propeller_positions = []
-        for row in individual_clean:
-            magnitude, arm_yaw, arm_pitch, mot_pitch, mot_yaw, direction = row
-
-            # Position: spherical to ENU cartesian
-            enu_x = magnitude * np.cos(arm_pitch) * np.cos(arm_yaw)
-            enu_y = magnitude * np.cos(arm_pitch) * np.sin(arm_yaw)
-            enu_z = magnitude * np.sin(arm_pitch)
-
-            # ENU to NED: (x, y, z) → (y, x, -z)
-            x, y, z = enu_y, enu_x, -enu_z
-
-            # Thrust direction in NED frame
-            # Matches orientation_to_unit_vector(0, mot_pitch, mot_yaw) from hovering_info.py:
-            #   R = ENU_to_NED @ euler_R(0, pitch, yaw); thrust = R @ [0, 0, -1]
-            sp, cp = np.sin(mot_pitch), np.cos(mot_pitch)
-            sy, cy = np.sin(mot_yaw), np.cos(mot_yaw)
-            thrust_x = -sy * sp
-            thrust_y = -cy * sp
-            thrust_z = cp
-
-            # Rotation direction
-            rotation = "cw" if direction > 0.5 else "ccw"
-
-            propellers.append({
-                "loc": [x, y, z],
-                "dir": [thrust_x, thrust_y, thrust_z, rotation],
-                "propsize": 2  # Default prop size
-            })
-            propeller_positions.append([x, y, z])
+        propellers = genome_to_propellers(individual)
+        propeller_positions = [prop["loc"] for prop in propellers]
 
         # Compute mounting points matching get_sim() in hovering_info.py
         disc_mounting_points = generate_disc_mounting_points(num_points=8, diameter=0.060)

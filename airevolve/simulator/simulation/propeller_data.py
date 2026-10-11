@@ -274,3 +274,50 @@ def create_standard_propeller_config(config_type, arm_length=0.11, prop_size=2):
     else:
         raise ValueError(f"Unknown configuration type: {config_type}. "
                         f"Available types: ['quad', 'hex', 'tri', 'octo']")
+
+def genome_to_propellers(genome, propsize=2):
+    """
+    Convert a spherical-angular genome to a propeller configuration.
+
+    Rows are [magnitude, arm_yaw, arm_pitch, motor_pitch, motor_yaw, direction];
+    rows containing NaN are skipped. Matches the conventions of get_sim() in
+    hovering_info.py (and the gate evaluator):
+
+    - Position: spherical → ENU cartesian → NED via (x, y, z) → (y, x, -z)
+    - Thrust: orientation_to_unit_vector(0, pitch, yaw) with internal ENU→NED transform
+    - Spin: direction > 0.5 → "cw", else "ccw"
+
+    Returns:
+        list: propeller dicts with "loc", "dir" and "propsize" keys.
+    """
+    genome = np.asarray(genome, dtype=float)
+    valid_rows = ~np.isnan(genome).any(axis=1)
+
+    propellers = []
+    for row in genome[valid_rows]:
+        magnitude, arm_yaw, arm_pitch, mot_pitch, mot_yaw, direction = row
+
+        # Position: spherical to ENU cartesian
+        enu_x = magnitude * np.cos(arm_pitch) * np.cos(arm_yaw)
+        enu_y = magnitude * np.cos(arm_pitch) * np.sin(arm_yaw)
+        enu_z = magnitude * np.sin(arm_pitch)
+
+        # ENU to NED: (x, y, z) → (y, x, -z)
+        x, y, z = enu_y, enu_x, -enu_z
+
+        # Thrust direction in NED frame:
+        #   R = ENU_to_NED @ euler_R(0, pitch, yaw); thrust = R @ [0, 0, -1]
+        sp, cp = np.sin(mot_pitch), np.cos(mot_pitch)
+        sy, cy = np.sin(mot_yaw), np.cos(mot_yaw)
+        thrust_x = -sy * sp
+        thrust_y = -cy * sp
+        thrust_z = cp
+
+        rotation = "cw" if direction > 0.5 else "ccw"
+
+        propellers.append({
+            "loc": [x, y, z],
+            "dir": [thrust_x, thrust_y, thrust_z, rotation],
+            "propsize": propsize,
+        })
+    return propellers
