@@ -27,6 +27,13 @@ class BaseLeeController:
         else:
             self.gravity = np.array(gravity)
 
+        # Body-frame rotation [x, y, z, w] applied on the right of every
+        # desired attitude: R_d ← R_d · R_c. The desired attitude is built so
+        # body −z points along the commanded force; for a drone whose net
+        # thrust axis d_T is not body −z (tilted motors), R_c maps d_T onto
+        # −z so that d_T is what ends up along the force. Identity = flat drone.
+        self.thrust_axis_correction = np.array([0.0, 0.0, 0.0, 1.0])
+
     def update_state(self, robot_state):
         """Update robot state from external source
         robot_state should be a dict containing:
@@ -130,6 +137,9 @@ class BaseLeeController:
         setpoint_angvel = np.array(setpoint_angvel)
         max_yaw_rate = getattr(self.cfg, 'max_yaw_rate', 2.0)  # Default max yaw rate
         setpoint_angvel[2] = np.clip(setpoint_angvel[2], -max_yaw_rate, max_yaw_rate)
+
+        setpoint_orientation = quat_mul(np.asarray(setpoint_orientation, dtype=float),
+                                        self.thrust_axis_correction)
 
         RT_Rd_quat = quat_mul(quat_inverse(self.robot_orientation),
                               np.array(setpoint_orientation))

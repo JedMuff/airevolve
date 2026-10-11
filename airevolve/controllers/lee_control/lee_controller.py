@@ -15,6 +15,7 @@ license: MIT
 import numpy as np
 from numpy import pi, sin, cos, tan, sqrt
 from numpy.linalg import norm, pinv
+from scipy.optimize import nnls
 import airevolve.controllers.utils as utils
 
 from .position_control import LeePositionController
@@ -24,6 +25,11 @@ from .lee_math_utils import *
 
 rad2deg = 180.0/pi
 deg2rad = pi/180.0
+
+# Weight of sideways-force suppression relative to thrust/torque tracking in
+# the bounded allocation used for tilted-motor drones.
+LATERAL_WEIGHT = 0.5
+
 
 class LeeGeometricControl:
     """
@@ -43,6 +49,7 @@ class LeeGeometricControl:
                  att_P_gain=None,                           # Attitude gains [kR_roll, kR_pitch, kR_yaw]
                  rate_P_gain=None,                          # Angular rate gains
                  auto_scale_gains=False,                    # Scale att/rate gains by inertia
+                 lateral_weight=LATERAL_WEIGHT,             # Sideways-force suppression weight (tilted drones)
                  # Interface compatibility (unused parameters for compatibility with PID controllers)
                  **kwargs):                                 # Catches vel_D_gain, vel_I_gain, rate_D_gain, tilt_max, rate_max, vel_max, etc.
         """
@@ -72,6 +79,7 @@ class LeeGeometricControl:
         """
         # Store drone reference and configuration
         self.quad = quad
+        self.lateral_weight = lateral_weight
         self.drone_config = quad.drone_sim.config
         self.num_motors = self.drone_config.num_motors
         self.orient = orient
@@ -112,7 +120,8 @@ class LeeGeometricControl:
         
         # Initialize Lee controller components
         self._init_lee_controllers(quad)
-        
+        self._init_thrust_axis_allocation(quad)
+
         # Initialize state variables
         
         # Initialize motor commands
@@ -164,6 +173,94 @@ class LeeGeometricControl:
         # Initialize attitude controller
         self.attitude_controller = LeeAttitudeController(config, mass, inertia, gravity, self.orient)
         
+    def _init_thrust_axis_allocation(self, quad):
+        """Make attitude control and motor allocation aware of tilted motors.
+
+        The plain mixer (``quad.params["mixerFMinv"]``) only controls body-z
+        thrust and the three torques. Tilted motors also push sideways, which
+        that mixer neither sees nor cancels, so the drone drifts off its
+        trajectory. For such drones we:
+
+        1. Find the hover trim: non-negative motor commands giving zero torque
+           and the weight as thrust along the resulting force direction d_T
+           (fixed-point iteration from body −z). d_T is the thrust axis.
+        2. Rotate desired attitudes by R_c (d_T → body −z) so d_T, not body
+           −z, is aligned with the commanded force.
+        3. Allocate each step by bounded least squares (see
+           ``_allocate_bounded``): match thrust along d_T and the torques,
+           softly suppress sideways force, keep every motor within limits.
+
+        For a flat drone d_T = −z and the plain mixer is kept unchanged.
+        """
+        self.thrust_axis_body = np.array([0.0, 0.0, -1.0])
+        self.mixer_inv = quad.params["mixerFMinv"]
+        self.bounded_allocation = False
+        self.can_trim = True
+        if self.orient != "NED":
+            return
+
+        Bf, Bm = quad.drone_sim.Bf, quad.drone_sim.Bm   # per normalised w², body frame
+        weight = quad.params["mB"] * quad.params["g"]
+        locs = np.array([p["loc"] for p in self.drone_config.propellers]) - self.drone_config.cg
+        arm = np.sqrt(np.mean(np.sum(locs ** 2, axis=1)))   # torque → force scale (m)
+        n = self.num_motors
+
+        d = self.thrust_axis_body.copy()
+        for _ in range(100):
+            # min |Bm·x/arm|² + |d·Bf·x − W|² (heavily weighted) + ε|x|², x ≥ 0
+            A = np.vstack([1e3 * Bm / arm, 1e3 * (d @ Bf)[None], 1e-2 * np.eye(n)])
+            b = np.concatenate([np.zeros(3), [1e3 * weight], np.zeros(n)])
+            x, _ = nnls(A, b)
+            force = Bf @ x
+            if norm(force) < 1e-12:
+                break
+            d_new = force / norm(force)
+            converged = norm(d_new - d) < 1e-10
+            d = d_new
+            if converged:
+                break
+        trim_torque = norm(Bm @ x) / arm
+        if norm(force) < 1e-12 or trim_torque > 1e-3 * weight:
+            # No zero-torque hover exists with motors spinning forwards.
+            self.can_trim = False
+            return
+
+        if norm(d - self.thrust_axis_body) < 1e-9:
+            return                                       # flat drone: plain mixer
+
+        self.thrust_axis_body = d
+        helper = np.array([1.0, 0.0, 0.0]) if abs(d[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        e1 = np.cross(d, helper)
+        e1 /= norm(e1)
+        lateral = np.vstack([e1, np.cross(d, e1)]) @ Bf  # sideways force rows
+        # Rows in force units: thrust, torques / arm, weighted sideways force.
+        self._alloc_rows = np.vstack([d @ Bf, Bm / arm, self.lateral_weight * lateral])
+        self._alloc_row_scale = np.array([1.0, 1.0 / arm, 1.0 / arm, 1.0 / arm])
+        w_max = np.array([p["wmax"] for p in self.drone_config.propellers])
+        self._alloc_lo = (quad.params["minWmotor"] / w_max) ** 2
+        self._alloc_hi = (quad.params["maxWmotor"] / w_max) ** 2
+        self.bounded_allocation = True
+
+        # Quaternion [x, y, z, w] of the minimal rotation taking d_T to −z.
+        target = np.array([0.0, 0.0, -1.0])
+        axis = np.cross(d, target)
+        angle = np.arctan2(norm(axis), d @ target)
+        axis = axis / norm(axis) if norm(axis) > 1e-12 else np.array([1.0, 0.0, 0.0])
+        q_c = np.concatenate([axis * np.sin(angle / 2), [np.cos(angle / 2)]])
+        for c in (self.position_controller, self.velocity_controller, self.attitude_controller):
+            c.thrust_axis_correction = q_c
+
+    def _allocate_bounded(self, t):
+        """Normalised w² for t = [thrust along d_T, Mx, My, Mz].
+
+        Least squares on [thrust, torques/arm, λ·sideways force] with every
+        motor at or above its minimum speed (NNLS on the offset), then capped
+        at the maximum.
+        """
+        target = np.concatenate([t * self._alloc_row_scale, np.zeros(2)])
+        y, _ = nnls(self._alloc_rows, target - self._alloc_rows @ self._alloc_lo)
+        return np.minimum(y + self._alloc_lo, self._alloc_hi)
+
     def _get_hover_speed(self, quad):
         """Calculate hover speed for each motor."""
         hover_speeds = []
@@ -289,7 +386,9 @@ class LeeGeometricControl:
         pitch_torque = moment_command[1]
         yaw_torque = moment_command[2]
 
-        # Create command vector [thrust, roll_torque, pitch_torque, yaw_torque]
+        # Create command vector [thrust, roll_torque, pitch_torque, yaw_torque].
+        # Thrust is along the drone's thrust axis d_T (body −z for flat drones);
+        # see _init_thrust_axis_allocation.
         t = np.array([thrust_command, roll_torque, pitch_torque, yaw_torque])
 
         # FIXED: Add safety limits to prevent motor saturation
@@ -311,7 +410,10 @@ class LeeGeometricControl:
         #     print(f"  mixerFMinv shape: {quad.params['mixerFMinv'].shape}")
 
         # Convert to motor commands using allocation matrix (same as GeneralizedControl)
-        w_squared_normalized = np.dot(quad.params["mixerFMinv"], t)
+        if self.bounded_allocation:
+            w_squared_normalized = self._allocate_bounded(t)
+        else:
+            w_squared_normalized = np.dot(self.mixer_inv, t)
 
         # if self._allocation_debug_counter % 100 == 1:
         #     print(f"  w_squared_normalized: {w_squared_normalized}")
