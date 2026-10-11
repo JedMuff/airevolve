@@ -24,6 +24,8 @@ from airevolve.simulator.simulation.drone_simulator import DroneSimulator
 from airevolve.simulator.simulation.dynamics_params import W_MAX_N, W_MIN_N
 from airevolve.simulator.simulation.propeller_data import (
     create_standard_propeller_config,
+    genome_to_propellers,
+    get_extended_prop_params,
 )
 
 # [magnitude, arm_yaw, arm_pitch, motor_pitch, motor_yaw, direction]
@@ -37,27 +39,12 @@ MARCH_TOP1_GENOME = np.array([
 ])
 
 
-def genome_to_propellers(genome, flatten=False):
-    """Same conventions as DroneGateEnv._convert_individual_to_propellers."""
-    props = []
-    for mag, arm_yaw, arm_pitch, mot_pitch, mot_yaw, direction in genome:
-        enu = mag * np.array([
-            np.cos(arm_pitch) * np.cos(arm_yaw),
-            np.cos(arm_pitch) * np.sin(arm_yaw),
-            np.sin(arm_pitch),
-        ])
-        thrust = [
-            -np.sin(mot_yaw) * np.sin(mot_pitch),
-            -np.cos(mot_yaw) * np.sin(mot_pitch),
-            np.cos(mot_pitch),
-        ]
-        if flatten:
-            thrust = [0.0, 0.0, -1.0]
-        props.append({
-            "loc": [enu[1], enu[0], -enu[2]],
-            "dir": thrust + ["cw" if direction > 0.5 else "ccw"],
-            "propsize": 2,
-        })
+def march_propellers(flatten=False):
+    """Propellers for MARCH_TOP1_GENOME, optionally with all motors flat."""
+    props = genome_to_propellers(MARCH_TOP1_GENOME)
+    if flatten:
+        for prop in props:
+            prop["dir"][:3] = [0.0, 0.0, -1.0]
     return props
 
 
@@ -119,14 +106,28 @@ def test_canted_motor_gives_lateral_force_and_lever_yaw():
     np.testing.assert_allclose(p["m_thr_coef"][0][2], expected_mz, rtol=1e-12)
 
 
+def test_same_spin_hover_yaw_torque_is_physical():
+    """At hover speed each prop's drag torque is k_m·W_hover², not twice that."""
+    props = create_standard_propeller_config("quad", arm_length=0.11, prop_size=2)
+    for prop in props:
+        prop["dir"][3] = "ccw"
+    sim = DroneSimulator(propellers=props)
+    k_f, k_m = get_extended_prop_params(2)["constants"]
+    W_hover = np.sqrt(sim.mass * sim.g / sim.num_motors / k_f)
+
+    sd = steady_derivative(sim, np.full(sim.num_motors, W_hover))
+    expected = sim.num_motors * k_m * W_hover**2 / sim.inertia[2, 2]
+    np.testing.assert_allclose(sd[11], expected, rtol=1e-9)
+
+
 def test_evolved_same_spin_drone_can_cancel_yaw():
-    tilted = DroneSimulator(propellers=genome_to_propellers(MARCH_TOP1_GENOME))
+    tilted = DroneSimulator(propellers=march_propellers())
     sd = best_hover_residual(tilted)
     assert abs(sd[5]) < 1e-4, f"cannot hold hover thrust: d_vz={sd[5]:.3e}"
     assert np.max(np.abs(sd[9:12])) < 1e-4, f"cannot balance moments: {sd[9:12]}"
 
     # Same arms and spins but flat motors: all-ccw drag can't be cancelled.
-    flat = DroneSimulator(propellers=genome_to_propellers(MARCH_TOP1_GENOME, flatten=True))
+    flat = DroneSimulator(propellers=march_propellers(flatten=True))
     sd_flat = best_hover_residual(flat)
     assert abs(sd_flat[11]) > 1.0, f"flat same-spin drone unexpectedly balanced yaw: {sd_flat[11]:.3e}"
 
@@ -134,5 +135,6 @@ def test_evolved_same_spin_drone_can_cancel_yaw():
 if __name__ == "__main__":
     test_flat_coefficients_match_scalar_form()
     test_canted_motor_gives_lateral_force_and_lever_yaw()
+    test_same_spin_hover_yaw_torque_is_physical()
     test_evolved_same_spin_drone_can_cancel_yaw()
     print("tilted dynamics OK")

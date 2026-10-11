@@ -29,11 +29,19 @@ motors produce lateral force and lever-arm moments (e.g. yaw from tilt):
 * `f_coef[i]       = k_f / m · d_i`                         (× W_i²)
 * `m_thr_coef[i]   = Iinv ⊙ (k_f · r_i × d_i)`              (× W_i²)
 * `m_spin_coef[i]  = Iinv ⊙ (spin_i · 2 · k_m · W_hover · a_i)` (× W_i)
+* `m_spin_const[i] = Iinv ⊙ (-spin_i · k_m · W_hover² · a_i)`  (constant)
 * `m_react_coef[i] = spin_i · k_r_react_borrow · a_i`       (× dW_i)
 
 with `d_i` the unit thrust direction, `a_i = -d_i` the prop axis,
 `r_i = loc_i - cg` and `Iinv = (1/Ixx, 1/Iyy, 1/Izz)`. For a flat motor
-(`d_i = (0, 0, -1)`) these reduce exactly to the scalar keys.
+(`d_i = (0, 0, -1)`) these reduce exactly to the scalar keys, plus
+`m_spin_const`.
+
+`m_spin_const` completes the tangent-line linearization of the prop drag
+torque `k_m·W²` about W_hover: `k_m·(2·W_hover·W - W_hover²)`. Without it the
+steady yaw torque at hover is 2·k_m·W_hover², twice the physical value. The
+constants cancel for spin-balanced configs (so reference parity is
+unaffected) but add up when props share a spin direction.
 
 Where spin_i = +1 for "ccw", -1 for "cw" (the convention is verified via
 the per-step parity test in unit_tests/test_dynamics_parity.py).
@@ -88,6 +96,8 @@ def derive_reference_params(
             k_r_react_signed (list[float]): per-motor yaw-moment from dW (signed)
             f_coef, m_thr_coef, m_spin_coef, m_react_coef (list[list[float]]):
                 per-motor tilt-aware 3-vector force/moment coefficients
+            m_spin_const (list[list[float]]): per-motor constant drag-torque
+                offset completing the linearization (angular acceleration)
             tau, k, w_min, w_max (float): motor model parameters
 
     Notes:
@@ -99,7 +109,8 @@ def derive_reference_params(
           variation in these is a Phase 6 polish item.
         * `k_r_signed` is a *linearization* at hover throttle. For hover,
           `dMz/dW ≈ 2·k_m·W_hover`. Away from hover this loses fidelity; the
-          reference accepts this as a sysid-level approximation.
+          reference accepts this as a sysid-level approximation. The runtime
+          adds `m_spin_const` so the torque *value* at hover is also correct.
     """
     n = len(propellers)
     if n == 0:
@@ -130,6 +141,7 @@ def derive_reference_params(
     f_coef = []
     m_thr_coef = []
     m_spin_coef = []
+    m_spin_const = []
     m_react_coef = []
     I_inv = np.array([1.0 / Ixx, 1.0 / Iyy, 1.0 / Izz])
     cg = np.zeros(3) if cg is None else np.asarray(cg, dtype=float)
@@ -156,6 +168,7 @@ def derive_reference_params(
         f_coef.append((k_f / m * d).tolist())
         m_thr_coef.append((I_inv * np.cross(r, k_f * d)).tolist())
         m_spin_coef.append((I_inv * spin * 2.0 * k_m * W_hover * a).tolist())
+        m_spin_const.append((I_inv * -spin * k_m * W_hover**2 * a).tolist())
         m_react_coef.append((spin * k_r_react * a).tolist())
 
     return {
@@ -170,6 +183,7 @@ def derive_reference_params(
         "f_coef": f_coef,
         "m_thr_coef": m_thr_coef,
         "m_spin_coef": m_spin_coef,
+        "m_spin_const": m_spin_const,
         "m_react_coef": m_react_coef,
         "tau": float(extended["tau"]),
         "k": float(extended["k"]),

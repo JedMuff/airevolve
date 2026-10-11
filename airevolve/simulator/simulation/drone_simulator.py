@@ -194,6 +194,7 @@ class DroneSimulator:
         f_coef = p_dict["f_coef"]
         m_thr_coef = p_dict["m_thr_coef"]
         m_spin_coef = p_dict["m_spin_coef"]
+        m_spin_const = p_dict["m_spin_const"]
         m_react_coef = p_dict["m_react_coef"]
         tau = p_dict["tau"]
         k = p_dict["k"]
@@ -222,7 +223,7 @@ class DroneSimulator:
         # with signs baked in by derive_reference_params.
         Mx, My, Mz = (
             sum(m_thr_coef[i][j] * W[i]**2 for i in range(n))
-            + sum(m_spin_coef[i][j] * W[i] for i in range(n))
+            + sum(m_spin_coef[i][j] * W[i] + m_spin_const[i][j] for i in range(n))
             + sum(m_react_coef[i][j] * d_W[i] for i in range(n))
             for j in range(3)
         )
