@@ -1,16 +1,14 @@
 """
 Drone Simulator with Propeller-Based Configuration
 
-Reference-form symbolic dynamics. Mirrors
-`optimal_quad_control_RL/quad_race_env.py:22-103` (the sysid'd 5-inch
-canonical model) but parameterized by airevolve's morphology.
+Reference-form symbolic dynamics: the per-motor model of
+`optimal_quad_control_RL/real_quad_env.py` (the flight-verified hex env),
+parameterized by airevolve's morphology. See dynamics_params.py for the
+equations and the two ways of building the coefficients (physics mode for
+any morphology, sysid mode for an identified real drone).
 
-Per-step parity against the reference is verified at machine precision
-(<1e-9 rel err) by `unit_tests/test_dynamics_parity.py`.
-
-See `experimentation/RUNTIME_DYNAMICS_MIGRATION.md` (the migration plan)
-and `experimentation/RL_TRAINING_FIXES.md` (the diagnostic chain that
-justified the rewrite).
+Parity with real_quad_env.f_func for the real hex is checked by
+`unit_tests/test_real_hex_parity.py`.
 """
 
 import warnings
@@ -18,7 +16,9 @@ import numpy as np
 from sympy import Array, Matrix, cos, lambdify, sin, sqrt, symbols, tan
 from .drone_configuration import DroneConfiguration
 from .propeller_data import create_standard_propeller_config
-from .dynamics_params import derive_reference_params, W_MAX_N, W_MIN_N
+from .dynamics_params import (
+    ParamLayout, derive_reference_params, sysid_to_reference_params, W_MAX_N, W_MIN_N,
+)
 
 
 def _invert_sqrt_poly(Wc, w_max, w_min, k):
@@ -37,24 +37,26 @@ def _invert_sqrt_poly(Wc, w_max, w_min, k):
 
 class DroneSimulator:
     """
-    Core drone simulation framework using reference-form sysid'd dynamics.
+    Core drone simulation framework using reference-form dynamics.
 
     State vector (length 12 + N where N = num_motors):
         [x, y, z, vx, vy, vz, phi, theta, psi, p, q, r, w_1..w_N]
-    where w_i ∈ [-1, 1] is the normalized motor speed (W_i = (w_i+1)/2 ·
-    W_MAX_N + W_MIN_N rad/s; W_MAX_N=3000, W_MIN_N=0).
+    where w_i ∈ [-1, 1] is the normalized motor speed
+    (W_i = (w_i+1)/2 · (w_norm_max - W_MIN_N) + W_MIN_N rad/s).
 
     Action vector (length N): u_i ∈ [-1, 1].
 
-    `dynamics_func(full_state, action) → full_state_dot` is lambdified;
-    motor model (sqrt-poly mapping + first-order lag) is baked in.
+    `dynamics_func_p(full_state, action, param_vector)` is the lambdified
+    dynamics with the coefficients as an argument (one column per env for
+    domain randomization); `dynamics_func(full_state, action)` binds the
+    nominal `param_vector`.
 
-    The reference's `Bf, Bm` allocation matrices are kept as decorative
-    attributes for API compatibility with consumers that read them; the
-    new dynamics path uses per-motor coefficients in `self.params` instead.
+    The `Bf, Bm` allocation matrices and `get_params()` are kept for the
+    Lee/PX4 controllers; the dynamics use `self.params` instead.
     """
 
-    def __init__(self, propellers=None, mountpoints=None, dt=0.005, gravity=9.81):
+    def __init__(self, propellers=None, mountpoints=None, dt=0.005, gravity=9.81,
+                 sysid_params=None, mass=None, inertia=None, w_norm_max=W_MAX_N):
         """
         Initialize drone simulator from propeller configuration.
 
@@ -62,11 +64,22 @@ class DroneSimulator:
             propellers (list): List of propeller dictionaries, each containing:
                 - "loc": [x, y, z] position in body frame (meters)
                 - "dir": [x, y, z, rotation] thrust direction and spin direction
-                - "propsize": propeller size in inches (2-8) or "matched"
+                - "propsize": propeller size in inches (2-8) or a named
+                  prop-library entry ("matched", calibrated motors)
             mountpoints (list, optional): Accepted for API compat;
                 DroneConfiguration does not currently consume it.
             dt (float): Integration time step
             gravity (float): Gravitational acceleration
+            sysid_params (dict, optional): identified coefficients in the
+                optimal_quad_control_RL `randomization.py` format. When given,
+                they are used directly (sysid mode) instead of deriving the
+                coefficients from the morphology; motor i of `propellers`
+                must be motor i+1 of the sysid.
+            mass, inertia (optional): measured mass (kg) and 3x3 inertia
+                overriding the values computed by DroneConfiguration.
+            w_norm_max (float): motor-speed normalization (rad/s) of the
+                state and of the policy's motor-speed inputs. Must match
+                the deployed controller.
 
         Example:
             # Standard quadrotor
@@ -84,40 +97,41 @@ class DroneSimulator:
 
         self.config = DroneConfiguration(propellers)
 
-        # Decorative — kept for API compatibility with consumers that read
-        # them (e.g., scripts using get_params for the legacy controller).
-        # The dynamics_func uses `self.params` (per-motor coefficients) instead.
+        # Bf/Bm and get_params serve the Lee/PX4 controllers; the dynamics
+        # use the per-motor coefficients in `self.params`.
         self.Bf, self.Bm = self.config.get_allocation_matrices()
         self.num_motors = self.config.num_motors
-        self.mass = self.config.mass
-        self.inertia = self.config.inertia_matrix
+        self.mass = float(mass) if mass is not None else self.config.mass
+        self.inertia = np.asarray(inertia, dtype=float) if inertia is not None else self.config.inertia_matrix
         self.center_of_gravity = self.config.cg
 
-        # All propellers are assumed to share the same prop_size (current
-        # airevolve convention). For asymmetric prop sizes, derive_reference_params
-        # would need per-motor extended params.
+        # All propellers are assumed to share the same prop_size.
         prop_size = propellers[0].get("propsize", 2)
         self.prop_size = prop_size
 
-        self.params = derive_reference_params(
-            propellers=propellers,
-            mass=float(self.mass),
-            inertia=np.asarray(self.inertia),
-            prop_size=prop_size,
-            gravity=gravity,
-            cg=np.asarray(self.center_of_gravity),
-        )
+        if sysid_params is not None:
+            self.params = sysid_to_reference_params(sysid_params, propellers)
+        else:
+            self.params = derive_reference_params(
+                propellers=propellers,
+                mass=self.mass,
+                inertia=self.inertia,
+                prop_size=prop_size,
+                gravity=gravity,
+                cg=np.asarray(self.center_of_gravity),
+            )
+        self.sysid_params = sysid_params
+        self.param_layout = ParamLayout(self.num_motors)
+        self.param_vector = self.param_layout.to_vector(self.params)
 
         self.dt = dt
         self.g = gravity
+        self.w_norm_max = float(w_norm_max)
 
         self._setup_dynamics()
 
-        # Full state: [base 12 dims, motor speeds w_1..w_N], all w in [-1, 1].
-        # The mid-range value (w=0) corresponds to W = W_MAX_N/2 = 1500 rad/s,
-        # which is *not* a meaningful "stopped" value. Initialize at the
-        # idle floor instead: W = w_min, i.e., w_init = 2·w_min/W_MAX_N - 1.
-        self._w_init = 2.0 * self.params["w_min"] / (W_MAX_N - W_MIN_N) - 1.0
+        # Initialize the motors at the idle floor W = w_min.
+        self._w_init = 2.0 * (self.params["w_min"] - W_MIN_N) / (self.w_norm_max - W_MIN_N) - 1.0
         self.state = np.zeros(12 + self.num_motors, dtype=np.float64)
         self.state[12:12 + self.num_motors] = self._w_init
         # Action: u_i in [-1, 1].
@@ -147,30 +161,39 @@ class DroneSimulator:
         return cls(propellers=propellers, **kwargs)
     
     def _setup_dynamics(self):
-        """Build the lambdified reference-form dynamics function.
+        """Build the lambdified reference-form dynamics.
 
-        Mirrors `experimentation/reference_drone_sim.py:_build_dynamics_func`
-        but generalized to N motors via `self.params` (per-motor signed
-        coefficients computed by `derive_reference_params`). Per-step parity
-        against the reference for the canonical 4-motor 2-inch quad is
-        verified by `unit_tests/test_dynamics_parity.py`.
-
-        The lambdified function has signature
-        `(full_state[12+N], action[N]) → full_state_dot[12+N]`. Motor model
-        (sqrt-poly mapping U → Wc, then first-order lag dW = (Wc-W)/tau) is
-        baked in. F and M are treated as accelerations directly — mass and
-        inertia are absorbed into the per-motor coefficients.
+        Mirrors `optimal_quad_control_RL/real_quad_env.py` term by term,
+        generalized to N motors with the coefficients as symbols (layout:
+        `ParamLayout`). `dynamics_func_p(full_state[12+N], action[N],
+        params[P]) → full_state_dot[12+N]`; each argument may carry a
+        trailing env dimension.
         """
         n = self.num_motors
+        layout = self.param_layout
 
-        # Base state symbols (12 dims).
         base_state_syms = symbols('x y z v_x v_y v_z phi theta psi p q r')
         x, y, z, vx, vy, vz, phi, theta, psi, p, q, r = base_state_syms
-        # Motor state symbols (N dims).
         motor_state_syms = list(symbols(f'w_1:{n + 1}'))
         full_state_syms = list(base_state_syms) + motor_state_syms
-        # Control (action) symbols (N dims).
         control_syms = list(symbols(f'u_1:{n + 1}'))
+        param_syms = list(symbols(f'P_0:{layout.size}'))
+
+        def block(name):
+            return param_syms[layout.slices[name]]
+
+        def per_motor(name):
+            b = block(name)
+            return [b[3 * i:3 * i + 3] for i in range(n)]
+
+        axes = per_motor("axis")
+        f_coef = per_motor("f_coef")
+        m_coef = per_motor("m_coef")
+        m_dw_coef = per_motor("m_dw_coef")
+        k_drag = block("k_drag")
+        inflow_coef, tau, k, w_min, w_max = (
+            block(name)[0] for name in ("inflow_coef", "tau", "k", "w_min", "w_max")
+        )
 
         # Rotation matrix (body → world).
         Rx = Matrix([[1, 0, 0], [0, cos(phi), -sin(phi)], [0, sin(phi), cos(phi)]])
@@ -178,87 +201,59 @@ class DroneSimulator:
         Rz = Matrix([[cos(psi), -sin(psi), 0], [sin(psi), cos(psi), 0], [0, 0, 1]])
         R = Rz * Ry * Rx
 
-        # Body-frame velocity (drag computed in body frame).
-        vbx, vby, _vbz = R.T @ Matrix([vx, vy, vz])
+        # Body velocity, split per motor into axial and in-plane parts.
+        vb = R.T @ Matrix([vx, vy, vz])
+        vd = [sum(a[j] * vb[j] for j in range(3)) for a in axes]
+        vp = [[vb[j] - vd[i] * axes[i][j] for j in range(3)] for i in range(n)]
 
-        # Unnormalize motor speed: w in [-1, 1] → W in [W_MIN_N, W_MAX_N] rad/s.
-        # W_MAX_N=3000 is independent of the physical w_max — intentional in the
-        # reference; state may exceed [-1, 1] under hard throttle (transient).
-        W = [(w_i + 1) / 2 * (W_MAX_N - W_MIN_N) + W_MIN_N for w_i in motor_state_syms]
-        # Action: u in [-1, 1] → U in [0, 1].
+        # Normalized motor speed w → rad/s, action u → U ∈ [0, 1].
+        w_span = self.w_norm_max - W_MIN_N
+        W = [(w_i + 1) / 2 * w_span + W_MIN_N for w_i in motor_state_syms]
         U = [(u_i + 1) / 2 for u_i in control_syms]
 
-        p_dict = self.params
-        k_x = p_dict["k_x"]
-        k_y = p_dict["k_y"]
-        f_coef = p_dict["f_coef"]
-        m_thr_coef = p_dict["m_thr_coef"]
-        m_spin_coef = p_dict["m_spin_coef"]
-        m_spin_const = p_dict["m_spin_const"]
-        m_react_coef = p_dict["m_react_coef"]
-        tau = p_dict["tau"]
-        k = p_dict["k"]
-        w_min = p_dict["w_min"]
-        w_max = p_dict["w_max"]
-
-        # Motor command: action U → target speed Wc via sqrt-polynomial.
+        # Motor model: steady-state speed (sqrt-polynomial) + first-order lag.
         Wc = [(w_max - w_min) * sqrt(k * U_i**2 + (1 - k) * U_i) + w_min for U_i in U]
-        # First-order lag.
         d_W = [(Wc_i - W_i) / tau for Wc_i, W_i in zip(Wc, W)]
-        # Convert dW (rad/s²) back to normalized derivative (1/s).
-        d_w = [d_W_i / (W_MAX_N - W_MIN_N) * 2 for d_W_i in d_W]
+        d_w = [d_W_i / w_span * 2 for d_W_i in d_W]
 
-        # Forces (treated as accelerations directly — mass implicit in f_coef).
-        sum_W = sum(W)
-        # Thrust along each motor's actual (possibly canted) direction.
-        Fx, Fy, Fz = (
-            sum(f_coef[i][j] * W[i]**2 for i in range(n)) for j in range(3)
-        )
-        Dx = -k_x * vbx * sum_W
-        Dy = -k_y * vby * sum_W
-
-        # Moments (treated as angular accelerations directly — inertia
-        # absorbed into the coefficients). Lever-arm (r × F), steady prop
-        # drag and motor reaction torques, each along the motor's own axis,
-        # with signs baked in by derive_reference_params.
-        Mx, My, Mz = (
-            sum(m_thr_coef[i][j] * W[i]**2 for i in range(n))
-            + sum(m_spin_coef[i][j] * W[i] + m_spin_const[i][j] for i in range(n))
-            + sum(m_react_coef[i][j] * d_W[i] for i in range(n))
+        # Thrust (with axial inflow loss) + in-plane rotor drag.
+        F = [
+            sum(f_coef[i][j] * (W[i]**2 - inflow_coef * vd[i] * W[i]) for i in range(n))
+            + k_drag[j] * sum(vp[i][j] * W[i] for i in range(n))
             for j in range(3)
-        )
+        ]
+        # Moments: thrust lever arm + prop drag torque (W²) and motor
+        # acceleration reaction (dW).
+        M = [
+            sum(m_coef[i][j] * W[i]**2 for i in range(n))
+            + sum(m_dw_coef[i][j] * d_W[i] for i in range(n))
+            for j in range(3)
+        ]
 
-        # Translational kinematics.
-        d_x = vx
-        d_y = vy
-        d_z = vz
+        d_vx, d_vy, d_vz = Matrix([0, 0, self.g]) + R @ Matrix(F)
 
-        # Translational dynamics: gravity + body-frame forces rotated to world.
-        accel = Matrix([0, 0, self.g]) + R @ Matrix([Dx + Fx, Dy + Fy, Fz])
-        d_vx, d_vy, d_vz = accel
-
-        # Euler-angle kinematics (singular at theta=±π/2; reset envs guard against this).
+        # Euler-angle kinematics (singular at theta=±π/2).
         d_phi = p + q * sin(phi) * tan(theta) + r * cos(phi) * tan(theta)
         d_theta = q * cos(phi) - r * sin(phi)
         d_psi = q * sin(phi) / cos(theta) + r * cos(phi) / cos(theta)
 
-        # Rotational dynamics — direct, no inertia inversion.
-        d_p = Mx
-        d_q = My
-        d_r = Mz
-
         state_dot = [
-            d_x, d_y, d_z,
+            vx, vy, vz,
             d_vx, d_vy, d_vz,
             d_phi, d_theta, d_psi,
-            d_p, d_q, d_r,
-        ] + d_w  # length 12 + n
+            M[0], M[1], M[2],
+        ] + d_w
 
-        self.dynamics_func = lambdify(
-            (Array(full_state_syms), Array(control_syms)),
+        self.dynamics_func_p = lambdify(
+            (Array(full_state_syms), Array(control_syms), Array(param_syms)),
             Array(state_dot),
             'numpy',
+            cse=True,
         )
+
+    def dynamics_func(self, full_state, action):
+        """State derivative with the nominal parameters."""
+        return self.dynamics_func_p(full_state, action, self.param_vector)
 
     def get_configuration_info(self):
         """
@@ -388,8 +383,7 @@ class DroneSimulator:
         if len(self.state) >= 12 + self.num_motors:
             w_norm = self.state[12:12 + self.num_motors]
             for i in range(self.num_motors):
-                # W = (w + 1) / 2 * (W_MAX_N - W_MIN_N) + W_MIN_N
-                motor_speeds[i] = (w_norm[i] + 1) / 2 * (W_MAX_N - W_MIN_N) + W_MIN_N
+                motor_speeds[i] = (w_norm[i] + 1) / 2 * (self.w_norm_max - W_MIN_N) + W_MIN_N
         return motor_speeds[:4]
 
     def get_params(self):

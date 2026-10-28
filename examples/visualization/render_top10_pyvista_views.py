@@ -264,13 +264,11 @@ def level_hover_contributions(genome_array):
     p = sim.params
     inertia_diag = np.diag(sim.inertia)
     f_coef = np.array(p["f_coef"]) * sim.mass
-    m_thr = np.array(p["m_thr_coef"]) * inertia_diag
-    m_spin = np.array(p["m_spin_coef"]) * inertia_diag
-    m_spin_const = np.array(p["m_spin_const"]) * inertia_diag
+    m_coef = np.array(p["m_coef"]) * inertia_diag
 
     def contributions(W):
         W = W[:, None]
-        return np.hstack([f_coef * W**2, m_thr * W**2 + m_spin * W + m_spin_const])
+        return np.hstack([f_coef * W**2, m_coef * W**2])
 
     gravity = np.array([0.0, 0.0, sim.mass * sim.g, 0.0, 0.0, 0.0])
 

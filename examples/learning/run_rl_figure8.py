@@ -1,5 +1,9 @@
 """Train a canonical 4-motor 2-inch X-quad on the figure-8 task with PPO.
 
+For policies to deploy on a real drone (sysid'd dynamics, domain
+randomization, checkpoints + run_config.json for C code export) use
+`examples/learning/train_rl.py` instead.
+
 This is the runtime end-to-end RL example: a single-script PPO trainer
 exercising airevolve's reference-form `DroneSimulator` (post Session 5
 migration) and `DroneGateEnv` (default figure-8 at z=-1.5 NED).

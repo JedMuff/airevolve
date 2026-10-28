@@ -145,8 +145,10 @@ def get_propeller_specs(prop_size):
     Raises:
         ValueError: If propeller size is not available
     """
-    if prop_size == "matched":
-        prop_key = "matched"
+    # Named entries ("matched", or calibrated motors registered via
+    # register_propeller) are looked up directly; sizes map to "prop<N>".
+    if isinstance(prop_size, str) and prop_size in PROPELLER_LIBRARY:
+        prop_key = prop_size
     else:
         prop_key = f"prop{prop_size}"
 
@@ -156,6 +158,11 @@ def get_propeller_specs(prop_size):
                         f"Available sizes: {available_sizes}")
 
     return PROPELLER_LIBRARY[prop_key].copy()
+
+def register_propeller(name, specs):
+    """Add a named entry (e.g. a motor/prop calibrated from flight sysid)."""
+    PROPELLER_LIBRARY[name] = dict(specs)
+
 
 def get_extended_prop_params(prop_size):
     """Return all reference-form physics constants for a prop size.
@@ -193,9 +200,11 @@ def validate_propeller_config(props):
                 raise KeyError(f"'{key}' is missing in propeller {i}")
         
         # Validate propeller size
-        if prop["propsize"] not in [2, 3, 4, 5, 6, 7, 8, "matched"]:
+        try:
+            get_propeller_specs(prop["propsize"])
+        except ValueError:
             raise ValueError(f"Invalid propeller size {prop['propsize']} in propeller {i}. "
-                           f"Available sizes: [2, 3, 4, 5, 6, 7, 8, 'matched']")
+                           f"Available: {list(PROPELLER_LIBRARY)}")
         
         # Validate direction format
         if len(prop["dir"]) != 4:

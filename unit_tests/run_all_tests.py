@@ -89,7 +89,8 @@ class TestRunner:
                 name='Reference-Form Dynamics',
                 description='Per-step parity (V0) and training smoke for the reference-form runtime simulator (Session 5 migration)',
                 test_files=[
-                    'test_dynamics_parity.py',
+                    'test_real_hex_parity.py',
+                    'test_tilted_dynamics.py',
                     'test_dynamics_smoke.py'
                 ],
                 requires_deps=['stable_baselines3']

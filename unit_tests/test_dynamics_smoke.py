@@ -29,7 +29,7 @@ import numpy as np
 
 # stable_baselines3 / PPO live in the experimentation env; reuse the
 # experimentation harness for consistency.
-EXP_DIR = "/home/jed/workspaces/airevolve/experimentation"
+EXP_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "experimentation")
 if EXP_DIR not in sys.path:
     sys.path.insert(0, EXP_DIR)
 

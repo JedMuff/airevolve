@@ -1,6 +1,17 @@
+"""Vectorized gate-racing and hover envs for PPO.
+
+Mirrors optimal_quad_control_RL/real_quad_env.py (`Quadcopter3DGates`,
+`Quadcopter3DHover`), whose policies are flight-verified on the real hex,
+generalized to any morphology: observations, reward, termination, reset
+distribution (including the order of the random draws) and per-env domain
+randomization match the reference, so a seeded run with the real hex's
+sysid reproduces it step for step (unit_tests/test_real_hex_parity.py).
+
+`legacy_termination=True` restores the earlier airevolve behaviour (box
+bounds only, no ground/gate-frame crashes or rate limit, +10 lap bonus,
+deterministic start) for reproducing past evolution runs.
+"""
 import torch
-import stable_baselines3
-import sys
 import numpy as np
 
 # Device is managed per-instance, not globally.
@@ -11,10 +22,9 @@ import numpy as np
 from gymnasium import spaces
 from stable_baselines3.common.vec_env import VecEnv
 
-# Import new simulation API
 from airevolve.simulator.simulation.drone_simulator import DroneSimulator
-from airevolve.simulator.simulation.drone_configuration import DroneConfiguration
 from airevolve.simulator.simulation.propeller_data import genome_to_propellers
+from airevolve.simulator.simulation.randomization import make_randomization
 from airevolve.evolution_tools.genome_handlers.mounting_points import (
     generate_disc_mounting_points, assign_nearest_mounting_point
 )
@@ -34,11 +44,30 @@ gate_pos = np.array([
 gate_yaw = np.array([1,2,1,0,-1,-2,-1,0])*np.pi/2
 start_pos = gate_pos[0] + np.array([0,-1.,0])
 
+# HOVER TASK
+hover_pos = np.array([0., 0., -1.5])
+
+
+def figure8_track(radius=1.5):
+    """Gate positions, yaws and start position of the figure-8 track."""
+    gates = np.array([
+        [ radius,  -radius, -1.5],
+        [ 0,        0,      -1.5],
+        [-radius,   radius, -1.5],
+        [ 0,      2*radius, -1.5],
+        [ radius,   radius, -1.5],
+        [ 0,        0,      -1.5],
+        [-radius,  -radius, -1.5],
+        [ 0,     -2*radius, -1.5]
+    ])
+    return gates, gate_yaw.copy(), gates[0] + np.array([0, -1., 0])
+
+
 class DroneGateEnv(VecEnv):
-    
+
     metadata = {'render_modes': ['rgb_array', 'human']}
     render_mode = 'rgb_array'
-    
+
     def __init__(self,
                  num_envs,
                  propellers=None,
@@ -48,8 +77,8 @@ class DroneGateEnv(VecEnv):
                  start_pos=start_pos,
                  x_bounds=[-5,5],
                  y_bounds=[-5,5],
-                 z_bounds=[-5,5],
-                 gates_ahead=2,
+                 z_bounds=[-7,0],
+                 gates_ahead=1,
                  pause_if_collision=False,
                  motor_limit=1.0,
                  initialize_at_random_gates=True,
@@ -62,30 +91,54 @@ class DroneGateEnv(VecEnv):
                  dt=0.01,
                  action_filter_alpha=1.0,
                  max_steps=1200,
+                 drone_sim=None,
+                 sysid_params=None,
+                 randomization=0.0,
+                 start_pos_noise=0.,
+                 legacy_termination=False,
                  ):
-        
+        """
+        Args (beyond the reference env's):
+            propellers / individual / drone_sim / sysid_params: the drone.
+                Pass a prebuilt `drone_sim`, or `propellers` (optionally with
+                `sysid_params` for an identified drone), or a genome as
+                `individual`. Defaults to the standard 2-inch quad.
+            x_bounds, y_bounds, z_bounds: flight volume (NED). Leaving it
+                ends the episode with -10; z above z_bounds[1] is a ground
+                crash. The defaults are the reference env's (|x|,|y| ≤ 5,
+                ground at z=0, ceiling at z=-7).
+            randomization: domain randomization, either a fraction (0.3 =
+                ±30% on every coefficient, 0 = nominal) or a callable
+                `draw(n) -> (n, P)` parameter vectors.
+            legacy_termination: earlier airevolve termination/reward (box
+                bounds x/y/z_bounds, no ground or gate-frame crashes, +10 on
+                completing a lap, deterministic start).
+        """
+
         # Set device
         if device is not None:
             self.device = device
             torch.set_default_device(device)
-        
+
         if render_mode is not None:
             self.render_mode = render_mode
 
         self.x_bounds = x_bounds
         self.y_bounds = y_bounds
         self.z_bounds = z_bounds
+        self.legacy_termination = legacy_termination
 
         # set seed
         self.seed = seed
         if self.seed is not None:
             np.random.seed(self.seed)
             torch.manual_seed(self.seed)
-        
+
         # Initialize drone simulator
-        if propellers is not None:
-            # Use new API with propeller configuration
-            self.drone_sim = DroneSimulator(propellers=propellers, dt=dt)
+        if drone_sim is not None:
+            self.drone_sim = drone_sim
+        elif propellers is not None:
+            self.drone_sim = DroneSimulator(propellers=propellers, dt=dt, sysid_params=sysid_params)
         elif individual is not None:
             # Convert legacy individual array to propeller configuration
             propellers, mountpoints = self._convert_individual_to_propellers(individual)
@@ -98,9 +151,10 @@ class DroneGateEnv(VecEnv):
         self.Bf, self.Bm = self.drone_sim.config.get_allocation_matrices()
 
         num_motors = self.drone_sim.num_motors
+        self.num_motors = num_motors
 
-        # Motor time constant for first-order dynamics (matches reference 5-inch sysid).
-        self.motor_tau = 0.04
+        # Motor time constant (nominal) for reporting.
+        self.motor_tau = self.drone_sim.params["tau"]
 
         # Define the race track
         self.start_pos = start_pos.astype(np.float32)
@@ -108,13 +162,23 @@ class DroneGateEnv(VecEnv):
         self.gate_yaw = gate_yaw.astype(np.float32)
         self.num_gates = gates_pos.shape[0]
         self.gates_ahead = gates_ahead
-        
+
         # Pause if collision
         self.pause_if_collision = pause_if_collision
 
+        # Uniform noise (m) on the start position when not initializing at random gates
+        self.start_pos_noise = start_pos_noise
+
+        # Domain randomization: one parameter vector per env, redrawn on reset
+        if callable(randomization):
+            self.randomization = randomization
+        else:
+            self.randomization = make_randomization(self.drone_sim, randomization)
+        self.params = self.randomization(num_envs)
+
         # Motor limit
         self.motor_limit = motor_limit
-        
+
         # Initialize at random gates
         self.initialize_at_random_gates = initialize_at_random_gates
 
@@ -122,7 +186,7 @@ class DroneGateEnv(VecEnv):
         self.num_state_history = num_state_history
         self.num_action_history = num_action_history
         self.history_step_size = history_step_size
-        
+
         # Calculate relative gates
         # pos,yaw of gate i in reference frame of gate i-1 (assumes a looped track)
         self.gate_pos_rel = np.zeros((self.num_gates,3), dtype=np.float32)
@@ -149,7 +213,7 @@ class DroneGateEnv(VecEnv):
         # Initialize number of gates passed
         self.num_gates_passed = np.zeros(num_envs, dtype=int)
 
-        # action space: [cmd1, cmd2, cmd3, cmd4]
+        # action space: one command per motor
         # U = (u+1)/2 --> u = 2U-1
         u_lim = 2*self.motor_limit-1
         action_space = spaces.Box(low=-1, high=u_lim, shape=(num_motors,), dtype=np.float64)
@@ -157,7 +221,7 @@ class DroneGateEnv(VecEnv):
         # observation space: pos[G], vel[G], att[eulerB->G], rates[B], rpms, future_gates[G], future_gate_dirs[G]
         # [G] = reference frame aligned with target gate
         # [B] = body frame
-        self.state_len = 12+num_motors+4*self.gates_ahead+4*self.num_action_history
+        self.state_len = 12+num_motors+4*self.gates_ahead+num_motors*self.num_action_history
         self.obs_len = self.state_len*(1+self.num_state_history)
         observation_space = spaces.Box(
             low  = np.array([-np.inf]*self.obs_len),
@@ -198,11 +262,9 @@ class DroneGateEnv(VecEnv):
         self.final_gate_passed = np.zeros(num_envs, dtype=bool)
 
         self.update_states = self.update_states_gate
-        
+
         self.pause = False
-        
-        self.num_motors = num_motors
-    
+
     def _convert_individual_to_propellers(self, individual):
         """
         Convert legacy individual array to propeller configuration.
@@ -223,7 +285,7 @@ class DroneGateEnv(VecEnv):
         mounting_points = assign_nearest_mounting_point(propeller_positions, disc_mounting_points)
 
         return propellers, mounting_points
-    
+
     def reset_seed(self):
         if self.seed is not None:
             np.random.seed(self.seed)
@@ -267,7 +329,8 @@ class DroneGateEnv(VecEnv):
         new_states[:,9:12] = self.world_states[:,9:12]
 
         # Update rpms
-        new_states[:,12:12+self.num_motors] = self.world_states[:,12:12+self.num_motors]
+        n = self.num_motors
+        new_states[:,12:12+n] = self.world_states[:,12:12+n]
 
         # Update future gates relative to current gate
         for i in range(self.gates_ahead):
@@ -275,16 +338,17 @@ class DroneGateEnv(VecEnv):
             # loop when out of bounds
             indices = indices % self.num_gates
             valid = indices < self.num_gates
-            new_states[valid,12+self.num_motors+4*i:12+self.num_motors+4*i+3] = self.gate_pos_rel[indices[valid]]
-            new_states[valid,12+self.num_motors+4*i+3] = self.gate_yaw_rel[indices[valid]]
+            new_states[valid,12+n+4*i:12+n+4*i+3] = self.gate_pos_rel[indices[valid]]
+            new_states[valid,12+n+4*i+3] = self.gate_yaw_rel[indices[valid]]
 
         # update action history
         self.action_hist = np.roll(self.action_hist, 1, axis=1)
         self.action_hist[:,0] = self.actions
 
         for i in range(self.num_action_history):
-            new_states[:,12+self.num_motors+4*self.gates_ahead+4*i:12+self.num_motors+4*self.gates_ahead+4*i+4] = self.action_hist[:,(i+1)*self.history_step_size-1]
-        
+            start = 12+n+4*self.gates_ahead+n*i
+            new_states[:,start:start+n] = self.action_hist[:,(i+1)*self.history_step_size-1]
+
         # update state history
         self.state_hist = np.roll(self.state_hist, 1, axis=1)
         self.state_hist[:,0] = new_states
@@ -293,10 +357,11 @@ class DroneGateEnv(VecEnv):
         self.states = self.state_hist[:,0:(self.num_state_history+1)*self.history_step_size:self.history_step_size].reshape((self.num_envs,-1))
 
     def reset_(self, dones):
+        # Random draws happen in the same order as the reference env.
         num_reset = dones.sum()
         # Track number of gates passed
         self.num_gates_passed[dones] = np.zeros(num_reset)
-        
+
         if self.initialize_at_random_gates:
             # set target gates to random gates
             self.target_gates[dones] = np.random.randint(0,self.num_gates, size=num_reset)
@@ -304,77 +369,68 @@ class DroneGateEnv(VecEnv):
             # gate_pos + [cos(gate_yaw), sin(gate_yaw), 0]
             pos = self.gate_pos[self.target_gates[dones]%self.num_gates]
             yaw = self.gate_yaw[self.target_gates[dones]%self.num_gates]
-            
+
             pos = pos - np.array([np.cos(yaw), np.sin(yaw), np.zeros_like(yaw)]).T
             x0, y0, z0 = pos.T
-
-            vx0 = np.random.uniform(-0.5,0.5, size=(num_reset,))
-            vy0 = np.random.uniform(-0.5,0.5, size=(num_reset,))
-            vz0 = np.random.uniform(-0.5,0.5, size=(num_reset,))
-            
-            phi0   = np.random.uniform(-np.pi/9,np.pi/9, size=(num_reset,))
-            theta0 = np.random.uniform(-np.pi/9,np.pi/9, size=(num_reset,))
-            psi0   = np.random.uniform(-np.pi,np.pi, size=(num_reset,))
-            
-            p0 = np.random.uniform(-0.1,0.1, size=(num_reset,))
-            q0 = np.random.uniform(-0.1,0.1, size=(num_reset,))
-            r0 = np.random.uniform(-0.1,0.1, size=(num_reset,))
-
-            # Motor speeds w_i are in [-1, 1] (reference-form normalization;
-            # see DroneSimulator state convention). Was [0, 1] under the old
-            # dynamics — see Phase 2.3 in RUNTIME_DYNAMICS_MIGRATION.md.
-            w0 = np.random.uniform(-1, 1, size=(num_reset,self.num_motors))
-
-        else: # always start at the first gate, fixed orientation
+        elif self.legacy_termination:
+            self._reset_legacy_fixed_start(dones, num_reset)
+            return self.states
+        else:
             # set target gates to 0
             self.target_gates[dones] = np.zeros(num_reset, dtype=int)
             # use start_pos
-            x0 = 0*np.random.uniform(-0.5,0.5, size=(num_reset,)) + self.start_pos[0]
-            y0 = 0*np.random.uniform(-0.5,0.5, size=(num_reset,)) + self.start_pos[1]
-            z0 = 0*np.random.uniform(-0.5,0.5, size=(num_reset,)) + self.start_pos[2]
+            x0 = np.random.uniform(-self.start_pos_noise,self.start_pos_noise, size=(num_reset,)) + self.start_pos[0]
+            y0 = np.random.uniform(-self.start_pos_noise,self.start_pos_noise, size=(num_reset,)) + self.start_pos[1]
+            z0 = np.random.uniform(-self.start_pos_noise,self.start_pos_noise, size=(num_reset,)) + self.start_pos[2]
 
-            vx0 = np.zeros((num_reset,))
-            vy0 = np.zeros((num_reset,))
-            vz0 = np.zeros((num_reset,))
-            
-            phi0   = np.zeros((num_reset,))
-            theta0 = np.zeros((num_reset,))
-            psi0   = np.zeros((num_reset,))
-            
-            p0 = np.zeros((num_reset,))
-            q0 = np.zeros((num_reset,))
-            r0 = np.zeros((num_reset,))
+        vx0 = np.random.uniform(-0.5,0.5, size=(num_reset,))
+        vy0 = np.random.uniform(-0.5,0.5, size=(num_reset,))
+        vz0 = np.random.uniform(-0.5,0.5, size=(num_reset,))
 
-            w0 = np.zeros((num_reset,self.num_motors))
+        phi0   = np.random.uniform(-np.pi/9,np.pi/9, size=(num_reset,))
+        theta0 = np.random.uniform(-np.pi/9,np.pi/9, size=(num_reset,))
+        psi0   = np.random.uniform(-np.pi,np.pi, size=(num_reset,))
 
-        w0 = np.hsplit(w0, self.num_motors)
+        p0 = np.random.uniform(-0.1,0.1, size=(num_reset,))
+        q0 = np.random.uniform(-0.1,0.1, size=(num_reset,))
+        r0 = np.random.uniform(-0.1,0.1, size=(num_reset,))
 
-        state_vars = [x0, y0, z0, vx0, vy0, vz0, phi0, theta0, psi0, p0, q0, r0]
-        state_vars = [var.reshape(num_reset, 1) for var in state_vars]
+        # Normalized motor speeds in [-1, 1], one draw per motor.
+        w0 = [np.random.uniform(-1,1, size=(num_reset,)) for _ in range(self.num_motors)]
 
-        self.world_states[dones] = np.concatenate(state_vars + list(w0), axis=1)
+        self.world_states[dones] = np.stack([x0, y0, z0, vx0, vy0, vz0, phi0, theta0, psi0, p0, q0, r0, *w0], axis=1)
         self.step_counts[dones] = np.zeros(num_reset)
         # Clear the action-filter memory for envs that just reset, so the
         # next action isn't smoothed against a stale pre-reset action.
         self.filtered_actions[dones] = 0.0
-        
+
+        # update params (domain randomization)
+        self.params[dones] = self.randomization(num_reset)
+
         # update states
         self.update_states()
         return self.states
-    
+
+    def _reset_legacy_fixed_start(self, dones, num_reset):
+        """Earlier airevolve fixed start: at start_pos, at rest, level."""
+        self.target_gates[dones] = np.zeros(num_reset, dtype=int)
+        state = np.zeros((num_reset, 12+self.num_motors))
+        state[:, 0:3] = self.start_pos
+        self.world_states[dones] = state
+        self.step_counts[dones] = np.zeros(num_reset)
+        self.filtered_actions[dones] = 0.0
+        self.params[dones] = self.randomization(num_reset)
+        self.update_states()
+
     def reset(self):
         return self.reset_(np.ones(self.num_envs, dtype=bool))
 
     def step_async(self, actions):
         self.prev_actions = self.actions
         self.actions = actions
-    
-    def step_wait(self):
-        # Reference-form dynamics: dynamics_func takes the full 12+N state
-        # and the action directly. Motor model (sqrt-poly mapping U → Wc,
-        # then first-order lag) is baked into the symbolic equations.
-        # Action is in [-1, 1]; motor state w_i is in [-1, 1].
-        #
+
+    def _integrate(self):
+        """Euler step of the per-env dynamics; returns the new world states."""
         # Apply the action low-pass filter (FC setpoint shaping) before the
         # action enters the dynamics. alpha=1.0 is a no-op.
         if self.action_filter_alpha < 1.0:
@@ -386,16 +442,41 @@ class DroneGateEnv(VecEnv):
         else:
             action_for_dynamics = self.actions
 
-        full_state = self.world_states  # (num_envs, 12+N)
-        full_state_dot = self.drone_sim.dynamics_func(
-            full_state.T, action_for_dynamics.T
-        ).T  # (num_envs, 12+N)
-        new_states = (full_state + self.dt * full_state_dot).astype(np.float32)
+        state_dot = np.asarray(self.drone_sim.dynamics_func_p(
+            self.world_states.T, np.asarray(action_for_dynamics).T, self.params.T
+        )).T
+        new_states = self.world_states + self.dt*state_dot
 
-        # Detect numerical divergence (NaN, Inf, or excessively large finite values)
-        diverged = np.any(~np.isfinite(new_states) | (np.abs(new_states) > 1e6), axis=1)
-        if np.any(diverged):
-            new_states[diverged] = self.world_states[diverged]
+        # Numerical divergence (NaN/Inf, e.g. at the Euler singularity):
+        # keep the last finite state and end the episode.
+        self.diverged = np.any(~np.isfinite(new_states), axis=1)
+        if np.any(self.diverged):
+            new_states[self.diverged] = self.world_states[self.diverged]
+        return new_states
+
+    def _crashed(self, new_states, rewards):
+        """Ground / out-of-bounds / divergence: -10 reward, returns masks."""
+        n = len(new_states)
+        if self.legacy_termination:
+            ground_collision = np.zeros(n, dtype=bool)
+            out_of_bounds = np.zeros(n, dtype=bool)
+            for axis, (lo, hi) in enumerate([self.x_bounds, self.y_bounds, self.z_bounds]):
+                out_of_bounds |= (new_states[:,axis] < lo) | (new_states[:,axis] > hi)
+        else:
+            # Ground collision penalty (z > 0)
+            ground_collision = new_states[:,2] > self.z_bounds[1]
+            # Check out of bounds
+            out_of_bounds = (new_states[:,0] < self.x_bounds[0]) | (new_states[:,0] > self.x_bounds[1])  # edges of the grid
+            out_of_bounds |= (new_states[:,1] < self.y_bounds[0]) | (new_states[:,1] > self.y_bounds[1])
+            out_of_bounds |= new_states[:,2] < self.z_bounds[0]                    # max height (z-axis point down)
+            out_of_bounds |= np.any(np.abs(new_states[:,9:12]) > 1000, axis=1)     # prevent numerical issues
+        out_of_bounds |= self.diverged
+        rewards[ground_collision] = -10
+        rewards[out_of_bounds] = -10
+        return ground_collision, out_of_bounds
+
+    def step_wait(self):
+        new_states = self._integrate()
 
         self.step_counts += 1
 
@@ -408,7 +489,6 @@ class DroneGateEnv(VecEnv):
         d2g_old = np.linalg.norm(pos_old - pos_gate, axis=1)
         d2g_new = np.linalg.norm(pos_new - pos_gate, axis=1)
         rat_penalty = 0.001*np.linalg.norm(new_states[:,9:12], axis=1)
-        action_penalty_delta = 0.001*np.linalg.norm((self.actions-self.prev_actions), axis=1)
 
         prog_rewards = d2g_old - d2g_new
         rewards = prog_rewards - rat_penalty
@@ -421,23 +501,15 @@ class DroneGateEnv(VecEnv):
         passed_gate_plane = (pos_old_projected < 0) & (pos_new_projected > 0)
         gate_size = 1.5
         gate_passed = passed_gate_plane & np.all(np.abs(pos_new - pos_gate)<gate_size/2, axis=1)
+        gate_collision = passed_gate_plane & np.any(np.abs(pos_new - pos_gate)>gate_size/2, axis=1)
 
-        # +10 only on the final gate of the lap. Per-gate was tried in
-        # session 2 (10-seed × 10M steps, native fig8) and all 10 seeds
-        # collapsed; final-only is closer to the reference, where the
-        # gate-pass reward path is itself dead code (quad_race_env.py:271,
-        # 479,482 — final_gate_passed is initialized but never updated).
-        final_gate_passed = gate_passed & (self.target_gates == self.num_gates - 1)
-        rewards[final_gate_passed] += 10.0
+        if self.legacy_termination:
+            # +10 on the final gate of the lap; gate frames don't end the episode.
+            final_gate_passed = gate_passed & (self.target_gates == self.num_gates - 1)
+            rewards[final_gate_passed] += 10.0
+            gate_collision = np.zeros_like(gate_collision)
 
-        # Check out of bounds
-        x_bounds_broken = np.logical_or(new_states[:,0] < self.x_bounds[0], new_states[:,0] > self.x_bounds[1])
-        y_bounds_broken = np.logical_or(new_states[:,1] < self.y_bounds[0], new_states[:,1] > self.y_bounds[1])
-        z_bounds_broken = np.logical_or(new_states[:,2] < self.z_bounds[0], new_states[:,2] > self.z_bounds[1])
-        out_of_bounds = x_bounds_broken | y_bounds_broken | z_bounds_broken
-
-        rewards[out_of_bounds] = -10
-        rewards[diverged] = -10
+        ground_collision, out_of_bounds = self._crashed(new_states, rewards)
 
         # Check number of steps
         max_steps_reached = self.step_counts >= self.max_steps
@@ -450,7 +522,7 @@ class DroneGateEnv(VecEnv):
         self.num_gates_passed[gate_passed] += 1
 
         # Check if the episode is done
-        dones = max_steps_reached | out_of_bounds | diverged
+        dones = max_steps_reached | ground_collision | out_of_bounds | gate_collision
         self.dones = dones
 
         # Save gates passed before reset (for info dict)
@@ -479,12 +551,14 @@ class DroneGateEnv(VecEnv):
             if max_steps_reached[i]:
                 infos[i]["TimeLimit.truncated"] = True
             # extra info for debugging
+            infos[i]["ground_collision"] = ground_collision[i]
             infos[i]["out_of_bounds"] = out_of_bounds[i]
+            infos[i]["gate_collision"] = gate_collision[i]
             infos[i]["gate_passed"] = gate_passed[i]
             infos[i]["num_gates_passed"] = gates_passed_before_reset
-            
+
         return self.states, rewards, dones, infos
-    
+
     def close(self):
         pass
 
@@ -521,3 +595,67 @@ class DroneGateEnv(VecEnv):
         action_dict = dict(zip(action_keys, (np.array(self.actions.T) + 1) / 2))
 
         return {**state_dict, **action_dict}
+
+
+class DroneHoverEnv(DroneGateEnv):
+    """Hover at a fixed target point (mirrors `Quadcopter3DHover`).
+
+    Reuses the gate env with a single 'gate' at the target with zero yaw and
+    no gates ahead, so the observed position is the offset from the target.
+
+    `yaw_rate_penalty` adds -c·|r| to the reward. The reference reward only
+    penalizes body rates by 0.001·|ω|, which leaves hovering while spinning
+    about z almost free; c ≈ 0.05 makes the policy stop rotating (it still
+    holds whatever heading it has). 0 reproduces `Quadcopter3DHover`.
+    """
+
+    def __init__(self, num_envs, target_pos=hover_pos, spawn_radius=1.0, yaw_rate_penalty=0.0, **kwargs):
+        self.target_pos = np.array(target_pos, dtype=np.float32)
+        self.yaw_rate_penalty = yaw_rate_penalty
+        super().__init__(
+            num_envs,
+            gates_pos=self.target_pos[np.newaxis],
+            gate_yaw=np.zeros(1),
+            start_pos=self.target_pos,
+            gates_ahead=0,
+            initialize_at_random_gates=False,
+            start_pos_noise=spawn_radius,
+            **kwargs
+        )
+
+    def step_wait(self):
+        new_states = self._integrate()
+
+        self.step_counts += 1
+
+        # Rewards: positive every step so that staying airborne always beats crashing
+        pos_error = np.linalg.norm(new_states[:,0:3] - self.target_pos, axis=1)
+        vel_penalty = 0.01*np.linalg.norm(new_states[:,3:6], axis=1)
+        rat_penalty = 0.001*np.linalg.norm(new_states[:,9:12], axis=1)
+        rewards = np.exp(-2*pos_error) - vel_penalty - rat_penalty
+        if self.yaw_rate_penalty:
+            rewards -= self.yaw_rate_penalty*np.abs(new_states[:,11])
+
+        ground_collision, out_of_bounds = self._crashed(new_states, rewards)
+
+        # Check number of steps
+        max_steps_reached = self.step_counts >= self.max_steps
+
+        dones = max_steps_reached | ground_collision | out_of_bounds
+        self.dones = dones
+
+        # Update world states and reset env if done (and update states)
+        self.world_states = new_states
+        self.reset_(dones)
+
+        # Write info dicts
+        infos = [{} for _ in range(self.num_envs)]
+        for i in range(self.num_envs):
+            if dones[i]:
+                infos[i]["terminal_observation"] = self.states[i]
+            if max_steps_reached[i]:
+                infos[i]["TimeLimit.truncated"] = True
+            infos[i]["ground_collision"] = ground_collision[i]
+            infos[i]["out_of_bounds"] = out_of_bounds[i]
+            infos[i]["pos_error"] = pos_error[i]
+        return self.states, rewards, dones, infos

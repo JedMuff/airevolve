@@ -5,8 +5,8 @@ body -z, so yaw could only come from spin direction. Evolved morphologies
 often cant their motors and spin all props the same way, steering yaw with
 the lever arm of the tilted thrust instead. These tests check that:
 
-1. For flat motors the tilt-aware coefficients reduce exactly to the
-   original scalar ones (the parity test covers the full dynamics_func).
+1. For flat motors the per-motor coefficients reduce to the familiar
+   scalar ones (test_real_hex_parity covers the full dynamics_func).
 2. A tangentially canted motor produces lateral force and the r × F yaw
    moment.
 3. An evolved all-ccw hexacopter (top-ranked NEAT figure-8 individual from
@@ -21,7 +21,7 @@ import numpy as np
 from scipy.optimize import least_squares
 
 from airevolve.simulator.simulation.drone_simulator import DroneSimulator
-from airevolve.simulator.simulation.dynamics_params import W_MAX_N, W_MIN_N
+from airevolve.simulator.simulation.dynamics_params import W_MIN_N
 from airevolve.simulator.simulation.propeller_data import (
     create_standard_propeller_config,
     genome_to_propellers,
@@ -56,7 +56,7 @@ def steady_derivative(sim, W):
     s = ((W - w_min) / (w_max - w_min)) ** 2
     U = (-(1 - k) + np.sqrt((1 - k) ** 2 + 4 * k * s)) / (2 * k)
     state = np.zeros(12 + sim.num_motors)
-    state[12:] = 2 * (W - W_MIN_N) / (W_MAX_N - W_MIN_N) - 1
+    state[12:] = 2 * (W - W_MIN_N) / (sim.w_norm_max - W_MIN_N) - 1
     return np.asarray(sim.dynamics_func(state, 2 * U - 1), dtype=float)
 
 
@@ -74,17 +74,21 @@ def best_hover_residual(sim):
 
 
 def test_flat_coefficients_match_scalar_form():
-    sim = DroneSimulator(
-        propellers=create_standard_propeller_config("quad", arm_length=0.11, prop_size=2)
-    )
+    props = create_standard_propeller_config("quad", arm_length=0.11, prop_size=2)
+    sim = DroneSimulator(propellers=props)
     p = sim.params
-    for i in range(sim.num_motors):
+    k_f, k_m = get_extended_prop_params(2)["constants"]
+    Ixx, Iyy, Izz = np.diag(sim.inertia)
+    cg = np.asarray(sim.center_of_gravity)
+    for i, prop in enumerate(props):
+        x, y = np.array(prop["loc"][:2]) - cg[:2]
+        spin = 1.0 if prop["dir"][3] == "ccw" else -1.0
+        np.testing.assert_allclose(p["axis"][i], [0, 0, -1], atol=1e-15)
         np.testing.assert_allclose(p["f_coef"][i], [0, 0, -p["k_w"]], atol=1e-15)
         np.testing.assert_allclose(
-            p["m_thr_coef"][i], [p["k_p_signed"][i], p["k_q_signed"][i], 0], rtol=1e-12, atol=1e-15
+            p["m_coef"][i], [-y * k_f / Ixx, x * k_f / Iyy, spin * k_m / Izz], rtol=1e-12, atol=1e-15
         )
-        np.testing.assert_allclose(p["m_spin_coef"][i], [0, 0, p["k_r_signed"][i]], atol=1e-15)
-        np.testing.assert_allclose(p["m_react_coef"][i], [0, 0, p["k_r_react_signed"][i]], atol=1e-15)
+        np.testing.assert_allclose(p["m_dw_coef"][i][:2], [0, 0], atol=1e-15)
 
 
 def test_canted_motor_gives_lateral_force_and_lever_yaw():
@@ -98,12 +102,14 @@ def test_canted_motor_gives_lateral_force_and_lever_yaw():
     sim = DroneSimulator(propellers=props)
     p = sim.params
 
-    k_f = p["k_w"] * sim.mass
+    k_f, k_m = get_extended_prop_params(2)["constants"]
     np.testing.assert_allclose(p["f_coef"][0], k_f / sim.mass * d, rtol=1e-12)
     r = loc - np.asarray(sim.center_of_gravity)
-    expected_mz = k_f * np.cross(r, d)[2] / sim.inertia[2, 2]
-    assert abs(expected_mz) > 0
-    np.testing.assert_allclose(p["m_thr_coef"][0][2], expected_mz, rtol=1e-12)
+    lever_mz = k_f * np.cross(r, d)[2]
+    assert abs(lever_mz) > 0
+    spin = 1.0 if props[0]["dir"][3] == "ccw" else -1.0
+    expected_mz = (lever_mz + spin * k_m * -d[2]) / sim.inertia[2, 2]
+    np.testing.assert_allclose(p["m_coef"][0][2], expected_mz, rtol=1e-12)
 
 
 def test_same_spin_hover_yaw_torque_is_physical():
