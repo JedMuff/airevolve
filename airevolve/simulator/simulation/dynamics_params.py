@@ -52,10 +52,11 @@ INFLOW_COEF = 2 * np.pi / 0.127
 
 # Motor-speed normalization: the state stores w ∈ [-1, 1] for
 # W ∈ [W_MIN_N, W_MAX_N] rad/s. It sets the scale of the motor-speed policy
-# inputs and must match `w_max_n` in the deployed C controller. 4700 matches
-# the flight-verified hex (real_quad_env.py with params_hex3).
+# inputs and must match `w_max_n` in the deployed C controller (each run
+# stores its value in run_config.json). 4000 matches the current
+# real_quad_env.py; the flown hex3 policies used 4700.
 W_MIN_N = 0.0
-W_MAX_N = 4700.0
+W_MAX_N = 4000.0
 
 
 def _spin_sign(rotation: str) -> float:

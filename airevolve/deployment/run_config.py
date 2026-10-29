@@ -12,7 +12,7 @@ drone and env a policy was trained on:
         "prop_library": {...},          # custom prop-library entries used
         "airframes": {...},             # airframes those entries name
         "mass": null, "inertia": null,  # measured overrides (physics mode)
-        "w_norm_max": 4700.0
+        "w_norm_max": 4000.0
       },
       "task": "gates" | "hover",
       "yaw_rate_penalty": 0.05,         # hover only (0 = reference reward)
@@ -59,7 +59,7 @@ def drone_config(name="real_hex3", genome=None, propellers=None, propsize=None,
             "hex3" for the real hex's motors calibrated from its sysid).
         arm_length: arm length for the standard layouts.
         w_norm_max: motor-speed normalization; defaults to the preset's
-            value for the real drones (hex3 4700, vuhex 4000), else 4700.
+            4000 (the flown hex3 policies used 4700).
         mass, inertia: measured overrides for physics mode.
     """
     sysid = None

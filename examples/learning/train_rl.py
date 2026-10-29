@@ -42,7 +42,7 @@ parser.add_argument('name', type=str, help='Name of the model')
 parser.add_argument('--drone', type=str, default='real_hex3',
                     help='real_hex3 (sysid of the flight-verified hex), real_vuhex (params_vuhex), quad, hex, tri or octo (default real_hex3)')
 parser.add_argument('--w_norm_max', type=float, default=None,
-                    help='Motor-speed normalization (rad/s) shared with the C code (default: real_hex3 4700, real_vuhex 4000, else 4700)')
+                    help='Motor-speed normalization (rad/s) shared with the C code (default 4000; the flown hex3 policies used 4700)')
 parser.add_argument('--genome', type=str, default=None, help='Spherical-angular genome (.npy) to train instead of --drone')
 parser.add_argument('--propellers', type=str, default=None, help='Propeller list (.json) to train instead of --drone')
 parser.add_argument('--propsize', type=str, default=None,

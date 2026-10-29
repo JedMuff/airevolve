@@ -1,7 +1,8 @@
 """Parity with the flight-verified hex env of optimal_quad_control_RL.
 
 Policies trained in optimal_quad_control_RL/real_quad_env.py with
-params_hex3 (w_max_n = 4700) fly on the real hexacopter. These tests check
+params_hex3 (w_max_n = 4700) fly on the real hexacopter; the reference now
+uses w_max_n = 4000, and the live checks follow whatever it has. These tests check
 that airevolve reproduces that env, so policies trained here deploy through
 the same C code:
 
@@ -87,7 +88,10 @@ def assert_close(a, b):
 
 def test_dynamics_match_fixture():
     data = np.load(FIXTURE)
-    assert_close(airevolve_derivatives(data["states"], data["actions"]), data["derivatives"])
+    # Recorded with the reference at w_max_n = 4700 (older fixtures don't store it).
+    w_norm_max = float(data["w_norm_max"]) if "w_norm_max" in data else 4700.0
+    assert_close(airevolve_derivatives(data["states"], data["actions"], w_norm_max=w_norm_max),
+                 data["derivatives"])
 
 
 def test_dynamics_match_reference():
@@ -205,7 +209,7 @@ def regenerate_fixture():
         raise SystemExit("optimal_quad_control_RL not found; cannot regenerate the fixture")
     states, actions = random_inputs(200)
     os.makedirs(os.path.dirname(FIXTURE), exist_ok=True)
-    np.savez(FIXTURE, states=states, actions=actions,
+    np.savez(FIXTURE, states=states, actions=actions, w_norm_max=loaded[0].w_max_n,
              derivatives=reference_derivatives(loaded[0], states, actions))
     print(f"wrote {FIXTURE}")
 

@@ -2,7 +2,7 @@
 
 `PARAMS_HEX3` is the system identification of the real hexacopter whose
 RL policies are flight-verified (optimal_quad_control_RL/randomization.py,
-`params_hex3`, trained with w_max_n = 4700). `real_hex3_propellers` is its
+`params_hex3`, trained with w_max_n = 4700; new runs default to 4000). `real_hex3_propellers` is its
 layout inferred from the coefficient signs and ratios, in flight-controller
 motor order, so that
 
@@ -42,8 +42,9 @@ PARAMS_HEX3 = {
     'w_min': 448.13, 'w_max': 4449.64, 'k': 0.83, 'tau': 0.038
 }
 
-# Motor-speed normalization the hex3 policy was trained and flown with.
-HEX3_W_NORM_MAX = 4700.0
+# Motor-speed normalization for new hex3 runs. The flown hex3 policies used
+# 4700 (their run configs keep it); pass w_norm_max=4700 to match them.
+HEX3_W_NORM_MAX = 4000.0
 
 # optimal_quad_control_RL/randomization.py: params_vuhex (verbatim).
 PARAMS_VUHEX = {
