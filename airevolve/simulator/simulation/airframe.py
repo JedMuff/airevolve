@@ -19,6 +19,10 @@ REAL_HEX    the flight-verified hexacopter, from weighing its parts:
             inertia equals the inertia implied by the hex's sysid (see
             sysid_presets.register_hex3_motor); it absorbs what the part
             model misses (mass placement within the parts, battery position).
+REAL_VUHEX  the same drone and parts, with roll and pitch scaled separately
+            to its later sysid PARAMS_VUHEX, whose roll/pitch ratio differs
+            from hex3's
+            (sysid_presets.register_vuhex_motor).
 
 A prop-library entry selects its airframe with an "airframe" key (the
 "hex3" motors use "real_hex"); entries without one use LEGACY.
@@ -42,7 +46,9 @@ class Airframe:
     battery_size: tuple         # m, box dimensions (0 = point mass)
     arm_density: float          # kg/m
     arm_root_radius: float      # m, arms start this far out (hub rim)
-    inertia_scale: float = 1.0  # applied to the whole inertia matrix
+    # Applied to the whole inertia matrix; a (x, y, z) triple scales each
+    # axis (S^½ I S^½ with S = diag(scale)).
+    inertia_scale: float | tuple = 1.0
 
     def to_dict(self):
         return asdict(self)
@@ -132,8 +138,11 @@ def mass_properties(locs, motor_masses, airframe: Airframe = LEGACY_AIRFRAME):
     for m, c, own in parts:
         r = c - cg
         inertia += own + m * (np.dot(r, r) * np.eye(3) - np.outer(r, r))
-    return mass, cg, airframe.inertia_scale * inertia
+    root = np.sqrt(np.broadcast_to(np.asarray(airframe.inertia_scale, dtype=float), (3,)))
+    return mass, cg, root[:, None] * inertia * root[None, :]
 
 
-def scaled(airframe: Airframe, inertia_scale: float) -> Airframe:
+def scaled(airframe: Airframe, inertia_scale) -> Airframe:
+    if np.ndim(inertia_scale):
+        return replace(airframe, inertia_scale=tuple(float(v) for v in inertia_scale))
     return replace(airframe, inertia_scale=float(inertia_scale))

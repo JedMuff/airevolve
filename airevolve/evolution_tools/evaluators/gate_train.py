@@ -21,7 +21,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")
 
 from airevolve.evolution_tools.evaluators.drone_gate_env import DroneGateEnv
 from airevolve.simulator.visualization.animation import view as animation_view
-from airevolve.evolution_tools.inspection_tools.morphological_descriptors.hovering_info import get_sim
+from airevolve.evolution_tools.inspection_tools.morphological_descriptors.hovering_info import get_physics_sim
 from airevolve.evolution_tools.inspection_tools.drone_visualizer import DroneVisualizer 
 
 import argparse
@@ -159,7 +159,7 @@ class FullStatsCallback(BaseCallback):
         self.logger.dump(self.num_timesteps)
 
 def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cuda:0", num=None, max_steps=1200,
-          legacy_termination=False, propsize="hex3"):
+          legacy_termination=False, propsize="vuhex"):
 
     if gate_cfg == "backandforth":
         gate_pos = backandforth.gate_pos
@@ -326,9 +326,9 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     return infos[0]["num_gates_passed"][0]
 
 def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cuda:0", num=None, max_steps=1200,
-                        legacy_termination=False, propsize="hex3") -> list:
+                        legacy_termination=False, propsize="vuhex") -> list:
     start_time = time.time()
-    sim = get_sim(individual)
+    sim = get_physics_sim(individual, propsize)
     sim.compute_hover(verbose=False)
     if sim.static_success == False:
         spinning_success = sim.spinning_success

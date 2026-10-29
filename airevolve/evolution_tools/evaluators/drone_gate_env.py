@@ -115,7 +115,8 @@ class DroneGateEnv(VecEnv):
                 bounds x/y/z_bounds, no ground or gate-frame crashes, +10 on
                 completing a lap, deterministic start).
             propsize: motors for a genome `individual` (prop-library entry;
-                "hex3" = the real hex's motors and airframe).
+                "vuhex" / "hex3" = the real hex's motors and airframe,
+                calibrated from params_vuhex / params_hex3).
         """
 
         # Set device

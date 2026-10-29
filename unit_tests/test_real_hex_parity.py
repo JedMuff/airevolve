@@ -24,6 +24,7 @@ import sys
 
 import numpy as np
 
+from airevolve.deployment import build_drone, drone_config
 from airevolve.evolution_tools.evaluators.drone_gate_env import DroneGateEnv, DroneHoverEnv
 from airevolve.simulator.simulation.drone_simulator import DroneSimulator
 from airevolve.simulator.simulation.dynamics_params import sysid_param_matrix
@@ -203,6 +204,21 @@ def test_real_hex_airframe_reproduces_sysid():
     np.testing.assert_allclose(m_phys[4:, 0], m_sys[4:, 0], rtol=0.05)
 
 
+def test_vuhex_motor_reproduces_sysid():
+    """physics_vuhex: the hex3 layout with "vuhex" motors (real_hex parts,
+    inertia scaled to PARAMS_VUHEX) has the vuhex sysid's dynamics."""
+    physics = build_drone(drone_config("physics_vuhex"))
+    assert physics.config.airframe.name == "real_vuhex"
+    np.testing.assert_allclose(physics.mass, HEX3_MASS, rtol=1e-12)
+    p, q = physics.params, hex3_sim(PARAMS_VUHEX).params
+    for key in ("f_coef", "k_drag", "m_dw_coef", "tau", "k", "w_min", "w_max"):
+        np.testing.assert_allclose(p[key], q[key], rtol=1e-9, atol=1e-15)
+    m_phys, m_sys = np.array(p["m_coef"]), np.array(q["m_coef"])
+    np.testing.assert_allclose(m_phys[:, 2], m_sys[:, 2], rtol=1e-9)
+    np.testing.assert_allclose(m_phys[:4, :2], m_sys[:4, :2], rtol=0.05)
+    np.testing.assert_allclose(m_phys[4:, 0], m_sys[4:, 0], rtol=0.05)
+
+
 def regenerate_fixture():
     loaded = load_reference()
     if loaded is None:
@@ -222,4 +238,5 @@ if __name__ == "__main__":
     test_env_matches_reference()
     test_calibrated_motor_rederives_sysid()
     test_real_hex_airframe_reproduces_sysid()
+    test_vuhex_motor_reproduces_sysid()
     print("real hex parity OK")

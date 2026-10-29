@@ -16,6 +16,9 @@ Usage:
     # Later identification of the hex (params_vuhex):
     python examples/learning/train_rl.py vuhex vuhex_gate_r30 --drone real_vuhex --randomization 30
 
+    # vuhex in physics mode, the simulator evolution uses:
+    python examples/learning/train_rl.py vuhex_physics vuhex_physics_gate_r30 --drone physics_vuhex --randomization 30
+
     # A custom morphology with the real hex's motors (physics mode):
     python examples/learning/train_rl.py evolved my_drone --genome my_genome.npy --propsize hex3 --randomization 30
 
@@ -40,7 +43,7 @@ parser = argparse.ArgumentParser(description='Training session configuration')
 parser.add_argument('session_name', type=str, help='Name of the training session')
 parser.add_argument('name', type=str, help='Name of the model')
 parser.add_argument('--drone', type=str, default='real_hex3',
-                    help='real_hex3 (sysid of the flight-verified hex), real_vuhex (params_vuhex), quad, hex, tri or octo (default real_hex3)')
+                    help='real_hex3 (sysid of the flight-verified hex), real_vuhex (params_vuhex), real_vuhex_drag100 (params_vuhex, 100x body drag), physics_hex3 / physics_vuhex (that layout in the evolution simulator), quad, hex, tri or octo (default real_hex3)')
 parser.add_argument('--w_norm_max', type=float, default=None,
                     help='Motor-speed normalization (rad/s) shared with the C code (default 4000; the flown hex3 policies used 4700)')
 parser.add_argument('--genome', type=str, default=None, help='Spherical-angular genome (.npy) to train instead of --drone')

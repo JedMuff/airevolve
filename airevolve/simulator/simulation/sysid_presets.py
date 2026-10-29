@@ -16,11 +16,14 @@ so it uses the same layout. `SYSID_DRONES` maps the `--drone` names to
 `calibrate_prop_constants` backs the per-motor physical constants (k_f, k_m,
 motor curve, drag, ...) out of an identified drone so that custom
 morphologies built from the same motors and props can be simulated in
-physics mode (`propsize="hex3"`). Those morphologies get the real hex's
-airframe ("real_hex": its weighed parts, arms scaling with length), so
-the hex3 layout itself reproduces the measured mass and the sysid.
+physics mode (`propsize="hex3"`, or `"vuhex"` for PARAMS_VUHEX). Those
+morphologies get the real hex's airframe (its weighed parts, arms scaling
+with length), so the hex3 layout itself reproduces the measured mass and
+the sysid.
 """
 from __future__ import annotations
+
+from dataclasses import replace
 
 import numpy as np
 
@@ -61,9 +64,14 @@ PARAMS_VUHEX = {
 # w_max_n in optimal_quad_control_RL/real_quad_env.py when vuhex was added.
 VUHEX_W_NORM_MAX = 4000.0
 
+# params_vuhex with the body drag (k_x, k_y) scaled 100x. The identified
+# vuhex drag is ~100x smaller than hex3's, so this brackets the fit.
+PARAMS_VUHEX_DRAG100 = dict(PARAMS_VUHEX, k_x=100 * PARAMS_VUHEX['k_x'], k_y=100 * PARAMS_VUHEX['k_y'])
+
 SYSID_DRONES = {
     "real_hex3": (PARAMS_HEX3, HEX3_W_NORM_MAX),
     "real_vuhex": (PARAMS_VUHEX, VUHEX_W_NORM_MAX),
+    "real_vuhex_drag100": (PARAMS_VUHEX_DRAG100, VUHEX_W_NORM_MAX),
 }
 
 # Measured on the real hex: all-up mass, and motor distance from the centre.
@@ -146,25 +154,51 @@ def calibrate_prop_constants(sysid, propellers, mass, motor_mass=None, izz=None)
     return specs, np.array([Ixx, Iyy, Izz])
 
 
-def register_hex3_motor():
-    """Register the real hex's motors ("hex3") and airframe ("real_hex").
+def _register_real_motor(propsize, sysid, airframe_name, per_axis=False):
+    """Register an identified drone's motors as prop-library entry
+    `propsize`, with the real hex's part model scaled to its sysid as
+    airframe `airframe_name`.
 
     The airframe's part model (airframe.REAL_HEX_AIRFRAME) gives the real
     hex's mass exactly; its inertia is scaled so roll/pitch match the
-    sysid. Izz, which the sysid can't observe, comes from the scaled part
-    model and sets k_m, so the hex's yaw coefficients are reproduced
+    sysid, by one factor or (`per_axis`) one each for roll and pitch with
+    their mean for yaw. Izz, which the sysid can't observe, comes from the
+    scaled part model and sets k_m, so the yaw coefficients are reproduced
     exactly too.
     """
     props = real_hex3_propellers()
     locs = [p["loc"] for p in props]
     mass, _, inertia = mass_properties(locs, [HEX3_MOTOR_MASS] * len(props), REAL_HEX_AIRFRAME)
-    _, sysid_inertia = calibrate_prop_constants(PARAMS_HEX3, props, mass)
-    scale = float(np.mean(sysid_inertia[:2] / np.diag(inertia)[:2]))
-    airframe = scaled(REAL_HEX_AIRFRAME, scale)
+    _, sysid_inertia = calibrate_prop_constants(sysid, props, mass)
+    roll_pitch = sysid_inertia[:2] / np.diag(inertia)[:2]
+    scale = float(np.mean(roll_pitch))
+    airframe = replace(scaled(REAL_HEX_AIRFRAME, (*roll_pitch, scale) if per_axis else scale),
+                       name=airframe_name)
     register_airframe(airframe)
 
-    specs, _ = calibrate_prop_constants(PARAMS_HEX3, props, mass, motor_mass=HEX3_MOTOR_MASS,
+    specs, _ = calibrate_prop_constants(sysid, props, mass, motor_mass=HEX3_MOTOR_MASS,
                                         izz=scale * inertia[2, 2])
     specs["airframe"] = airframe.name
-    register_propeller("hex3", specs)
+    register_propeller(propsize, specs)
     return specs
+
+
+def register_hex3_motor():
+    """Register the real hex's motors ("hex3") and airframe ("real_hex")."""
+    return _register_real_motor("hex3", PARAMS_HEX3, "real_hex")
+
+
+def register_vuhex_motor():
+    """Register vuhex's motors ("vuhex") and airframe ("real_vuhex").
+
+    PARAMS_VUHEX is a later identification of the same drone as
+    PARAMS_HEX3, so it uses the same weighed parts, with the inertia scaled
+    to PARAMS_VUHEX. The two fits disagree on inertia: vuhex implies 1.34x
+    hex3's roll and 2.3x its pitch inertia (equal |k_p1| and |k_q1| on the
+    same layout), so roll and pitch are scaled separately.
+    """
+    return _register_real_motor("vuhex", PARAMS_VUHEX, "real_vuhex", per_axis=True)
+
+
+# Prop-library entries calibrated from a sysid on first use.
+REAL_MOTORS = {"hex3": register_hex3_motor, "vuhex": register_vuhex_motor}

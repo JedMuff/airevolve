@@ -109,6 +109,28 @@ def get_sim(individual, motor_template = {"propsize": 2}):
 
     return sim
 
+def get_physics_sim(individual, propsize):
+    """Hover optimizer for the drone the RL env trains: genome_to_propellers
+    with prop-library entry `propsize` (e.g. "vuhex") and DroneConfiguration's
+    mass, CG and inertia (its airframe), instead of get_sim's dronehover
+    prop library and descriptors."""
+    from types import SimpleNamespace
+    from airevolve.simulator.simulation.drone_configuration import DroneConfiguration
+    from airevolve.simulator.simulation.propeller_data import genome_to_propellers
+
+    config = DroneConfiguration(genome_to_propellers(individual, propsize=propsize))
+    I = config.inertia_matrix
+    drone = SimpleNamespace(
+        props=config.propellers, mass=config.mass, cg=np.asarray(config.cg),
+        Ix=I[0, 0], Iy=I[1, 1], Iz=I[2, 2], Ixy=I[0, 1], Ixz=I[0, 2], Iyz=I[1, 2],
+    )
+    try:
+        sim = Hover(drone)
+    except:
+        sim = None
+
+    return sim
+
 def drone_info(individual):
 
     sim = get_sim(individual)

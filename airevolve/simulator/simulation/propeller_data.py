@@ -147,10 +147,10 @@ def get_propeller_specs(prop_size):
     """
     # Named entries ("matched", or calibrated motors registered via
     # register_propeller) are looked up directly; sizes map to "prop<N>".
-    if prop_size == "hex3" and "hex3" not in PROPELLER_LIBRARY:
-        # Calibrated from the real hex's sysid on first use.
-        from .sysid_presets import register_hex3_motor
-        register_hex3_motor()
+    if prop_size in ("hex3", "vuhex") and prop_size not in PROPELLER_LIBRARY:
+        # Calibrated from the real drone's sysid on first use.
+        from .sysid_presets import REAL_MOTORS
+        REAL_MOTORS[prop_size]()
     if isinstance(prop_size, str) and prop_size in PROPELLER_LIBRARY:
         prop_key = prop_size
     else:

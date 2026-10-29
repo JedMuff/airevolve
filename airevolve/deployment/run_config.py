@@ -43,6 +43,9 @@ from airevolve.simulator.simulation.airframe import Airframe, get_airframe, regi
 
 CONFIG_NAME = "run_config.json"
 STANDARD_DRONES = ("quad", "hex", "tri", "octo")
+# The real drones' layout in physics mode (the evolution simulator), with
+# their motors calibrated from the sysid: --drone name -> propsize.
+PHYSICS_DRONES = {"physics_hex3": "hex3", "physics_vuhex": "vuhex"}
 
 
 def drone_config(name="real_hex3", genome=None, propellers=None, propsize=None,
@@ -51,7 +54,9 @@ def drone_config(name="real_hex3", genome=None, propellers=None, propsize=None,
 
     Args:
         name: "real_hex3" (sysid mode, the flight-verified hex),
-            "real_vuhex" (sysid mode, same layout), a standard layout ("quad", "hex", "tri", "octo"), or a label for `genome` /
+            "real_vuhex" (sysid mode, same layout), "physics_hex3" /
+            "physics_vuhex" (that layout in physics mode with the motors
+            calibrated from the sysid), a standard layout ("quad", "hex", "tri", "octo"), or a label for `genome` /
             `propellers`.
         genome: spherical-angular genome array (rows with NaN are skipped).
         propellers: explicit propeller list.
@@ -75,10 +80,12 @@ def drone_config(name="real_hex3", genome=None, propellers=None, propsize=None,
         params, preset_w_norm_max = SYSID_DRONES[name]
         sysid = dict(params)
         w_norm_max = w_norm_max or preset_w_norm_max
+    elif name in PHYSICS_DRONES:
+        propellers = real_hex3_propellers(propsize=propsize or PHYSICS_DRONES[name])
     elif name in STANDARD_DRONES:
         propellers = create_standard_propeller_config(name, arm_length=arm_length, prop_size=propsize or 2)
     else:
-        raise ValueError(f"unknown drone {name!r}: use {tuple(SYSID_DRONES)}, {STANDARD_DRONES}, a genome or propellers")
+        raise ValueError(f"unknown drone {name!r}: use {tuple(SYSID_DRONES)}, {tuple(PHYSICS_DRONES)}, {STANDARD_DRONES}, a genome or propellers")
 
     prop_library, airframes = {}, {}
     if sysid is None:
