@@ -96,6 +96,7 @@ class DroneGateEnv(VecEnv):
                  randomization=0.0,
                  start_pos_noise=0.,
                  legacy_termination=False,
+                 propsize=2,
                  ):
         """
         Args (beyond the reference env's):
@@ -113,6 +114,8 @@ class DroneGateEnv(VecEnv):
             legacy_termination: earlier airevolve termination/reward (box
                 bounds x/y/z_bounds, no ground or gate-frame crashes, +10 on
                 completing a lap, deterministic start).
+            propsize: motors for a genome `individual` (prop-library entry;
+                "hex3" = the real hex's motors and airframe).
         """
 
         # Set device
@@ -141,7 +144,7 @@ class DroneGateEnv(VecEnv):
             self.drone_sim = DroneSimulator(propellers=propellers, dt=dt, sysid_params=sysid_params)
         elif individual is not None:
             # Convert legacy individual array to propeller configuration
-            propellers, mountpoints = self._convert_individual_to_propellers(individual)
+            propellers, mountpoints = self._convert_individual_to_propellers(individual, propsize)
             self.drone_sim = DroneSimulator(propellers=propellers, mountpoints=mountpoints, dt=dt)
         else:
             # Default quadrotor configuration
@@ -265,7 +268,7 @@ class DroneGateEnv(VecEnv):
 
         self.pause = False
 
-    def _convert_individual_to_propellers(self, individual):
+    def _convert_individual_to_propellers(self, individual, propsize=2):
         """
         Convert legacy individual array to propeller configuration.
 
@@ -277,7 +280,7 @@ class DroneGateEnv(VecEnv):
             (propellers, mounting_points): Propeller configs and disc mounting points,
             matching the conventions used by get_sim() in hovering_info.py.
         """
-        propellers = genome_to_propellers(individual)
+        propellers = genome_to_propellers(individual, propsize=propsize)
         propeller_positions = [prop["loc"] for prop in propellers]
 
         # Compute mounting points matching get_sim() in hovering_info.py

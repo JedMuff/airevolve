@@ -8,13 +8,11 @@ for realistic mass, center of gravity, inertia, and control allocation calculati
 
 import numpy as np
 from numpy.linalg import norm, inv
+from .airframe import Airframe, get_airframe, mass_properties
 from .propeller_data import (
     get_propeller_specs, validate_propeller_config,
-    GRAVITY, CONTROLLER_MASS, BATTERY_MASS, BEAM_DENSITY,
+    GRAVITY,
 )
-
-# Battery mounted under the frame (NED: +z is down).
-BATTERY_POS = np.array([0.0, 0.0, 0.02])
 
 class DroneConfiguration:
     """
@@ -28,7 +26,7 @@ class DroneConfiguration:
     - Moment allocation matrix (Bm) mapping motor commands to body moments
     """
     
-    def __init__(self, propellers):
+    def __init__(self, propellers, airframe=None):
         """
         Initialize drone configuration from propeller specifications.
         
@@ -37,6 +35,9 @@ class DroneConfiguration:
                 - "loc": [x, y, z] position in body frame (meters)
                 - "dir": [x, y, z, rotation] thrust direction and spin direction
                 - "propsize": propeller size in inches (4-8)
+            airframe (Airframe or str, optional): the non-motor structure.
+                Default: the airframe named by the motors' prop-library
+                entry ("real_hex" for "hex3" motors), else the legacy one.
                 
         Example:
             propellers = [
@@ -53,6 +54,7 @@ class DroneConfiguration:
         
         # Add propeller specifications to each propeller
         self._add_propeller_specs()
+        self.airframe = self._resolve_airframe(airframe)
         
         # Compute physical properties
         self._compute_mass_and_cg()
@@ -66,92 +68,27 @@ class DroneConfiguration:
             prop["constants"] = specs["constants"]  # [k_f, k_m]
             prop["wmax"] = specs["wmax"]
             prop["mass"] = specs["mass"]
+            prop["airframe"] = specs.get("airframe")
+
+    def _resolve_airframe(self, airframe):
+        if isinstance(airframe, Airframe):
+            return airframe
+        if airframe is not None:
+            return get_airframe(airframe)
+        names = {prop["airframe"] for prop in self.propellers}
+        if len(names) > 1:
+            raise ValueError(f"motors name different airframes {names}; pass airframe explicitly")
+        return get_airframe(names.pop())
     
     def _compute_mass_and_cg(self):
-        """Compute total mass and center of gravity location."""
-        # Total mass = controller + battery + per-prop (propeller + beam).
-        self.mass = CONTROLLER_MASS + BATTERY_MASS
-        for prop in self.propellers:
-            beam_length = norm(np.array(prop["loc"]))
-            self.mass += prop["mass"] + BEAM_DENSITY * beam_length
+        """Compute total mass, center of gravity and inertia (see airframe.py)."""
+        locs = [prop["loc"] for prop in self.propellers]
+        masses = [prop["mass"] for prop in self.propellers]
+        self.mass, self.cg, inertia = mass_properties(locs, masses, self.airframe)
+        (self.Ix, self.Ixy, self.Ixz), (_, self.Iy, self.Iyz), (_, _, self.Iz) = inertia
 
-        # Center of gravity. Controller sits at origin, battery at BATTERY_POS,
-        # propellers at their loc, beams at their midpoint.
-        self.cg = (BATTERY_MASS / self.mass) * BATTERY_POS
-        for prop in self.propellers:
-            prop_mass = prop["mass"]
-            prop_loc = np.array(prop["loc"])
-            beam_length = norm(prop_loc)
-            beam_mass = BEAM_DENSITY * beam_length
-            self.cg += (prop_mass / self.mass) * prop_loc
-            self.cg += (beam_mass / self.mass) * prop_loc * 0.5
-    
     def _compute_inertia(self):
-        """Compute inertia matrix components using parallel axis theorem."""
-        # Controller inertia about its own center (approximated as rectangular block)
-        # Typical flight controller dimensions: 105mm x 36mm x 35mm
-        controller_Ix = (1/12) * CONTROLLER_MASS * (0.036**2 + 0.035**2)
-        controller_Iy = (1/12) * CONTROLLER_MASS * (0.105**2 + 0.035**2)
-        controller_Iz = (1/12) * CONTROLLER_MASS * (0.105**2 + 0.036**2)
-        
-        # Translate controller inertia to center of gravity using parallel axis theorem
-        cg_offset_sq = np.dot(self.cg, self.cg)
-        self.Ix = controller_Ix + CONTROLLER_MASS * (self.cg[1]**2 + self.cg[2]**2)
-        self.Iy = controller_Iy + CONTROLLER_MASS * (self.cg[0]**2 + self.cg[2]**2)
-        self.Iz = controller_Iz + CONTROLLER_MASS * (self.cg[0]**2 + self.cg[1]**2)
-        
-        # Initialize products of inertia
-        self.Ixy = -CONTROLLER_MASS * self.cg[0] * self.cg[1]
-        self.Ixz = -CONTROLLER_MASS * self.cg[0] * self.cg[2]
-        self.Iyz = -CONTROLLER_MASS * self.cg[1] * self.cg[2]
-
-        # Battery contribution (treated as a point mass at BATTERY_POS).
-        r_bat = BATTERY_POS - self.cg
-        self.Ix += BATTERY_MASS * (r_bat[1] ** 2 + r_bat[2] ** 2)
-        self.Iy += BATTERY_MASS * (r_bat[0] ** 2 + r_bat[2] ** 2)
-        self.Iz += BATTERY_MASS * (r_bat[0] ** 2 + r_bat[1] ** 2)
-        self.Ixy -= BATTERY_MASS * r_bat[0] * r_bat[1]
-        self.Ixz -= BATTERY_MASS * r_bat[0] * r_bat[2]
-        self.Iyz -= BATTERY_MASS * r_bat[1] * r_bat[2]
-        
-        # Add contributions from propellers and beams
-        for prop in self.propellers:
-            prop_mass = prop["mass"]
-            pos = np.array(prop["loc"])
-            beam_length = norm(pos)
-            beam_mass = BEAM_DENSITY * beam_length
-            
-            # Propeller position relative to CG
-            r_prop = pos - self.cg
-            
-            # Propeller contributions (treated as point mass)
-            self.Ix += prop_mass * (r_prop[1]**2 + r_prop[2]**2)
-            self.Iy += prop_mass * (r_prop[0]**2 + r_prop[2]**2)
-            self.Iz += prop_mass * (r_prop[0]**2 + r_prop[1]**2)
-            self.Ixy -= prop_mass * r_prop[0] * r_prop[1]
-            self.Ixz -= prop_mass * r_prop[0] * r_prop[2]
-            self.Iyz -= prop_mass * r_prop[1] * r_prop[2]
-            
-            # Beam contributions (rod along beam direction)
-            beam_center = pos * 0.5  # Beam center at midpoint
-            r_beam = beam_center - self.cg
-            
-            # For a rod along the beam direction, add both translational and rotational inertia
-            beam_direction = pos / beam_length  # Unit vector along beam
-            
-            # Perpendicular moment of inertia for rod: I_perp = (1/12) * m * L²
-            I_beam_perp = (1/12) * beam_mass * beam_length**2
-            
-            # Add translational inertia (parallel axis theorem)
-            self.Ix += beam_mass * (r_beam[1]**2 + r_beam[2]**2) + I_beam_perp * (beam_direction[1]**2 + beam_direction[2]**2)
-            self.Iy += beam_mass * (r_beam[0]**2 + r_beam[2]**2) + I_beam_perp * (beam_direction[0]**2 + beam_direction[2]**2)
-            self.Iz += beam_mass * (r_beam[0]**2 + r_beam[1]**2) + I_beam_perp * (beam_direction[0]**2 + beam_direction[1]**2)
-            
-            # Add products of inertia
-            self.Ixy -= beam_mass * r_beam[0] * r_beam[1]
-            self.Ixz -= beam_mass * r_beam[0] * r_beam[2]
-            self.Iyz -= beam_mass * r_beam[1] * r_beam[2]
-        
+        """Clean up the inertia matrix from `_compute_mass_and_cg`."""
         # Create inertia matrix with numerical stability improvements
         self.inertia_matrix = np.array([
             [self.Ix, self.Ixy, self.Ixz],

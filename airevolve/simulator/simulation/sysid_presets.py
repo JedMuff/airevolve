@@ -16,14 +16,15 @@ so it uses the same layout. `SYSID_DRONES` maps the `--drone` names to
 `calibrate_prop_constants` backs the per-motor physical constants (k_f, k_m,
 motor curve, drag, ...) out of an identified drone so that custom
 morphologies built from the same motors and props can be simulated in
-physics mode (`propsize="hex3"`).
+physics mode (`propsize="hex3"`). Those morphologies get the real hex's
+airframe ("real_hex": its weighed parts, arms scaling with length), so
+the hex3 layout itself reproduces the measured mass and the sysid.
 """
 from __future__ import annotations
 
-import warnings
-
 import numpy as np
 
+from .airframe import REAL_HEX_AIRFRAME, mass_properties, register_airframe, scaled
 from .dynamics_params import INFLOW_COEF
 from .propeller_data import PROPELLER_LIBRARY, register_propeller
 
@@ -64,14 +65,12 @@ SYSID_DRONES = {
     "real_vuhex": (PARAMS_VUHEX, VUHEX_W_NORM_MAX),
 }
 
-# Placeholder scale of the real hex. The sysid only fixes k_f/m and the
-# k_f·r/I ratios; absolute k_f, k_m and inertia need the measured mass and
-# arm length. Replace these with measurements before trusting custom
-# morphologies built with propsize="hex3". (Sysid mode is unaffected.)
-HEX3_MASS = 0.19859     # kg, all-up weight with battery
-HEX3_ARM_LENGTH = 0.08  # m, motor distance from the centre
-_PLACEHOLDER_MASS = 0.30
-_PLACEHOLDER_ARM_LENGTH = 0.10
+# Measured on the real hex: all-up mass, and motor distance from the centre.
+HEX3_MASS = 0.19859     # kg
+HEX3_ARM_LENGTH = 0.08  # m
+# One motor (4.6 g) + prop (0.996 g); the rest of the drone is
+# airframe.REAL_HEX_AIRFRAME.
+HEX3_MOTOR_MASS = 0.0046 + 0.000996
 
 
 def real_hex3_propellers(arm_length=None, propsize=3):
@@ -82,7 +81,7 @@ def real_hex3_propellers(arm_length=None, propsize=3):
     M5 right, M6 left. |k_p5| ≈ 2·|k_p1| puts M1-M4 at ±30° from the x axis
     and M5/M6 on the y axis. Spin follows the sign of k_r (+ → ccw).
     """
-    R = arm_length or HEX3_ARM_LENGTH or _PLACEHOLDER_ARM_LENGTH
+    R = arm_length or HEX3_ARM_LENGTH
     layout = [  # (angle from +x towards +y in degrees, spin)
         (150, "ccw"),   # M1 rear-right
         (30, "ccw"),    # M2 front-right
@@ -98,7 +97,7 @@ def real_hex3_propellers(arm_length=None, propsize=3):
     ]
 
 
-def calibrate_prop_constants(sysid, propellers, mass, motor_mass=None):
+def calibrate_prop_constants(sysid, propellers, mass, motor_mass=None, izz=None):
     """Per-motor constants of an identified drone, for physics mode.
 
     Args:
@@ -107,6 +106,8 @@ def calibrate_prop_constants(sysid, propellers, mass, motor_mass=None):
         mass: its measured mass (kg).
         motor_mass: mass of one motor + prop (kg), used by DroneConfiguration
             for custom morphologies. Defaults to the 3-inch library value.
+        izz: yaw inertia (kg m²), which the sysid can't observe. Default
+            Ixx + Iyy (point masses in the motor plane).
 
     Returns:
         (specs, inertia): a prop-library entry and the inertia diagonal
@@ -123,10 +124,8 @@ def calibrate_prop_constants(sysid, propellers, mass, motor_mass=None):
     lsq = lambda lever, coef: float(lever @ coef / (lever @ lever))
     inv_Ixx = lsq(-loc[:, 1] * k_f, k_p)
     inv_Iyy = lsq(loc[:, 0] * k_f, k_q)
-    # Izz is not observable from roll/pitch; use the flat-frame identity
-    # Izz ≈ Ixx + Iyy (point masses in the motor plane).
     Ixx, Iyy = 1.0 / inv_Ixx, 1.0 / inv_Iyy
-    Izz = Ixx + Iyy
+    Izz = Ixx + Iyy if izz is None else float(izz)
 
     k_m = float(np.mean(np.abs(k_r))) * Izz
     specs = {
@@ -147,15 +146,24 @@ def calibrate_prop_constants(sysid, propellers, mass, motor_mass=None):
 
 
 def register_hex3_motor():
-    """Register the real hex's motor/prop as prop-library entry "hex3"."""
-    if HEX3_MASS is None or HEX3_ARM_LENGTH is None:
-        warnings.warn(
-            "hex3 motor constants use a PLACEHOLDER mass/arm length "
-            f"({_PLACEHOLDER_MASS} kg, {_PLACEHOLDER_ARM_LENGTH} m). Set HEX3_MASS and "
-            "HEX3_ARM_LENGTH in sysid_presets.py to the real hex's measurements.",
-            stacklevel=2,
-        )
-    mass = HEX3_MASS or _PLACEHOLDER_MASS
-    specs, _ = calibrate_prop_constants(PARAMS_HEX3, real_hex3_propellers(), mass)
+    """Register the real hex's motors ("hex3") and airframe ("real_hex").
+
+    The airframe's part model (airframe.REAL_HEX_AIRFRAME) gives the real
+    hex's mass exactly; its inertia is scaled so roll/pitch match the
+    sysid. Izz, which the sysid can't observe, comes from the scaled part
+    model and sets k_m, so the hex's yaw coefficients are reproduced
+    exactly too.
+    """
+    props = real_hex3_propellers()
+    locs = [p["loc"] for p in props]
+    mass, _, inertia = mass_properties(locs, [HEX3_MOTOR_MASS] * len(props), REAL_HEX_AIRFRAME)
+    _, sysid_inertia = calibrate_prop_constants(PARAMS_HEX3, props, mass)
+    scale = float(np.mean(sysid_inertia[:2] / np.diag(inertia)[:2]))
+    airframe = scaled(REAL_HEX_AIRFRAME, scale)
+    register_airframe(airframe)
+
+    specs, _ = calibrate_prop_constants(PARAMS_HEX3, props, mass, motor_mass=HEX3_MOTOR_MASS,
+                                        izz=scale * inertia[2, 2])
+    specs["airframe"] = airframe.name
     register_propeller("hex3", specs)
     return specs

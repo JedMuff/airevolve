@@ -159,7 +159,7 @@ class FullStatsCallback(BaseCallback):
         self.logger.dump(self.num_timesteps)
 
 def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num_envs=100, device="cuda:0", num=None, max_steps=1200,
-          legacy_termination=False):
+          legacy_termination=False, propsize="hex3"):
 
     if gate_cfg == "backandforth":
         gate_pos = backandforth.gate_pos
@@ -222,6 +222,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         device=device,
         max_steps=max_steps,
         legacy_termination=legacy_termination,
+        propsize=propsize,
     )
     test_env = DroneGateEnv(
         num_envs=1,
@@ -241,6 +242,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
         device=device,
         max_steps=max_steps,
         legacy_termination=legacy_termination,
+        propsize=propsize,
     )
 
     # Wrap the environment in a Monitor wrapper
@@ -324,7 +326,7 @@ def train(individual, gate_cfg, total_timesteps=int(1E8), save_dir="./logs", num
     return infos[0]["num_gates_passed"][0]
 
 def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cfg, device="cuda:0", num=None, max_steps=1200,
-                        legacy_termination=False) -> list:
+                        legacy_termination=False, propsize="hex3") -> list:
     start_time = time.time()
     sim = get_sim(individual)
     sim.compute_hover(verbose=False)
@@ -360,7 +362,7 @@ def evaluate_individual(individual, ind_save_dir, training_ts, num_envs, gate_cf
     plt.close()
 
     num_gates_passed = train(individual, gate_cfg, total_timesteps=int(float(training_ts)), save_dir=ind_save_dir, num_envs=int(num_envs), device=device, num=num, max_steps=max_steps,
-                             legacy_termination=legacy_termination)
+                             legacy_termination=legacy_termination, propsize=propsize)
 
     fig = plt.figure(figsize=plt.figaspect(0.5))
     ax = fig.add_subplot(111, projection='3d')

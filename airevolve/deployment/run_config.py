@@ -10,6 +10,7 @@ drone and env a policy was trained on:
         "propellers": [...],            # motor i = flight-controller motor i+1
         "sysid_params": {...} | null,   # sysid mode when given
         "prop_library": {...},          # custom prop-library entries used
+        "airframes": {...},             # airframes those entries name
         "mass": null, "inertia": null,  # measured overrides (physics mode)
         "w_norm_max": 4700.0
       },
@@ -33,11 +34,12 @@ import numpy as np
 from airevolve.simulator.simulation.drone_simulator import DroneSimulator
 from airevolve.simulator.simulation.dynamics_params import W_MAX_N
 from airevolve.simulator.simulation.propeller_data import (
-    PROPELLER_LIBRARY, create_standard_propeller_config, genome_to_propellers, register_propeller,
+    create_standard_propeller_config, genome_to_propellers, get_propeller_specs, register_propeller,
 )
 from airevolve.simulator.simulation.sysid_presets import (
-    SYSID_DRONES, real_hex3_propellers, register_hex3_motor,
+    SYSID_DRONES, real_hex3_propellers,
 )
+from airevolve.simulator.simulation.airframe import Airframe, get_airframe, register_airframe
 
 CONFIG_NAME = "run_config.json"
 STANDARD_DRONES = ("quad", "hex", "tri", "octo")
@@ -78,13 +80,14 @@ def drone_config(name="real_hex3", genome=None, propellers=None, propsize=None,
     else:
         raise ValueError(f"unknown drone {name!r}: use {tuple(SYSID_DRONES)}, {STANDARD_DRONES}, a genome or propellers")
 
-    prop_library = {}
+    prop_library, airframes = {}, {}
     if sysid is None:
         for size in {p["propsize"] for p in propellers}:
-            if size == "hex3" and "hex3" not in PROPELLER_LIBRARY:
-                register_hex3_motor()
+            specs = get_propeller_specs(size)
             if isinstance(size, str) and size != "matched":
-                prop_library[size] = PROPELLER_LIBRARY[size]
+                prop_library[size] = specs
+            if specs.get("airframe"):
+                airframes[specs["airframe"]] = get_airframe(specs["airframe"]).to_dict()
 
     clean = [{"loc": [float(v) for v in p["loc"]],
               "dir": [float(v) for v in p["dir"][:3]] + [p["dir"][3]],
@@ -94,6 +97,7 @@ def drone_config(name="real_hex3", genome=None, propellers=None, propsize=None,
         "propellers": clean,
         "sysid_params": sysid,
         "prop_library": prop_library,
+        "airframes": airframes,
         "mass": mass,
         "inertia": None if inertia is None else np.asarray(inertia).tolist(),
         "w_norm_max": float(w_norm_max or W_MAX_N),
@@ -102,6 +106,8 @@ def drone_config(name="real_hex3", genome=None, propellers=None, propsize=None,
 
 def build_drone(drone: dict, dt=0.01) -> DroneSimulator:
     """DroneSimulator for the drone section of a run config."""
+    for airframe in drone.get("airframes", {}).values():
+        register_airframe(Airframe.from_dict(airframe))
     for size, specs in drone.get("prop_library", {}).items():
         register_propeller(size, specs)
     return DroneSimulator(

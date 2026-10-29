@@ -28,7 +28,7 @@ from airevolve.simulator.simulation.drone_simulator import DroneSimulator
 from airevolve.simulator.simulation.dynamics_params import sysid_param_matrix
 from airevolve.simulator.simulation.propeller_data import register_propeller
 from airevolve.simulator.simulation.sysid_presets import (
-    HEX3_W_NORM_MAX, PARAMS_HEX3, PARAMS_VUHEX, calibrate_prop_constants, real_hex3_propellers,
+    HEX3_MASS, HEX3_W_NORM_MAX, PARAMS_HEX3, PARAMS_VUHEX, calibrate_prop_constants, real_hex3_propellers,
 )
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -184,6 +184,21 @@ def test_calibrated_motor_rederives_sysid():
     np.testing.assert_allclose(physics["m_dw_coef"], sysid["m_dw_coef"], rtol=1e-9, atol=1e-15)
 
 
+def test_real_hex_airframe_reproduces_sysid():
+    """The hex3 layout built in the custom setup (hex3 motors + real_hex
+    airframe) has the measured mass and the sysid's dynamics."""
+    physics = DroneSimulator(real_hex3_propellers(propsize="hex3"), dt=0.01, w_norm_max=HEX3_W_NORM_MAX)
+    assert physics.config.airframe.name == "real_hex"
+    np.testing.assert_allclose(physics.mass, HEX3_MASS, rtol=1e-12)
+    p, q = physics.params, hex3_sim().params
+    for key in ("f_coef", "k_drag", "m_dw_coef", "tau", "k", "w_min", "w_max"):
+        np.testing.assert_allclose(p[key], q[key], rtol=1e-9, atol=1e-15)
+    m_phys, m_sys = np.array(p["m_coef"]), np.array(q["m_coef"])
+    np.testing.assert_allclose(m_phys[:, 2], m_sys[:, 2], rtol=1e-9)
+    np.testing.assert_allclose(m_phys[:4, :2], m_sys[:4, :2], rtol=0.05)
+    np.testing.assert_allclose(m_phys[4:, 0], m_sys[4:, 0], rtol=0.05)
+
+
 def regenerate_fixture():
     loaded = load_reference()
     if loaded is None:
@@ -202,4 +217,5 @@ if __name__ == "__main__":
     test_dynamics_match_reference()
     test_env_matches_reference()
     test_calibrated_motor_rederives_sysid()
+    test_real_hex_airframe_reproduces_sysid()
     print("real hex parity OK")
